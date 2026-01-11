@@ -65,13 +65,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     const path = location.pathname;
     if (path.includes('/dashboard')) return 'Overview';
     if (path.includes('/token/')) return 'Token Details';
-    if (path.includes('/kol-feed')) return 'KOL / Influencer Feed';
+
     if (path.includes('/heatmap')) return 'Token Heatmap';
     if (path.includes('/sentiment')) return 'Sentiment Intelligence';
     if (path.includes('/detection')) return 'Global Detection';
     if (path.includes('/virality')) return 'Virality Prediction';
-    if (path.includes('/chatbot')) return 'AI Chatbot';
-    if (path.includes('/wallet')) return 'Wallet Tracking';
+    if (path.includes('/ai-assistant')) return 'AI Assistant';
+    if (path.includes('/wallet')) return 'Wallet Tracker';
+    if (path.includes('/smart-money')) return 'Smart Money Engine';
     if (path.includes('/safe-scan')) return 'Safe Scan';
     if (path.includes('/settings')) return 'Settings';
     return 'Overview';
@@ -80,12 +81,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
   const getPageSubtitle = () => {
     const path = location.pathname;
     if (path.includes('/dashboard')) return 'Track token and stay ahead of the crowd';
-    if (path.includes('/kol-feed')) return 'Real-time posts from top crypto influencers ranked by impact, engagement, and narrative momentum.';
+
     if (path.includes('/heatmap')) return 'Visualize concentration of normal vs. abnormal activity';
     if (path.includes('/sentiment')) return 'Monitor user opinions, reviews, and feedback trends.';
     if (path.includes('/detection')) return 'Identify anomalies, drift, or suspicious patterns';
     if (path.includes('/virality')) return 'AI predicts tokens likely to blow up from sentiment + engagement signals';
-    if (path.includes('/chatbot')) return 'Interact with Atlaix Intelligence';
+    if (path.includes('/ai-assistant')) return 'Interact with Atlaix Intelligence';
     if (path.includes('/safe-scan')) return 'Security analysis and risk scoring for tokens';
     if (path.includes('/wallet')) return 'Monitor wallet activity, performance and patterns';
     return '';
@@ -123,22 +124,19 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
           <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-2 pl-2">Overview</div>
           <NavItem active={isActive('/dashboard')} onClick={() => handleNavigation('/dashboard')} icon={<LayoutDashboard size={20} />} label="Overview" />
 
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Market Monitoring</div>
-          <NavItem active={isActive('/kol-feed')} onClick={() => handleNavigation('/kol-feed')} icon={<Users size={20} />} label="KOL / Influencer Feed" />
-          <NavItem active={isActive('/custom-alerts')} onClick={() => handleNavigation('/custom-alerts')} icon={<Bell size={20} />} label="Custom Alerts" />
-          <NavItem active={isActive('/heatmap')} onClick={() => handleNavigation('/heatmap')} icon={<Activity size={20} />} label="Token Heatmap" />
-
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Analytics & Insights</div>
+          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Market & Narrative Intelligence</div>
+          <NavItem active={isActive('/detection')} onClick={() => handleNavigation('/detection')} icon={<Radar size={20} />} label="Detection Engine" />
           <NavItem active={isActive('/sentiment')} onClick={() => handleNavigation('/sentiment')} icon={<Target size={20} />} label="Sentiment Intelligence" />
-          <NavItem active={isActive('/detection')} onClick={() => handleNavigation('/detection')} icon={<Radar size={20} />} label="Detection" />
-          <NavItem active={isActive('/virality')} onClick={() => handleNavigation('/virality')} icon={<Flame size={20} />} label="Virality Prediction" />
+          <NavItem active={isActive('/virality')} onClick={() => handleNavigation('/virality')} icon={<Flame size={20} />} label="Virality Engine" />
 
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Trading & Intelligence Tools</div>
-          <NavItem active={isActive('/wallet')} onClick={() => handleNavigation('/wallet')} icon={<Wallet size={20} />} label="Wallet Tracking" />
-          <NavItem active={isActive('/chatbot')} onClick={() => handleNavigation('/chatbot')} icon={<MessageSquare size={20} />} label="AI Chatbot" />
-          <NavItem active={isActive('/smart-money')} onClick={() => handleNavigation('/smart-money')} icon={<Zap size={20} />} label="Smart Money Tracking" />
+          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Wallet & Capital Intelligence</div>
+          <NavItem active={isActive('/smart-money')} onClick={() => handleNavigation('/smart-money')} icon={<Zap size={20} />} label="Smart Money Engine" />
+          <NavItem active={isActive('/heatmap')} onClick={() => handleNavigation('/heatmap')} icon={<Activity size={20} />} label="Token Heatmap" />
+          <NavItem active={isActive('/wallet')} onClick={() => handleNavigation('/wallet')} icon={<Wallet size={20} />} label="Wallet Tracker" />
 
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Security & Risk</div>
+          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Platform-Wide Intelligence & Tools</div>
+          <NavItem active={isActive('/smart-alerts')} onClick={() => handleNavigation('/smart-alerts')} icon={<Bell size={20} />} label="Smart Alerts" />
+          <NavItem active={isActive('/ai-assistant')} onClick={() => handleNavigation('/ai-assistant')} icon={<MessageSquare size={20} />} label="AI Assistant" />
           <NavItem active={isActive('/safe-scan')} onClick={() => handleNavigation('/safe-scan')} icon={<ShieldCheck size={20} />} label="Safe Scan" />
 
           <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Account</div>

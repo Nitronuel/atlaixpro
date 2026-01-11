@@ -7,10 +7,10 @@ import { TokenDetails } from './pages/TokenDetails';
 import { Heatmap } from './pages/Heatmap';
 import { Detection } from './pages/Detection';
 import { TokenDetection } from './pages/TokenDetection';
-import { Chatbot } from './pages/Chatbot';
+import { AiAssistant } from './pages/AiAssistant';
 import { WalletTracking } from './pages/WalletTracking';
 import { SafeScan } from './pages/SafeScan';
-import { CustomAlerts } from './pages/CustomAlerts';
+import { SmartAlerts } from './pages/SmartAlerts';
 import { ViewState } from './types';
 
 // Placeholder components for views not yet implemented
@@ -56,17 +56,17 @@ function AppContent() {
                         // Map view enum to routes for legacy generic calls if any
                         const routes: Record<string, string> = {
                             'overview': '/dashboard',
-                            'kol-feed': '/kol-feed',
+
                             'heatmap': '/heatmap',
                             'sentiment': '/sentiment',
                             'detection': '/detection',
                             'virality': '/virality',
-                            'chatbot': '/chatbot',
+                            'ai-assistant': '/ai-assistant',
                             'wallet-tracking': '/wallet',
                             'safe-scan': '/safe-scan',
                             'settings': '/settings',
                             'smart-money': '/smart-money',
-                            'custom-alerts': '/custom-alerts'
+                            'smart-alerts': '/smart-alerts'
                         };
                         if (routes[view]) navigate(routes[view]);
                     }}
@@ -76,7 +76,7 @@ function AppContent() {
                         <Route path="/dashboard" element={<Dashboard />} />
                         <Route path="/token/:address" element={<TokenDetails />} />
 
-                        <Route path="/kol-feed" element={<PlaceholderView title="KOL / Influencer Feed" />} />
+
                         <Route path="/heatmap" element={<Heatmap />} />
                         <Route path="/sentiment" element={<PlaceholderView title="Sentiment Intelligence" />} />
 
@@ -84,15 +84,15 @@ function AppContent() {
                         <Route path="/detection/token/:query" element={<TokenDetection />} />
 
                         <Route path="/virality" element={<PlaceholderView title="Virality Prediction" />} />
-                        <Route path="/chatbot" element={<Chatbot />} />
+                        <Route path="/ai-assistant" element={<AiAssistant />} />
 
                         <Route path="/wallet" element={<WalletTracking />} />
                         <Route path="/wallet/:address" element={<WalletTracking />} />
 
                         <Route path="/safe-scan" element={<SafeScan />} />
 
-                        <Route path="/smart-money" element={<PlaceholderView title="Smart Money Tracking" />} />
-                        <Route path="/custom-alerts" element={<CustomAlerts />} />
+                        <Route path="/smart-money" element={<PlaceholderView title="Smart Money Engine" />} />
+                        <Route path="/smart-alerts" element={<SmartAlerts />} />
                         <Route path="/settings" element={<PlaceholderView title="Settings" />} />
                     </Routes>
                 </Layout>
