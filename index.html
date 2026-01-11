@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Atlaix</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        main: '#111315',
+                        sidebar: '#16181A',
+                        card: '#1C1F22',
+                        'card-hover': '#222529',
+                        primary: {
+                            green: '#26D356',
+                            'green-light': '#2AF598',
+                            yellow: '#F2C94C',
+                            purple: '#9B51E0',
+                            red: '#EB5757',
+                            blue: '#2F80ED'
+                        },
+                        text: {
+                            light: '#EAECEF',
+                            medium: '#8F96A3',
+                            dark: '#6C727A'
+                        },
+                        border: '#2A2E33'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Base styles matching the design system */
+        :root {
+            --bg-main: #111315;
+            --bg-card: #1C1F22;
+            --text-light: #EAECEF;
+            --border-color: #2A2E33;
+            --primary-green: #26D356;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-light);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-main);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 10px;
+            border: 2px solid var(--bg-main);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary-green);
+        }
+
+        .custom-scrollbar {
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) var(--bg-main);
+        }
+
+        /* Table Styles */
+        .data-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            white-space: nowrap;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 0.6rem 0.4rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .data-table th {
+            color: #6C727A;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            background: var(--bg-card);
+            height: 44px;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+
+        .data-table td {
+            color: #EAECEF;
+            font-weight: 500;
+            font-size: 0.85rem;
+            vertical-align: middle;
+            height: 50px;
+        }
+
+        .sticky-col {
+            position: sticky !important;
+            left: 0;
+            background: var(--bg-card) !important;
+            z-index: 10 !important;
+            box-shadow: 4px 0 10px -2px rgba(0, 0, 0, 0.5);
+        }
+
+        th.sticky-col {
+            z-index: 30 !important;
+        }
+
+        /* Filter Pills */
+        .filter-pill {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 50px;
+            padding: 0.35rem 0.8rem;
+            color: #8F96A3;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .filter-pill:hover,
+        .filter-pill.active {
+            border-color: #EAECEF;
+            color: #EAECEF;
+            background: #222529;
+        }
+
+        .filter-popup {
+            position: absolute;
+            top: calc(100% + 12px);
+            left: 0;
+            background: #1C1F22;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            z-index: 500;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.7);
+            width: max-content;
+            min-width: 100%;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .filter-list-item {
+            padding: 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .filter-list-item:hover {
+            background: #222529;
+            color: #EAECEF;
+        }
+
+        .filter-list-item.selected {
+            color: var(--primary-green);
+            font-weight: 600;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "path": "https://esm.sh/path@^0.12.7",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.89.0"
+  }
+}
+</script>
+</head>
+
+<body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+</body>
+
+</html>
