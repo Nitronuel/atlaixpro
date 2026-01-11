@@ -8,11 +8,11 @@ export type ViewState =
     | 'detection'
     | 'token-detection'
     | 'virality'
-    | 'chatbot'
+    | 'ai-assistant'
     | 'wallet-tracking'
     | 'smart-money'
     | 'safe-scan'
-    | 'custom-alerts'
+    | 'smart-alerts'
     | 'settings';
 
 export type WalletCategory = 'Smart Money' | 'Whale' | 'Sniper' | 'Fresh Wallet' | 'Early Buyer';

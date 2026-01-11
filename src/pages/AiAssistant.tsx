@@ -8,7 +8,7 @@ interface Message {
     type?: 'text' | 'rich-token' | 'rich-sentiment';
 }
 
-export const Chatbot: React.FC = () => {
+export const AiAssistant: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
@@ -29,7 +29,7 @@ export const Chatbot: React.FC = () => {
             let text = "I've analyzed the market based on your request.";
             if (userMsg.text.toLowerCase().includes('bonk')) type = 'rich-token';
             else if (userMsg.text.toLowerCase().includes('sentiment')) type = 'rich-sentiment';
-            
+
             setMessages(p => [...p, { id: Date.now() + 1, text, sender: 'ai', type }]);
             setIsTyping(false);
         }, 1500);
@@ -46,8 +46,8 @@ export const Chatbot: React.FC = () => {
                     <p className="text-text-medium mb-8">Ask me anything about tokens, wallets, or market trends.</p>
                     <div className="flex flex-wrap justify-center gap-3 w-full max-w-2xl">
                         {["Analyze $BONK sentiment", "Show me smart money flow for SOL", "Check $WIF for risks", "What's trending now?"].map((s, i) => (
-                            <button 
-                                key={i} 
+                            <button
+                                key={i}
                                 onClick={() => setInput(s)}
                                 className="px-5 py-3 bg-card border border-border rounded-full hover:border-primary-green hover:bg-card-hover transition-all text-sm font-medium"
                             >
@@ -67,11 +67,10 @@ export const Chatbot: React.FC = () => {
                             )}
                             <div className={`max-w-[80%] space-y-2`}>
                                 {msg.text && (
-                                    <div className={`p-4 rounded-xl text-sm leading-relaxed ${
-                                        msg.sender === 'user' 
-                                        ? 'bg-primary-purple text-white rounded-br-sm' 
-                                        : 'bg-card border border-border text-text-light rounded-bl-sm'
-                                    }`}>
+                                    <div className={`p-4 rounded-xl text-sm leading-relaxed ${msg.sender === 'user'
+                                            ? 'bg-primary-purple text-white rounded-br-sm'
+                                            : 'bg-card border border-border text-text-light rounded-bl-sm'
+                                        }`}>
                                         {msg.text}
                                     </div>
                                 )}
@@ -121,17 +120,17 @@ export const Chatbot: React.FC = () => {
                     <div ref={endRef} />
                 </div>
             )}
-            
+
             <div className="mt-4 bg-card border border-border rounded-2xl p-3 flex items-center gap-3 shadow-lg">
-                <input 
-                    type="text" 
+                <input
+                    type="text"
                     className="flex-1 bg-transparent border-none outline-none text-text-light placeholder-text-dark px-2"
                     placeholder="Ask Atlaix..."
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                 />
-                <button 
+                <button
                     onClick={handleSend}
                     disabled={!input.trim()}
                     className="w-10 h-10 bg-primary-green rounded-lg flex items-center justify-center text-main hover:opacity-90 disabled:bg-border disabled:text-text-dark transition-all"

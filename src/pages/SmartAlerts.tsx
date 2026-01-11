@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { AiInterpretationService, InterpretationResult } from '../services/AiInterpretationService';
 
-export const CustomAlerts: React.FC = () => {
+export const SmartAlerts: React.FC = () => {
     const [alertInput, setAlertInput] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [interpretation, setInterpretation] = useState<InterpretationResult | null>(null);
@@ -59,7 +59,7 @@ export const CustomAlerts: React.FC = () => {
         const newAlert = {
             id: Date.now(),
             trigger: interpretation.structured,
-            type: "AI Custom",
+            type: "AI Smart",
             status: true,
             lastTriggered: "Just now"
         };
@@ -90,7 +90,7 @@ export const CustomAlerts: React.FC = () => {
                 <div className="relative z-10 flex flex-col gap-6">
                     <div>
                         <h2 className="text-xl md:text-2xl font-bold text-text-light">
-                            Create Custom Alert
+                            Create Smart Alert
                         </h2>
                         <p className="text-sm text-text-medium mt-2 max-w-2xl">
                             Describe any market condition, wallet activity, or token metric you want to track.
