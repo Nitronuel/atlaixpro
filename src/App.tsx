@@ -11,6 +11,8 @@ import { AiAssistant } from './pages/AiAssistant';
 import { WalletTracking } from './pages/WalletTracking';
 import { SafeScan } from './pages/SafeScan';
 import { SmartAlerts } from './pages/SmartAlerts';
+import { SmartMoney } from './pages/SmartMoney';
+import { SmartWalletProfile } from './pages/SmartWalletProfile';
 import { ViewState } from './types';
 
 // Placeholder components for views not yet implemented
@@ -91,7 +93,8 @@ function AppContent() {
 
                         <Route path="/safe-scan" element={<SafeScan />} />
 
-                        <Route path="/smart-money" element={<PlaceholderView title="Smart Money Engine" />} />
+                        <Route path="/smart-money" element={<SmartMoney />} />
+                        <Route path="/smart-money/:address" element={<SmartWalletProfile />} />
                         <Route path="/smart-alerts" element={<SmartAlerts />} />
                         <Route path="/settings" element={<PlaceholderView title="Settings" />} />
                     </Routes>
