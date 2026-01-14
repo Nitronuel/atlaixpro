@@ -72,8 +72,11 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     if (path.includes('/virality')) return 'Virality Prediction';
     if (path.includes('/ai-assistant')) return 'AI Assistant';
     if (path.includes('/wallet')) return 'Wallet Tracker';
+    if (path.includes('/wallet')) return 'Wallet Tracker';
+    if (path.includes('/smart-money/')) return 'Smart Wallet Profile Page';
     if (path.includes('/smart-money')) return 'Smart Money Engine';
     if (path.includes('/safe-scan')) return 'Safe Scan';
+    if (path.includes('/smart-alerts')) return 'Smart Alerts';
     if (path.includes('/settings')) return 'Settings';
     return 'Overview';
   };
@@ -89,6 +92,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     if (path.includes('/ai-assistant')) return 'Interact with Atlaix Intelligence';
     if (path.includes('/safe-scan')) return 'Security analysis and risk scoring for tokens';
     if (path.includes('/wallet')) return 'Monitor wallet activity, performance and patterns';
+    if (path.includes('/smart-alerts')) return 'Create AI-powered market alerts';
     return '';
   };
 
