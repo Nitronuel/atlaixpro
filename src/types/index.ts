@@ -15,7 +15,7 @@ export type ViewState =
     | 'smart-alerts'
     | 'settings';
 
-export type WalletCategory = 'Smart Money' | 'Whale' | 'Sniper' | 'Fresh Wallet' | 'Early Buyer';
+export type WalletCategory = 'Smart Money' | 'Whale' | 'Sniper' | 'Fresh Wallet' | 'Early Buyer' | 'Hodler' | 'Degen' | 'Insider' | 'Fresh' | 'Copy Trade' | 'High Vol' | 'Early';
 
 export interface SavedWallet {
     addr: string;
@@ -65,6 +65,7 @@ export interface MarketCoin {
     chain: string;
     address?: string;
     pairAddress?: string;
+    activeWallets24h?: number;
 }
 
 export interface Post {
@@ -109,4 +110,11 @@ export interface EnrichedTokenData {
     chainId: string;
     dexId: string;
     url: string;
+    holders?: number;
+    totalSupply?: number;
+    pairCreatedAt?: number;
+    txns?: { h24: { buys: number; sells: number } };
+    tax?: { buy: number; sell: number };
+    poolCount?: number;
+    activeWallets24h?: number;
 }

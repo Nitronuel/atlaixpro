@@ -295,7 +295,7 @@ export const ChainRouter = {
             case '1D': delta = ONE_DAY; break;
             case '1W': delta = ONE_DAY * 7; break;
             case '1M': delta = ONE_DAY * 30; break;
-            case '>1M': delta = ONE_DAY * 90; break; // Approximating >1M as 3 months for trend or just 30d+? Using 90d seems fair or maybe just 31d
+            case '>1M': delta = ONE_DAY * 90; break; // Approximate >1M blocks as a 90-day trend window.
             default: delta = ONE_DAY;
         }
 
@@ -360,19 +360,19 @@ export const ChainRouter = {
             const startTime = now - lookbackMs;
 
             // Scenario A: Asset purchased AFTER the start time (e.g. bought 2 days ago, filter is 7 days)
-            // PnL is just the full PnL since purchase.
+            // Calculate total PnL from the initial purchase date.
             if (buyTime >= startTime) {
                 referencePrice = costBasis;
                 // If filtering for >1M and it's newer, it technically doesn't match the filter, 
                 // but the UI typically shows everything or filters. 
                 // The new requirement is "filter logic... calculate and display PnL within selected time frame".
-                // We will return standard PnL but maybe the UI filters it out if strict?
+                // Return standard PnL; UI filtering logic will handle strict display requirements.
                 // For now, we assume we show it with full PnL.
             }
             // Scenario B: Asset held LONGER than start time (e.g. bought 1 year ago, filter is 7 days)
             // PnL should be change since 7 days ago.
             else {
-                // If filter is >1M, we probably want the PnL since forever (Total PnL) for old assets? 
+                // For >1M block filters, utilize cumulative PnL for historical accuracy. 
                 // Or "Change since 1 month ago"? usually >1M implies "Overall for old stuff".
                 // Let's stick to the prompt: "calculate and display PnL within the selected time frame"
 

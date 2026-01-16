@@ -35,6 +35,11 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const navigate = useNavigate();
 
+    // Search Suggestions State
+    const [suggestions, setSuggestions] = useState<MarketCoin[]>([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
+
+
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 20;
@@ -46,6 +51,55 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [marketData, setMarketData] = useState<MarketCoin[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+    const [searchError, setSearchError] = useState<string>('');
+
+    // Live Search Filter Effect
+    // Live Search Filter Effect
+    useEffect(() => {
+        setSearchError(''); // Clear error on typing
+        if (!searchQuery.trim()) {
+            setSuggestions([]);
+            return;
+        }
+
+        const query = searchQuery.toLowerCase();
+
+        // 1. Instant Local Search from Market Data
+        const localMatches = marketData ? marketData.filter(coin =>
+            coin.ticker.toLowerCase().includes(query) ||
+            coin.name.toLowerCase().includes(query) ||
+            coin.address.toLowerCase().includes(query)
+        ).slice(0, 5) : [];
+
+        setSuggestions(localMatches);
+
+        // 2. Debounced Global Search
+        const timer = setTimeout(async () => {
+            try {
+                // Only search global if query is long enough to be meaningful
+                if (query.length < 2) return;
+
+                const globalResults = await DatabaseService.searchGlobalPairs(query);
+
+                // Merge: Local first, then unique Global
+                const existingAddrs = new Set(localMatches.map(c => c.address.toLowerCase()));
+                const uniqueGlobal = globalResults.filter(c => !existingAddrs.has(c.address.toLowerCase()));
+
+                // Combine
+                let combined = [...localMatches, ...uniqueGlobal];
+
+                // Sort by Market Cap (High to Low)
+                combined.sort((a, b) => parseCurrency(b.cap) - parseCurrency(a.cap));
+
+                // Set suggestions
+                setSuggestions(combined.slice(0, 10));
+            } catch (e) {
+                console.error("Global search error:", e);
+            }
+        }, 300); // 300ms debounce
+
+        return () => clearTimeout(timer);
+    }, [searchQuery, marketData]);
 
     // Load Data Function
     const loadData = async (force: boolean = false) => {
@@ -77,8 +131,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     };
 
     const handleSearchSubmit = () => {
-        if (searchQuery.trim()) {
-            handleTokenNavigation(searchQuery);
+        if (!searchQuery.trim()) return;
+
+        if (suggestions.length > 0) {
+            handleTokenNavigation(suggestions[0]);
+        } else {
+            setSearchError("Token not available");
         }
     };
 
@@ -299,24 +357,86 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         <div className="flex flex-col gap-6 pb-16">
             <div className="bg-card border border-border rounded-xl p-3 md:p-5 shadow-lg relative z-40">
                 <div className="flex flex-row items-center gap-2 w-full flex-nowrap">
-                    <div className="flex-1 bg-main border border-border rounded-lg flex items-center px-4 py-2.5 transition-all focus-within:border-primary-green/50">
+                    <div className="flex-1 bg-main border border-border rounded-lg flex items-center px-4 py-2.5 transition-all focus-within:border-primary-green/50 relative">
                         <input
                             type="text"
                             className="bg-transparent border-none text-text-light outline-none w-full text-[0.95rem] placeholder-text-dark"
                             placeholder="search token name or past CA"
                             value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
+                            onChange={(e) => {
+                                setSearchQuery(e.target.value);
+                                setShowSuggestions(true);
+                            }}
+                            onFocus={() => {
+                                if (searchQuery.trim()) setShowSuggestions(true);
+                            }}
+                            onBlur={() => {
+                                // Small delay to allow click event to register
+                                setTimeout(() => setShowSuggestions(false), 200);
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    handleSearchSubmit();
+                                    setShowSuggestions(false);
+                                }
+                            }}
                         />
+
+                        {/* Search Suggestions Dropdown */}
+                        {showSuggestions && suggestions.length > 0 && (
+                            <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-[60]">
+                                <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                                    {suggestions.map((coin) => (
+                                        <div
+                                            key={coin.id}
+                                            className="flex items-center gap-3 px-4 py-3 hover:bg-card-hover cursor-pointer transition-colors border-b border-border/50 last:border-none"
+                                            onClick={() => {
+                                                handleTokenNavigation(coin);
+                                                setSearchQuery('');
+                                                setShowSuggestions(false);
+                                            }}
+                                        >
+                                            <div className="w-10 h-10 rounded-full bg-main flex items-center justify-center shrink-0 border border-border">
+                                                <img src={coin.img} alt={coin.ticker} className="w-7 h-7 rounded-full object-cover" onError={handleImageError} />
+                                            </div>
+
+                                            {/* Left: Ticker & Name */}
+                                            <div className="flex flex-col min-w-[100px]">
+                                                <span className="font-bold text-base text-text-light">{coin.ticker}</span>
+                                                <span className="text-xs text-text-dark truncate max-w-[120px]">{coin.name}</span>
+                                            </div>
+
+                                            {/* Center: Market Cap */}
+                                            <div className="flex flex-col items-end flex-1 px-3 border-r border-border/30 mr-3">
+                                                <span className="text-[10px] text-text-dark uppercase tracking-wider">MCap</span>
+                                                <span className="font-mono text-sm text-text-medium">{coin.cap}</span>
+                                            </div>
+
+                                            {/* Right: Price & Change */}
+                                            <div className="flex flex-col items-end min-w-[80px]">
+                                                <span className="font-mono text-sm text-text-light">{coin.price}</span>
+                                                <span className={`text-xs font-bold ${getPercentColor(coin.h24)}`}>{coin.h24}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        {searchError && (
+                            <div className="absolute top-full mt-2 right-0 bg-primary-red/10 border border-primary-red text-primary-red text-xs px-3 py-1.5 rounded font-bold backdrop-blur-md z-50">
+                                {searchError}
+                            </div>
+                        )}
                     </div>
                     <button
                         className="bg-primary-green text-main w-11 h-11 md:w-14 md:h-11 rounded-lg flex-shrink-0 flex items-center justify-center hover:bg-primary-green-darker transition-colors shadow-md"
                         onClick={handleSearchSubmit}
+                        tabIndex={-1}
                     >
                         <Search size={20} strokeWidth={2.5} />
                     </button>
                 </div>
-            </div>
+            </div >
 
             <div className="bg-card border border-border rounded-xl p-3 md:p-5 overflow-visible shadow-sm relative z-30">
                 <div className="flex flex-col gap-3 mb-4">
@@ -459,7 +579,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
             <div className="w-full relative z-20">
                 <h3 className="text-base font-bold mb-4 text-text-light">AI Market Pulse</h3>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
 
                     <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-center gap-1.5 shadow-sm">
                         <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
@@ -517,6 +637,6 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     );
 };

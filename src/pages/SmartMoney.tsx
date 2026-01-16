@@ -23,11 +23,11 @@ const MOCK_OUTFLOWS = [
 ];
 
 const TRENDING_WALLETS = [
-    { id: 1, address: '0x7a...9f2b', tag: 'Smart Money', winRate: '78%', pnl: '+$133.9k', score: 92, volume: '$2.4M' },
-    { id: 2, address: '0x3c...1a8d', tag: 'Smart Money', winRate: '82%', pnl: '+$450.2k', score: 88, volume: '$5.1M' },
-    { id: 3, address: '0x9b...4e1c', tag: 'Smart Money', winRate: '65%', pnl: '+$89.5k', score: 85, volume: '$1.2M' },
-    { id: 4, address: '0x2d...8f3a', tag: 'Smart Money', winRate: '90%', pnl: '+$67.1k', score: 81, volume: '$850k' },
-    { id: 5, address: '0x1f...5e9b', tag: 'Smart Money', winRate: '72%', pnl: '+$210.5k', score: 79, volume: '$3.5M' },
+    { id: 1, address: '0x7a...9f2b', tag: 'Whale', winRate: '78%', successfulTokens: '78%', pnl: '+$133.9k', score: 92, volume: '$133.90M', pnlPercent: '+120%' },
+    { id: 2, address: '0x3c...1a8d', tag: 'Smart Money', winRate: '82%', successfulTokens: '82%', pnl: '+$450.2k', score: 88, volume: '$5.1M', pnlPercent: '+45%' },
+    { id: 3, address: '0x9b...4e1c', tag: 'Smart Money', winRate: '65%', successfulTokens: '65%', pnl: '+$89.5k', score: 85, volume: '$1.2M', pnlPercent: '+15%' },
+    { id: 4, address: '0x2d...8f3a', tag: 'Sniper', winRate: '90%', successfulTokens: '90%', pnl: '+$67.1k', score: 81, volume: '$850k', pnlPercent: '+210%' },
+    { id: 5, address: '0x1f...5e9b', tag: 'Whale', winRate: '72%', successfulTokens: '72%', pnl: '+$210.5k', score: 79, volume: '$3.5M', pnlPercent: '+35%' },
 ];
 
 const RECENT_EVENTS = [
@@ -96,10 +96,10 @@ export const SmartMoney: React.FC = () => {
             </div>
 
             {/* --- Main Dashboard Content --- */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-6">
 
                 {/* --- Column 1: Trending Smart Wallets (Moved from Col 2) --- */}
-                <div className="lg:col-span-4 flex flex-col gap-6">
+                <div className="xl:col-span-4 flex flex-col gap-6">
                     <div className="bg-[#111315] border border-[#2A2E33] rounded-2xl overflow-hidden shadow-lg h-full">
                         <div className="px-5 py-4 border-b border-[#2A2E33] flex items-center justify-between">
                             <h3 className="font-bold text-[#EAECEF] flex items-center gap-2">
@@ -112,29 +112,42 @@ export const SmartMoney: React.FC = () => {
                                 <div
                                     key={wallet.id}
                                     onClick={() => navigate(`/smart-money/${wallet.address}`)}
-                                    className="px-3 py-4 hover:bg-[#1C1F22] rounded-xl transition-colors cursor-pointer group"
+                                    className="p-3 hover:bg-[#1C1F22] rounded-xl transition-colors cursor-pointer group relative border-b border-[#2A2E33]/30 last:border-0"
                                 >
-                                    <div className="flex items-start gap-3 mb-2">
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <span className="text-xs font-bold text-white bg-green-500/10 px-1.5 rounded">{wallet.tag}</span>
-                                                <span className="text-xs text-[#5D6470]">{wallet.address}</span>
-                                            </div>
-                                            <div className="grid grid-cols-3 items-center text-xs">
-                                                <div className="text-left">
-                                                    <span className="text-[#8F96A3]">Win: <span className="text-[#EAECEF] font-semibold">{wallet.winRate}</span></span>
-                                                </div>
-                                                <div className="text-center">
-                                                    <span className="text-[#8F96A3]">Vol: <span className="text-[#EAECEF] font-semibold">{wallet.volume}</span></span>
-                                                </div>
-                                                <div className="text-right">
-                                                    <span className="text-[#8F96A3]">PnL: <span className="text-green-400 font-semibold">{wallet.pnl}</span></span>
-                                                </div>
+                                    {/* Header: Avatar, Badge, Address, Button */}
+                                    <div className="flex items-center justify-between mb-0.5">
+                                        <div className="flex items-center gap-2.5">
+                                            {/* Avatar Gradient */}
+                                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-inner group-hover:scale-105 transition-transform"></div>
+
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className="text-sm font-bold text-[#EAECEF] font-mono tracking-tight group-hover:text-primary-green transition-colors">{wallet.address}</span>
                                             </div>
                                         </div>
+
+                                        <button className="px-3 py-1 rounded-lg bg-[#1C1F22] hover:bg-[#2A2E33] border border-[#3C414A] text-[#EAECEF] text-[9px] font-bold transition-colors opacity-0 group-hover:opacity-100">
+                                            View
+                                        </button>
                                     </div>
-                                    <div className="w-full bg-[#2A2E33] h-1 rounded-full overflow-hidden">
-                                        <div className="bg-green-500 h-full" style={{ width: `${wallet.score}%` }}></div>
+
+                                    {/* Stats Grid */}
+                                    <div className="flex justify-between items-start pt-0 pl-10">
+                                        <div className="flex flex-col text-left">
+                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Win Rate</span>
+                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.winRate}</span>
+                                        </div>
+                                        <div className="flex flex-col text-center">
+                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">% Successful Token</span>
+                                            <span className="text-xs font-bold text-green-400">{wallet.successfulTokens}</span>
+                                        </div>
+                                        <div className="flex flex-col text-center">
+                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">30d PnL</span>
+                                            <span className="text-xs font-bold text-green-400">{wallet.pnlPercent}</span>
+                                        </div>
+                                        <div className="flex flex-col text-right">
+                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Vol</span>
+                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.volume}</span>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -148,7 +161,7 @@ export const SmartMoney: React.FC = () => {
                 </div>
 
                 {/* --- Column 2: Recent Events Feed (Moved from Col 3) --- */}
-                <div className="lg:col-span-4 flex flex-col gap-6">
+                <div className="xl:col-span-4 flex flex-col gap-6">
                     <div className="bg-[#111315] border border-[#2A2E33] rounded-2xl overflow-hidden shadow-lg h-full">
                         <div className="px-5 py-4 border-b border-[#2A2E33] flex items-center justify-between">
                             <h3 className="font-bold text-[#EAECEF] flex items-center gap-2">
@@ -159,7 +172,11 @@ export const SmartMoney: React.FC = () => {
                         </div>
                         <div className="p-2 space-y-1">
                             {RECENT_EVENTS.map((event, i) => (
-                                <div key={i} className="p-3 hover:bg-[#1C1F22] rounded-xl transition-colors cursor-pointer group relative">
+                                <div
+                                    key={i}
+                                    onClick={() => navigate(`/token-smart-money/${event.token}`)}
+                                    className="p-3 hover:bg-[#1C1F22] rounded-xl transition-colors cursor-pointer group relative"
+                                >
                                     <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-full ${event.type === 'buy' ? 'bg-green-500' : 'bg-red-500'}`}></div>
 
                                     <div className="flex flex-col gap-1 w-full pl-4">
@@ -193,7 +210,7 @@ export const SmartMoney: React.FC = () => {
                 </div>
 
                 {/* --- Column 3: Inflows & Outflows (Moved from Col 1) --- */}
-                <div className="lg:col-span-4 flex flex-col gap-6">
+                <div className="sm:col-span-2 xl:col-span-4 grid grid-cols-1 sm:grid-cols-2 xl:flex xl:flex-col gap-6">
                     {/* Top Inflows */}
                     <section className="bg-[#111315] border border-[#2A2E33] rounded-2xl overflow-hidden flex flex-col">
                         <div className="px-6 py-4 border-b border-[#2A2E33] flex items-center justify-between">

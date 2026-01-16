@@ -11,7 +11,7 @@ const DEXSCREENER_PAIRS_URL = 'https://api.dexscreener.com/latest/dex/pairs';
 // --- REQUIREMENTS ---
 // Strict filters for High Quality Alpha
 const REQUIREMENTS = {
-    MIN_LIQUIDITY_USD: 500000, // User requested > $500k
+    MIN_LIQUIDITY_USD: 500000, // Minimum liquidity threshold set to $500k
     MIN_VOLUME_24H: 50000,    // Increased to ensure active trading
     MIN_TXNS_24H: 100,        // Filter out dead/zombie tokens
     MIN_FDV: 1000000,         // Minimum $1M FDV to avoid micro-caps/scams
@@ -29,7 +29,7 @@ const USD_QUOTE_SYMBOLS = new Set([
 ]);
 
 // --- SEED DATA (CLEARED) ---
-// User requested to remove all current tokens and rely on live scanning.
+// Seed data cleared to prioritize live network scanning.
 const SEED_DATA: MarketCoin[] = [];
 
 // --- DISCOVERY QUERIES ---
@@ -193,7 +193,7 @@ export const DatabaseService = {
         }
 
         try {
-            // 1. Load existing data from DB (Our "Memory")
+            // 1. Load existing market data from the persistent database.
             let dbTokens = await DatabaseService.fetchFromSupabase();
 
             // --- SEED DATA INJECTION ---
@@ -210,11 +210,11 @@ export const DatabaseService = {
 
             // --- CRITICAL LOGIC: POPULATION VS MAINTENANCE ---
 
-            // If we have fewer than target tokens, we DO NOT waste API calls updating prices.
-            // We use 100% of bandwidth to SEARCH for new tokens.
+            // If we have fewer than target tokens, we avoid updating prices to conserve bandwidth.
+            // Allocate full bandwidth to discovery operations.
             if (currentCount < REQUIREMENTS.TARGET_LIST_SIZE) {
-                // PHASE 1: HYPER-GROWTH MODE
-                // Focus strictly on finding new tokens. Don't refresh existing ones yet.
+                // Phase 1: Aggressive Discovery
+                // Focus strictly on finding new tokens. Defer refreshing existing data.
                 // 25 Parallel Queries = Aggressive population without hitting limits.
                 const batchSize = 25;
                 const end = Math.min(currentQueryIndex + batchSize, SHUFFLED_QUERIES.length);
@@ -228,15 +228,15 @@ export const DatabaseService = {
                 searchResults.forEach(pairs => newPairs = [...newPairs, ...pairs]);
 
             } else {
-                // PHASE 2: SUSTAIN & UPGRADE MODE
+                // Phase 2: Maintenance and Optimization
                 // We have 300+ tokens. 
                 // Priority 1: Keep prices fresh (Refresh ALL).
-                // Priority 2: Keep looking for better tokens to replace low-quality ones (Search).
+                // Priority 2: Continue searching for high-quality tokens to replace lower-quality ones.
 
                 // A. Update existing tokens (Bulk Endpoint is efficient)
                 const chainMap: Record<string, string[]> = {};
 
-                // Update ALL tokens every cycle to keep the feed "Live"
+                // Refresh all tracked tokens to ensure real-time data accuracy.
                 // 300 tokens = 10 API calls. Safe within 300 req/min limit.
                 currentList.forEach(t => {
                     const cid = t.chain === 'ethereum' ? 'ethereum' : t.chain === 'solana' ? 'solana' : t.chain === 'bsc' ? 'bsc' : 'base';
@@ -248,8 +248,8 @@ export const DatabaseService = {
                 const updateResults = await Promise.all(updatePromises);
                 updateResults.forEach(pairs => updatedPairs = [...updatedPairs, ...pairs]);
 
-                // B. Continuous Discovery (Run 5 searches to find gems)
-                // We still want to find 100x coins even if the list is full
+                // B. Continuous Discovery (Run 5 searches to find new assets)
+                // Continue discovery process to identify high-potential assets even when the list is at capacity.
                 const discoveryBatch = 5;
                 const end = Math.min(currentQueryIndex + discoveryBatch, SHUFFLED_QUERIES.length);
                 const queries = SHUFFLED_QUERIES.slice(currentQueryIndex, end);
@@ -320,7 +320,7 @@ export const DatabaseService = {
             });
 
             // 5. Limit size & Sync
-            // Return top 500 to Ensure Continual Growth view
+            // Return the top 500 assets to maintain a comprehensive market view.
             const finalData = mergedList.slice(0, 500);
 
             // Sync new discoveries to DB (Background)
@@ -479,7 +479,9 @@ export const DatabaseService = {
             trend,
             chain: getChainId(pair.chainId),
             address: pair.baseToken.address,
-            pairAddress: pair.pairAddress
+            pairAddress: pair.pairAddress,
+            // Attempt to capture makers if available in raw response (some endpoints provide it)
+            activeWallets24h: (pair as any).boosts?.active || (pair as any).makers || 0
         };
     },
 
@@ -565,9 +567,12 @@ export const DatabaseService = {
                 else return null;
             }
 
-            // Return the best pair directly (No aggregation)
-            // This ensures we match DexScreener's main view logic
-            return bestPair;
+            // Return the best pair directly with added pool count metric
+            return {
+                ...bestPair,
+                poolCount: data.pairs ? data.pairs.length : 0,
+                activeWallets24h: (bestPair as any).boosts?.active || (bestPair as any).makers || 0
+            };
 
         } catch (e) {
             console.error("DexScreener Aggregation Error", e);
@@ -577,5 +582,11 @@ export const DatabaseService = {
 
     checkAndTriggerIngestion: async () => {
         await DatabaseService.getMarketData(true, true);
+    },
+
+    searchGlobalPairs: async (query: string): Promise<MarketCoin[]> => {
+        const pairs = await searchDexScreener(query);
+        // Transform and return top results
+        return pairs.slice(0, 10).map((p, i) => DatabaseService.transformPair(p, i));
     }
 };

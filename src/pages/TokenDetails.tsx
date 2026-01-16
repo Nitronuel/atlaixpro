@@ -2,11 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { DatabaseService } from '../services/DatabaseService';
 import { ChainActivityService, RealActivity } from '../services/ChainActivityService';
+import { MoralisService } from '../services/MoralisService';
 import { useParams, useNavigate } from 'react-router-dom';
 import { EnrichedTokenData } from '../types';
 import { TokenSidebar } from '../components/token/TokenSidebar';
 import { TokenChart } from '../components/token/TokenChart';
+import { SolanaRpcService } from '../services/SolanaRpcService';
 import { TokenTransactions } from '../components/token/TokenTransactions';
+import { TokenOverviewCards } from '../components/token/TokenOverviewCards';
 
 export const TokenDetails: React.FC = () => {
     const { address } = useParams<{ address: string }>();
@@ -28,16 +31,79 @@ export const TokenDetails: React.FC = () => {
             try {
                 const data = await DatabaseService.getTokenDetails(address);
                 if (data) {
-                    setEnrichedData(data);
-                    const price = parseFloat(data.priceUsd) || 0;
+                    // Start basic data
+                    const enriched: EnrichedTokenData = {
+                        ...data,
+                        holders: 0,
+                        totalSupply: 0,
+                        pairCreatedAt: (data as any).pairCreatedAt || 0,
+                        txns: (data as any).txns || { h24: { buys: 0, sells: 0 } },
+                        tax: { buy: 0, sell: 0 } // Default for now
+                    };
+                    setEnrichedData(enriched);
 
-                    // Use ChainActivityService for scalable, filtered feed
-                    const realActivity = await ChainActivityService.getTokenActivity(
-                        data.baseToken.address,
+                    // Fetch Logic: Parallel execution for speed
+                    // 1. Get Holders (RPC)
+                    // 2. Get Supply (RPC)
+                    // 3. Activity Feed (ChainActivityService)
+
+                    const mintAddress = data.baseToken.address;
+                    const isSolana = data.chainId === 'solana';
+
+                    let holders = 0;
+                    let supply = 0;
+                    let realActivity: any[] = [];
+
+                    // ACTIVITY FEED (Universal)
+                    realActivity = await ChainActivityService.getTokenActivity(
+                        mintAddress,
                         data.chainId,
-                        price,
-                        data.pairAddress // Pass pair address for Buy/Sell detection
+                        parseFloat(data.priceUsd) || 0,
+                        data.pairAddress
                     );
+
+                    // CHAIN SPECIFIC METADATA
+                    if (isSolana) {
+                        // Solana: Use RPC
+                        const [h, s] = await Promise.all([
+                            SolanaRpcService.getHolderCount(mintAddress),
+                            SolanaRpcService.getTokenSupply(mintAddress)
+                        ]);
+                        holders = h || 0;
+                        supply = s || 0;
+                    } else {
+                        // EVM / Other: Use Moralis
+                        try {
+                            const metadata = await MoralisService.getTokenMetadata(mintAddress, data.chainId);
+                            if (metadata) {
+                                // Adjust for decimals
+                                const decimals = metadata.decimals || 18;
+                                supply = parseFloat(metadata.totalSupply) / Math.pow(10, decimals);
+                            } else {
+                                // Fallback if API fails
+                                const price = parseFloat(data.priceUsd) || 0;
+                                const fdv = data.fdv || 0;
+                                if (price > 0 && fdv > 0) supply = fdv / price;
+                            }
+                        } catch (e) {
+                            console.warn("EVM Supply Fetch Failed", e);
+                        }
+                    }
+
+                    // SECURITY CHECK (Tax / Honeypot) - Parallel execution
+                    // Note: This is an async update to the state to show data as it comes in
+                    import('../services/GoPlusService').then(({ GoPlusService }) => {
+                        GoPlusService.fetchTokenSecurity(mintAddress, data.chainId).then(security => {
+                            if (security && security.tax) {
+                                setEnrichedData(prev => prev ? ({
+                                    ...prev,
+                                    tax: security.tax
+                                }) : null);
+                            }
+                        }).catch(err => console.error("Tax Fetch Error", err));
+                    });
+
+                    setEnrichedData(prev => prev ? ({ ...prev, holders, totalSupply: supply }) : null);
 
                     // We now strictly use the real activity feed (filtered for Whales/Burns)
                     // We do NOT fall back to simulation because users want high-signal data.
@@ -77,6 +143,9 @@ export const TokenDetails: React.FC = () => {
                             chainId={enrichedData?.chainId || 'ethereum'}
                             pairAddress={enrichedData?.pairAddress || ''}
                         />
+                        <div className="mt-4">
+                            <TokenOverviewCards data={enrichedData} />
+                        </div>
                     </div>
                     <TokenTransactions
                         activityFeed={activityFeed}
@@ -85,8 +154,8 @@ export const TokenDetails: React.FC = () => {
                     />
                 </div>
 
-                {/* Right Column (Sidebar) - Fixed 270px width */}
-                <div className="contents lg:block lg:w-[270px] lg:shrink-0 h-full">
+                {/* Right Column (Sidebar) - Fixed 300px width */}
+                <div className="contents lg:block lg:w-[300px] lg:shrink-0 h-full">
                     <TokenSidebar data={enrichedData} loading={loading} />
                 </div>
             </div>

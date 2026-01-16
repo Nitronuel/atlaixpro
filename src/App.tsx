@@ -13,6 +13,7 @@ import { SafeScan } from './pages/SafeScan';
 import { SmartAlerts } from './pages/SmartAlerts';
 import { SmartMoney } from './pages/SmartMoney';
 import { SmartWalletProfile } from './pages/SmartWalletProfile';
+import { TokenSmartMoney } from './pages/TokenSmartMoney';
 import { ViewState } from './types';
 
 // Placeholder components for views not yet implemented
@@ -95,6 +96,7 @@ function AppContent() {
 
                         <Route path="/smart-money" element={<SmartMoney />} />
                         <Route path="/smart-money/:address" element={<SmartWalletProfile />} />
+                        <Route path="/token-smart-money/:address" element={<TokenSmartMoney />} />
                         <Route path="/smart-alerts" element={<SmartAlerts />} />
                         <Route path="/settings" element={<PlaceholderView title="Settings" />} />
                     </Routes>

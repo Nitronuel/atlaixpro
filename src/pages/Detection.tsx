@@ -4,11 +4,10 @@ import { CustomCalendar } from '../components/ui/CustomCalendar';
 
 declare var ApexCharts: any;
 
-interface DetectionProps {
-    onSearch: (token: string) => void;
-}
+import { useNavigate } from 'react-router-dom';
 
-export const Detection: React.FC<DetectionProps> = ({ onSearch }) => {
+export const Detection: React.FC = () => {
+    const navigate = useNavigate();
     const [query, setQuery] = useState('');
     const [timeFilter, setTimeFilter] = useState('24H');
     const [activeFilter, setActiveFilter] = useState<string | null>(null);
@@ -85,9 +84,10 @@ export const Detection: React.FC<DetectionProps> = ({ onSearch }) => {
                 series: [
                     { name: 'Market Risk', data: [30, 35, 40, 38, 45, 50, 55, 52, 48, 50, 55, 60] },
                     { name: 'Smart Money Flow', data: [20, 25, 30, 45, 60, 55, 65, 70, 80, 85, 82, 88] },
+                    { name: 'Volume', data: [45, 48, 52, 50, 55, 58, 62, 70, 75, 78, 80, 85] }
                 ],
                 chart: { type: 'area', height: 320, background: 'transparent', toolbar: { show: false }, zoom: { enabled: false } },
-                colors: ['#EB5757', '#2F80ED'],
+                colors: ['#EB5757', '#2F80ED', '#F2C94C'],
                 fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
                 stroke: { curve: 'smooth', width: 2 },
                 dataLabels: { enabled: false },
@@ -106,7 +106,12 @@ export const Detection: React.FC<DetectionProps> = ({ onSearch }) => {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (query.trim()) onSearch(query);
+        if (query.trim()) {
+            // Encode the query to handle slashes or special characters if necessary, 
+            // but for tokens usually raw string is fine or basic encoding.
+            // Using encodeURIComponent is safer for URL segments.
+            navigate(`/detection/token/${encodeURIComponent(query.trim())}`);
+        }
     };
 
     const detectionEvents = [
@@ -147,7 +152,7 @@ export const Detection: React.FC<DetectionProps> = ({ onSearch }) => {
             </div>
 
             <div className="bg-card border border-border rounded-2xl overflow-visible shadow-sm">
-                <div className="grid grid-cols-1 lg:grid-cols-[1fr_250px]">
+                <div className="grid grid-cols-1 xl:grid-cols-[1fr_250px]">
                     <div className="p-6">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                             <h3 className="card-title mb-0">Global Detection Chart</h3>
@@ -164,9 +169,9 @@ export const Detection: React.FC<DetectionProps> = ({ onSearch }) => {
                         <div ref={chartRef} className="w-full min-h-[320px]"></div>
                     </div>
 
-                    <div className="border-t lg:border-t-0 lg:border-l border-border p-6 bg-card-hover/20">
+                    <div className="border-t xl:border-t-0 xl:border-l border-border p-6 bg-card-hover/20">
                         <h3 className="card-title text-base font-bold">Quick Actions</h3>
-                        <div className="flex flex-col gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
                             {[
                                 { icon: <ShieldAlert size={18} className="text-text-medium" />, label: 'Create Smart Alert' },
                                 { icon: <Wallet size={18} className="text-text-medium" />, label: 'Track Wallet' },
@@ -234,7 +239,7 @@ export const Detection: React.FC<DetectionProps> = ({ onSearch }) => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 relative z-10 w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 relative z-10 w-full">
                 {detectionEvents.map((event, idx) => (
                     <div key={idx} className="bg-card border border-border rounded-xl flex overflow-hidden group hover:border-text-medium transition-colors shadow-md h-full">
                         <div className={`w-1.5 shrink-0 bg-${event.color}`}></div>
