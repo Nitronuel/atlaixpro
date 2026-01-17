@@ -154,29 +154,29 @@ export const SmartAlerts: React.FC = () => {
                                         </p>
 
                                         <div className="bg-black/40 border border-border p-3 rounded-lg mb-4">
-                                            <code className="text-primary-green font-mono text-sm md:text-base break-words block">
+                                            <code className="text-primary-green font-mono text-sm md:text-base whitespace-pre-wrap break-words block">
                                                 {interpretation.structured}
                                             </code>
                                             {interpretation.details?.tokenAddress && (
                                                 <div className="mt-2 pt-2 border-t border-white/10 flex items-center gap-2">
                                                     <span className="text-xs text-text-medium font-mono">CA:</span>
-                                                    <code className="text-xs text-text-medium font-mono opacity-80 select-all">
+                                                    <code className="text-xs text-text-medium font-mono opacity-80 select-all break-all">
                                                         {interpretation.details.tokenAddress}
                                                     </code>
                                                 </div>
                                             )}
                                         </div>
 
-                                        <div className="flex flex-wrap gap-3 items-center">
+                                        <div className="flex flex-col sm:flex-row gap-3 items-center w-full">
                                             <button
                                                 onClick={handleConfirmAlert}
-                                                className="bg-primary-green hover:bg-primary-green-darker text-main font-bold py-2 px-6 rounded-lg transition-colors shadow-lg shadow-primary-green/10"
+                                                className="w-full sm:w-auto bg-primary-green hover:bg-primary-green-darker text-main font-bold py-2 px-6 rounded-lg transition-colors shadow-lg shadow-primary-green/10 text-center"
                                             >
                                                 Confirm Alert
                                             </button>
                                             <button
                                                 onClick={handleRefine}
-                                                className="bg-transparent border border-border hover:border-text-light text-text-medium hover:text-text-light font-medium py-2 px-6 rounded-lg transition-colors"
+                                                className="w-full sm:w-auto bg-transparent border border-border hover:border-text-light text-text-medium hover:text-text-light font-medium py-2 px-6 rounded-lg transition-colors text-center"
                                             >
                                                 Refine Request
                                             </button>
@@ -186,7 +186,7 @@ export const SmartAlerts: React.FC = () => {
                                                     setAlertInput('');
                                                     setInterpretation(null);
                                                 }}
-                                                className="bg-transparent border border-border hover:border-primary-red/50 text-text-medium hover:text-primary-red font-medium py-2 px-6 rounded-lg transition-colors ml-auto sm:ml-0"
+                                                className="w-full sm:w-auto bg-transparent border border-border hover:border-primary-red/50 text-text-medium hover:text-primary-red font-medium py-2 px-6 rounded-lg transition-colors sm:ml-auto text-center"
                                             >
                                                 Cancel Alert
                                             </button>
@@ -233,7 +233,7 @@ export const SmartAlerts: React.FC = () => {
                             <button className="text-xs font-medium text-text-dark hover:text-text-light transition-colors">View All</button>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {[
                                 { title: "Bundle Wallet Liquidation", desc: "Detect simultaneous sells from linked wallets", icon: <AlertTriangle className="text-primary-green" />, query: "Alert me when linked wallets sell simultaneously" },
                                 { title: "Rug Pull Detection", desc: "Liquidity removed > 80% or Mint authority enabled", icon: <ShieldCheck className="text-primary-green" />, query: "Alert me when liquidity is removed > 80%" },

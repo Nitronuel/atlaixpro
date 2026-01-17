@@ -164,7 +164,7 @@ export const AlchemyService = {
                 if (loops > 50) break; // Increased loop limit for large wallets
 
                 // Alchemy expects: [address, { pageKey: "...", type: ["erc20"] }]
-                // or just [address] which defaults to erc20.
+                // Default to ERC20 standard if only address is provided.
                 // Best practice is robust options object.
                 const params: any[] = [address];
 
@@ -344,7 +344,7 @@ export const AlchemyService = {
             // Replaced with static import at top
 
             // Get timestamp for return value
-            // We can get block details from Alchemy or just rely on Price Service
+            // Retrieve block details using the configured Price Service.
             // Let's get price first.
 
             // Map Native

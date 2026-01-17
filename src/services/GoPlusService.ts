@@ -124,6 +124,7 @@ export interface SecurityReport {
         scamHistory: boolean;
     };
     chainName?: string;
+    tax?: { buy: number; sell: number; };
 }
 
 export class GoPlusService {
@@ -193,8 +194,7 @@ export class GoPlusService {
 
             const found = probeResults.find(r => r !== null);
             if (found) {
-                // Determine which probe won and call fetchEvm with that chain (passing the data we already got to save a call, ideally, but for code cleaniness we can just recall or pass it in)
-                // We'll just call fetchEvmSecurity which will re-fetch, but it's cleaner. OR better: refactor fetchEvmSecurity to accept data.
+                // Delegate to fetchEvmSecurity using the identified chain to retrieve security data.
                 return this.fetchEvmSecurity(found.chain, address, dexData, found.data);
             }
 
@@ -438,7 +438,8 @@ export class GoPlusService {
                     logo: marketData.logo
                 },
                 creatorReputation,
-                chainName: 'Solana'
+                chainName: 'Solana',
+                tax: { buy: parseFloat(transferFee) || 0, sell: parseFloat(transferFee) || 0 }
             };
         } catch (e) {
             console.error("Solana Scan Error", e);
@@ -663,7 +664,8 @@ export class GoPlusService {
                     logo: marketData.logo
                 },
                 creatorReputation,
-                chainName: chainName.charAt(0).toUpperCase() + chainName.slice(1)
+                chainName: chainName.charAt(0).toUpperCase() + chainName.slice(1),
+                tax: { buy: buyTax, sell: sellTax }
             };
 
         } catch (e) {

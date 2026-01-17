@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Copy, Globe, ExternalLink, Scan, Zap, Wallet, Bell, Radar } from 'lucide-react';
 import { EnrichedTokenData } from '../../types';
+import { formatCompactNumber } from '../../utils/format';
 
 interface TokenSidebarProps {
     data: EnrichedTokenData | null;
@@ -86,13 +87,13 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
                             onError={(e) => e.currentTarget.src = 'https://via.placeholder.com/64'}
                             alt={data.baseToken.name}
                         />
-                        <div className="flex flex-col flex-1 min-w-0">
-                            <div className="flex items-start justify-between w-full">
-                                <div className="flex flex-col min-w-0">
-                                    <h1 className="text-lg font-extrabold text-text-light tracking-tight truncate mr-2" title={data.baseToken.name}>{data.baseToken.name}</h1>
-                                    <span className="text-sm font-mono text-text-medium font-semibold">{data.baseToken.symbol}</span>
+                        <div className="flex flex-col flex-1 min-w-0 justify-center">
+                            <div className="flex flex-col min-w-0">
+                                <h1 className="text-base font-bold text-text-light tracking-tight truncate mb-0.5" title={data.baseToken.name}>{data.baseToken.name}</h1>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-mono text-text-medium font-semibold">{data.baseToken.symbol}</span>
+                                    <span className="bg-[#2F80ED]/10 text-[#2F80ED] text-[9px] font-bold px-1 py-[2px] rounded border border-[#2F80ED]/30 uppercase tracking-wide whitespace-nowrap">{data.chainId}</span>
                                 </div>
-                                <span className="bg-[#2F80ED]/10 text-[#2F80ED] text-[9px] font-bold px-1 py-[2px] rounded border border-[#2F80ED]/30 uppercase tracking-wide whitespace-nowrap">{data.chainId}</span>
                             </div>
                         </div>
                     </div>
@@ -124,24 +125,8 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
                     </div>
                 </div>
 
-                {/* Stats Grid */}
-                <div className="p-5 grid grid-cols-2 gap-y-4 gap-x-4 border-b border-border">
-                    <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Market Cap</span>
-                        <span className="text-xs font-bold text-text-light">{fdv}</span>
-                    </div>
-                    <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Liquidity</span>
-                        <span className="text-xs font-bold text-text-light">{liq}</span>
-                    </div>
-                    <div className="flex flex-col col-span-2">
-                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Volume (24h)</span>
-                        <span className="text-xs font-bold text-text-light">{vol}</span>
-                    </div>
-                </div>
-
-                {/* Performance Grid */}
-                <div className="p-5">
+                {/* Performance Grid (Moved to Top) */}
+                <div className="p-5 border-b border-border">
                     <div className="text-xs font-bold text-text-medium uppercase tracking-wider mb-2">Performance</div>
                     <div className="grid grid-cols-4 gap-2">
                         {[
@@ -161,6 +146,42 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
                             );
                         })}
                     </div>
+                </div>
+
+                {/* Stats Grid */}
+                {/* Stats Grid */}
+                <div className="p-5 grid grid-cols-3 gap-y-4 gap-x-2">
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Mkt Cap</span>
+                        <span className="text-xs font-bold text-text-light">{formatCompactNumber(data?.fdv, '$')}</span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Liquidity</span>
+                        <span className="text-xs font-bold text-text-light">{formatCompactNumber(data?.liquidity?.usd, '$')}</span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">FDV</span>
+                        <span className="text-xs font-bold text-text-light">{formatCompactNumber(data?.fdv, '$')}</span>
+                    </div>
+
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Vol (24)</span>
+                        <span className="text-xs font-bold text-text-light">{formatCompactNumber(data?.volume?.h24, '$')}</span>
+                    </div>
+
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Supply</span>
+                        <span className="text-xs font-bold text-text-light">{formatCompactNumber(data?.totalSupply)}</span>
+                    </div>
+
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-text-medium uppercase tracking-wider">Age</span>
+                        <span className="text-xs font-bold text-text-light">
+                            {data?.pairCreatedAt ? Math.floor((Date.now() - data.pairCreatedAt) / (1000 * 60 * 60 * 24)) + 'd' : 'N/A'}
+                        </span>
+                    </div>
+
+
                 </div>
 
                 <div className="p-5 border-t border-border flex flex-col gap-3">
@@ -184,7 +205,7 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
             {/* Bottom Card: Quick Actions & Trade */}
             <div className="bg-card border border-border rounded-xl p-5 flex flex-col shrink-0 order-5 lg:order-none">
                 <div className="text-[10px] font-bold text-text-medium uppercase tracking-wider mb-3">Quick Actions</div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-3">
                     <button className="aspect-square bg-card-hover hover:bg-border border border-border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-colors group">
                         <Scan size={24} className="text-text-medium group-hover:text-primary-green transition-colors" />
                         <span className="text-[10px] font-bold text-text-light">Risk Scan</span>

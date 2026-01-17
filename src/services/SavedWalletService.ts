@@ -9,7 +9,7 @@ export const SavedWalletService = {
             // Migration: If old format (single category) exists, convert it? 
             // For now, simple parse. Since interface changed, old data might look like { category: '...' }
             // We should safely handle that in UI or migration here. 
-            // Ideally wipe or migrate, but let's just parse.
+            // Parse legacy string data for backward compatibility.
             const parsed = data ? JSON.parse(data) : [];
             return parsed.map((w: any) => ({
                 ...w,

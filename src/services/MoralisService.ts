@@ -64,6 +64,45 @@ const mapChainToMoralisEVM = (chain: string) => {
 
 export const MoralisService = {
     /**
+     * Get Token Metadata (Supply, Decimals, etc.)
+     */
+    getTokenMetadata: async (tokenAddress: string, chain: string): Promise<{ totalSupply: string, decimals: number, symbol: string } | null> => {
+        if (!tokenAddress) return null;
+
+        const isSolana = chain.toLowerCase() === 'solana';
+        if (isSolana) {
+            // Solana doesn't use this endpoint usually, simpler to use RPC
+            return null;
+        }
+
+        const hexChain = mapChainToMoralisEVM(chain);
+        const url = `https://deep-index.moralis.io/api/v2.2/erc20/metadata?chain=${hexChain}&addresses%5B0%5D=${tokenAddress}`;
+
+        try {
+            const response = await fetch(url, {
+                headers: { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY }
+            });
+
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            // Data is array
+            if (Array.isArray(data) && data.length > 0) {
+                const info = data[0];
+                return {
+                    totalSupply: info.total_supply,
+                    decimals: parseInt(info.decimals),
+                    symbol: info.symbol
+                };
+            }
+            return null;
+        } catch (e) {
+            console.error("Moralis Metadata Error", e);
+            return null;
+        }
+    },
+
+    /**
      * Fetches real token transfers and categorizes them as Buys/Sells
      * by comparing against the Liquidity Pair Address from DexScreener.
      */
@@ -108,7 +147,15 @@ export const MoralisService = {
 
             return transfers.map((tx) => {
                 // --- Advanced Filtering Logic ---
-                // We only want: Add Liq, Remove Liq, Burn, Whale Transfer (>$500k)
+                const to = (tx.to_address || '').toLowerCase();
+                const from = (tx.from_address || '').toLowerCase();
+                const decimals = tx.decimals ? Number(tx.decimals) : 18;
+                const rawVal = parseFloat(tx.value) / Math.pow(10, decimals);
+                const usdVal = rawVal * tokenPrice;
+                const isBuy = pairAddress && from === pairAddress.toLowerCase();
+                const isSell = pairAddress && to === pairAddress.toLowerCase();
+
+                // Filter for significant liquidity events: additions, removals, burns, and large transfers (> $500k).
 
                 // 1. Burn Detection
                 const deadAddresses = [
@@ -131,14 +178,14 @@ export const MoralisService = {
                 }
 
                 // 2. Whale Transfer Detection (>$500,000)
-                // Exclude DEX trades (Buys/Sells) from this specific category if they are just standard swaps
+                // Exclude standard DEX swaps from this categorization to focus on transfer events.
                 if (usdVal > 500000) {
                     // If it's not a buy/sell (it's a raw transfer) OR if we want to flag huge buys as Whales?
                     // User said "Whale Transfer", usually implies raw transfer or OTC. 
                     // But let's include any movement > 500k as a Whale event for now, but label it distinctively.
                     // However, request says "only report... whale transfer".
                     // If it's a Buy/Sell, it might technically be a "Whale Trade". 
-                    // Let's strictly follow "Transfer" logic for now, or just flag all >500k.
+                    // Adhere to strict transfer logic, flagging transactions exceeding $500k.
                     // "Whale Transfer" usually means wallet-to-wallet.
 
                     if (!isBuy && !isSell) {
@@ -213,7 +260,7 @@ export const MoralisService = {
                     cursor = data.cursor || null;
                     loops++;
 
-                    // Solana endpoint might just return all? If so array check handles it.
+                    // Ensure array response handling for Solana endpoint compatibility.
                     if (isSolana) break;
 
                 } while (cursor);
@@ -316,7 +363,7 @@ export const MoralisService = {
 
         if (native) {
             // Check if native is already in tokens (Wrapped version sometimes shows up? No, native is distinct from WETH)
-            // But just in case, we prepend it.
+            // Prepend the new event to ensure immediate visibility.
             return [native, ...tokens];
         }
 

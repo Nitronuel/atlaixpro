@@ -59,7 +59,7 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                                 .sort((a, b) => {
                                     if (timeFilter !== 'ALL') {
                                         // Sort by PnL Percent if period filter is active? Or keep Value?
-                                        // Let's keep Value for consistency, but maybe secondary sort?
+                                        // Maintain Value as primary sort key; consider implementing secondary sorting if required.
                                         return b.rawValue - a.rawValue;
                                     }
                                     return b.rawValue - a.rawValue;

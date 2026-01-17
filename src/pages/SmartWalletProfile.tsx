@@ -31,49 +31,51 @@ export const SmartWalletProfile: React.FC = () => {
 
             {/* --- Header Section --- */}
             <div className="flex flex-col gap-6 bg-[#111315] border border-[#2A2E33] p-6 rounded-2xl">
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => navigate(-1)}
-                        className="p-2 hover:bg-[#1C1F22] rounded-lg text-[#8F96A3] hover:text-[#EAECEF] transition-colors"
-                    >
-                        <ArrowLeft size={20} />
-                    </button>
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-400/20 to-blue-500/20 border border-green-500/30 flex items-center justify-center">
-                        <Wallet size={24} className="text-primary-green" />
-                    </div>
-                    <div>
-                        <div className="text-sm text-[#8F96A3] font-medium mb-1">Smart Money Wallet</div>
-                        <div className="flex items-center gap-3">
-                            <h1 className="text-2xl font-bold text-[#EAECEF]">{address || '0xabc...123'}</h1>
+                <div className="flex flex-col md:flex-row items-center gap-4 md:gap-8">
+                    <div className="flex items-center gap-4 w-full md:w-auto">
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="p-2 hover:bg-[#1C1F22] rounded-lg text-[#8F96A3] hover:text-[#EAECEF] transition-colors"
+                        >
+                            <ArrowLeft size={20} />
+                        </button>
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-400/20 to-blue-500/20 border border-green-500/30 flex items-center justify-center shrink-0">
+                            <Wallet size={24} className="text-primary-green" />
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-sm text-[#8F96A3] font-medium mb-1">Smart Money Wallet</div>
+                            <div className="flex items-center gap-3">
+                                <h1 className="text-xl md:text-2xl font-bold text-[#EAECEF] truncate">{address || '0xabc...123'}</h1>
 
-                            <button className="text-[#8F96A3] hover:text-[#EAECEF] transition-colors"><Copy size={16} /></button>
-                            <button className="text-[#8F96A3] hover:text-[#EAECEF] transition-colors"><ExternalLink size={16} /></button>
+                                <button className="text-[#8F96A3] hover:text-[#EAECEF] transition-colors shrink-0"><Copy size={16} /></button>
+                                <button className="text-[#8F96A3] hover:text-[#EAECEF] transition-colors shrink-0"><ExternalLink size={16} /></button>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="ml-auto grid grid-cols-4 gap-8 text-right">
+                    <div className="grid grid-cols-4 gap-4 md:gap-8 text-right w-full md:w-auto ml-auto">
                         <div className="flex flex-col items-end gap-1">
                             <span className="text-[10px] text-[#8F96A3] uppercase tracking-wider font-semibold flex items-center gap-1">Score</span>
-                            <span className="text-lg font-bold text-green-400">92</span>
+                            <span className="text-base font-bold text-green-400">92</span>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                             <span className="text-[10px] text-[#8F96A3] uppercase tracking-wider font-semibold flex items-center gap-1">Profit</span>
-                            <span className="text-lg font-bold text-green-400">+$1.5M</span>
+                            <span className="text-base font-bold text-green-400">+$1.5M</span>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                             <span className="text-[10px] text-[#8F96A3] uppercase tracking-wider font-semibold flex items-center gap-1">Win Rate</span>
-                            <span className="text-lg font-bold text-green-400">85%</span>
+                            <span className="text-base font-bold text-green-400">85%</span>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                             <span className="text-[10px] text-[#8F96A3] uppercase tracking-wider font-semibold">Joined</span>
-                            <span className="text-lg font-bold text-[#EAECEF]">15/01/2023</span>
+                            <span className="text-base font-bold text-[#EAECEF]">15/01/2023</span>
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* --- Overview Cards --- */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 {OVERVIEW_CARDS.map((card, idx) => (
                     <div key={idx} className="bg-[#111315] border border-[#2A2E33] p-4 rounded-xl flex flex-col justify-between h-24 relative overflow-hidden group hover:border-[#363B41] transition-colors">
                         <div className="flex items-center justify-between z-10">

@@ -332,7 +332,7 @@ export class SolanaRpcService {
 
         // LAZY LOAD FALLBACK:
         // If cache is missing, we MUST fetch data or else we return N/A.
-        // We trigger a "mini-preload" for this specific asset (which actually just scans history anyway).
+        // Initiate a historical data scan for the specific asset to preload relevant activity.
         if (!cached) {
             console.warn(`[SolanaRpc] Cache miss for ${walletAddress}. Triggering Lazy Load...`);
             await this.preloadHistory(walletAddress, [mintAddress]);

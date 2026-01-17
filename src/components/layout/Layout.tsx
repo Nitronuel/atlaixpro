@@ -65,6 +65,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     const path = location.pathname;
     if (path.includes('/dashboard')) return 'Overview';
     if (path.includes('/token/')) return 'Token Details';
+    if (path.includes('/token-smart-money/')) return 'Token Smart Money View';
 
     if (path.includes('/heatmap')) return 'Token Heatmap';
     if (path.includes('/sentiment')) return 'Sentiment Intelligence';
@@ -101,16 +102,16 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
       {/* Sidebar Overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/70 z-[1000] md:hidden backdrop-blur-sm"
+          className="fixed inset-0 bg-black/70 z-[1000] xl:hidden backdrop-blur-sm"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside className={`
-        fixed md:static inset-y-0 left-0 z-[1100] w-[300px] md:w-[240px] lg:w-[280px] bg-sidebar border-r border-border
-        transform transition-transform duration-300 ease-in-out flex flex-col shadow-2xl md:shadow-none
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        fixed xl:static inset-y-0 left-0 z-[1100] w-[300px] xl:w-[280px] bg-sidebar border-r border-border
+        transform transition-transform duration-300 ease-in-out flex flex-col shadow-2xl xl:shadow-none
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full xl:translate-x-0'}
       `}>
         <div className="px-3 py-4">
           <div className="flex items-center gap-3 text-2xl font-bold text-text-light pl-2">
@@ -173,10 +174,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-main h-full">
         {/* Header */}
-        <header className="h-[80px] md:h-[100px] px-4 md:px-6 flex items-center justify-between sticky top-0 bg-[#111315e6] backdrop-blur-md z-30 border-b border-border/50">
+        <header className="h-[80px] xl:h-[100px] px-4 xl:px-6 flex items-center justify-between sticky top-0 bg-[#111315e6] backdrop-blur-md z-30 border-b border-border/50">
           <div className="flex items-center gap-5 overflow-hidden">
             <button
-              className="md:hidden text-text-medium hover:text-text-light"
+              className="xl:hidden text-text-medium hover:text-text-light"
               onClick={() => setSidebarOpen(true)}
             >
               <Menu size={28} />
@@ -188,7 +189,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                   <span className="text-xs px-2.5 py-0.5 rounded bg-card border border-border text-text-light font-semibold uppercase">Free</span>
                 )}
               </h1>
-              <p className="text-base text-text-medium truncate hidden md:block mt-1">{getPageSubtitle()}</p>
+              <p className="text-base text-text-medium truncate hidden xl:block mt-1">{getPageSubtitle()}</p>
             </div>
           </div>
 
@@ -264,7 +265,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
         </header>
 
         {/* View Content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 relative">
+        <main className="flex-1 overflow-y-auto p-4 xl:p-6 relative">
           {children}
         </main>
       </div>
