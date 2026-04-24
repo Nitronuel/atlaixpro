@@ -1,8 +1,8 @@
-import { APP_CONFIG } from '../config';
 import { DatabaseService } from './DatabaseService';
 import { FactCheckService } from './FactCheckService';
 import { UncxService } from './UncxService';
 import { RugCheckService } from './RugCheckService';
+import { fetchProvider } from './ProviderGateway';
 
 interface GoPlusResponse {
     code: number;
@@ -183,7 +183,7 @@ export class GoPlusService {
             // Run requests in parallel
             const probeResults = await Promise.all(chainsToProbe.map(async (c) => {
                 try {
-                    const res = await fetch(`${this.BASE_URL}/token_security/${c.id}?contract_addresses=${address}`);
+                    const res = await fetchProvider('goplus', `${this.BASE_URL}/token_security/${c.id}?contract_addresses=${address}`);
                     const json = await res.json();
                     if (json.code === 1 && (json.result[address.toLowerCase()] || json.result[address])) {
                         return { chain: c.name, data: json };
@@ -211,7 +211,7 @@ export class GoPlusService {
     private static async fetchSolanaSecurity(address: string): Promise<SecurityReport | null> {
         try {
             const [goPlusResponse, dexData, rugCheckData] = await Promise.all([
-                fetch(`${this.BASE_URL}/solana/token_security?contract_addresses=${address}`),
+                fetchProvider('goplus', `${this.BASE_URL}/solana/token_security?contract_addresses=${address}`),
                 DatabaseService.getTokenDetails(address, 'solana'),
                 RugCheckService.fetchTokenReport(address)
             ]);
@@ -466,7 +466,7 @@ export class GoPlusService {
 
             // Only fetch if we don't already have it
             if (!data) {
-                const response = await fetch(`${this.BASE_URL}/token_security/${chainId}?contract_addresses=${address}`);
+                const response = await fetchProvider('goplus', `${this.BASE_URL}/token_security/${chainId}?contract_addresses=${address}`);
                 data = await response.json();
             }
             if (!dexData) {
@@ -799,7 +799,7 @@ export class GoPlusService {
 
     static async fetchAddressSecurity(address: string): Promise<{ isMalicious: boolean, honeypotCreator: boolean, phishingCreator: boolean, scamHistory: boolean } | null> {
         try {
-            const response = await fetch(`${this.BASE_URL}/address_security/${address}?chain_id=solana`);
+            const response = await fetchProvider('goplus', `${this.BASE_URL}/address_security/${address}?chain_id=solana`);
             if (!response.ok) return null;
 
             const data: AddressSecurityResponse = await response.json();

@@ -1,8 +1,8 @@
 
-import { APP_CONFIG } from '../config';
 import { MoralisService } from './MoralisService';
+import { fetchAlchemyRpc, getBackendAlchemyKey } from './ProviderGateway';
 
-const ALCHEMY_KEY = APP_CONFIG.alchemyKey;
+const ALCHEMY_KEY = typeof window !== 'undefined' ? 'backend' : getBackendAlchemyKey();
 
 export const AlchemyService = {
     /**
@@ -25,8 +25,6 @@ export const AlchemyService = {
             default: network = 'eth-mainnet';
         }
 
-        const url = `https://${network}.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-
         // Deduplicate addresses
         const uniqueAddresses = [...new Set(tokenAddresses)];
         const priceMap: Record<string, number> = {};
@@ -35,10 +33,9 @@ export const AlchemyService = {
             // Alchemy supports batch requests via JSON-RPC
             // method: "alchemy_getTokenPrices"
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const response = await fetchAlchemyRpc(
+                network,
+                {
                     id: 1,
                     jsonrpc: "2.0",
                     method: "alchemy_getTokenPrices",
@@ -47,8 +44,8 @@ export const AlchemyService = {
                             addresses: uniqueAddresses.map(a => ({ address: a }))
                         }
                     ]
-                })
-            });
+                }
+            );
 
             if (!response.ok) {
                 const text = await response.text();
@@ -111,21 +108,19 @@ export const AlchemyService = {
             default: network = 'eth-mainnet';
         }
 
-        const url = `https://${network}.g.alchemy.com/v2/${ALCHEMY_KEY}`;
         const assets: any[] = [];
 
         try {
             // 1. Get Native Balance
-            const nativeRes = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const nativeRes = await fetchAlchemyRpc(
+                network,
+                {
                     jsonrpc: "2.0",
                     method: "eth_getBalance",
                     params: [address, "latest"],
                     id: 1
-                })
-            });
+                }
+            );
 
             const nativeData = await nativeRes.json();
             if (nativeData.result && nativeData.result !== '0x0') {
@@ -173,16 +168,15 @@ export const AlchemyService = {
 
                 params.push(options);
 
-                const tokenRes = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
+                const tokenRes = await fetchAlchemyRpc(
+                    network,
+                    {
                         jsonrpc: "2.0",
                         method: "alchemy_getTokenBalances",
                         params: params,
                         id: 2
-                    })
-                });
+                    }
+                );
 
                 const data = await tokenRes.json();
                 const tokens = data.result?.tokenBalances || [];
@@ -212,16 +206,15 @@ export const AlchemyService = {
             // Process chunks sequentially to respect rate limits slightly better than Promise.all(all)
             for (const chunk of chunks) {
                 const metadataPromises = chunk.map((t: any) =>
-                    fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
+                    fetchAlchemyRpc(
+                        network,
+                        {
                             jsonrpc: "2.0",
                             method: "alchemy_getTokenMetadata",
                             params: [t.contractAddress],
                             id: 1
-                        })
-                    })
+                        }
+                    )
                         .then(r => r.json())
                         .then(d => ({ ...t, metadata: d.result }))
                         .catch(() => ({ ...t, metadata: null }))
@@ -276,8 +269,6 @@ export const AlchemyService = {
             default: return { price: 0, timestamp: 0 }; // Alchemy doesn't support others for this API
         }
 
-        const url = `https://${network}.g.alchemy.com/v2/${ALCHEMY_KEY}`;
-
         try {
             // Fetch Incoming Transfers (Receives)
             // Filters: toAddress = wallet, category = ["erc20", "external"] (for native)
@@ -299,16 +290,15 @@ export const AlchemyService = {
                 params.contractAddresses = [tokenAddress];
             }
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const response = await fetchAlchemyRpc(
+                network,
+                {
                     jsonrpc: "2.0",
                     method: "alchemy_getAssetTransfers",
                     params: [params],
                     id: 42
-                })
-            });
+                }
+            );
 
             const data = await response.json();
             const transfers = data.result?.transfers || [];
@@ -365,16 +355,15 @@ export const AlchemyService = {
             // Let's fetch block timestamp cheaply via Alchemy?
             // eth_getBlockByNumber
 
-            const blockRes = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const blockRes = await fetchAlchemyRpc(
+                network,
+                {
                     jsonrpc: "2.0",
                     method: "eth_getBlockByNumber",
                     params: [blockNum, false],
                     id: 43
-                })
-            });
+                }
+            );
 
             const blockData = await blockRes.json();
             const timestamp = blockData.result?.timestamp ? parseInt(blockData.result.timestamp, 16) * 1000 : 0;

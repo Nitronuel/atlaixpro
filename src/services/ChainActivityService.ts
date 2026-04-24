@@ -1,6 +1,6 @@
 
-import { APP_CONFIG } from '../config';
 import { SolanaProvider } from './SolanaProvider';
+import { fetchAlchemyRpc } from './ProviderGateway';
 
 // Define the Activity Interface
 export interface RealActivity {
@@ -52,20 +52,15 @@ export const ChainActivityService = {
      */
     getEVMActivity: async (tokenAddress: string, chain: string, priceUsd: number, pairAddress?: string): Promise<RealActivity[]> => {
         const network = mapChainToAlchemyNetwork(chain);
-        const apiKey = APP_CONFIG.alchemyKey;
-
         if (chain.toLowerCase() === 'bsc') return [];
-
-        const url = `https://${network}.g.alchemy.com/v2/${apiKey}`;
 
         // Normalize Pair Address for comparison
         const pairAddr = pairAddress ? pairAddress.toLowerCase() : '';
 
         try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const response = await fetchAlchemyRpc(
+                network,
+                {
                     jsonrpc: "2.0",
                     id: 1,
                     method: "alchemy_getAssetTransfers",
@@ -81,8 +76,8 @@ export const ChainActivityService = {
                             order: "desc"
                         }
                     ]
-                })
-            });
+                }
+            );
 
             if (!response.ok) return [];
             const data = await response.json();

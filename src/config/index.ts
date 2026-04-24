@@ -1,5 +1,6 @@
 const env = ((typeof import.meta !== 'undefined' && (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env) || {}) as Record<string, string | undefined>;
 const processEnv = (typeof process !== 'undefined' ? process.env : {}) as Record<string, string | undefined>;
+const isBrowser = typeof window !== 'undefined';
 
 const readEnv = (...values: Array<string | undefined>) => {
     for (const value of values) {
@@ -9,9 +10,11 @@ const readEnv = (...values: Array<string | undefined>) => {
     return '';
 };
 
+const readBackendEnv = (...values: Array<string | undefined>) => isBrowser ? '' : readEnv(...values);
+
 export const APP_CONFIG = {
-    goplusAppKey: readEnv(env.VITE_GOPLUS_KEY, processEnv.VITE_GOPLUS_KEY),
-    goplusAppSecret: readEnv(env.VITE_GOPLUS_SECRET, processEnv.VITE_GOPLUS_SECRET),
+    goplusAppKey: readBackendEnv(processEnv.GOPLUS_KEY),
+    goplusAppSecret: readBackendEnv(processEnv.GOPLUS_SECRET),
 
     // 1. SUPABASE (The Vault)
     supabaseUrl: readEnv(env.VITE_SUPABASE_URL, processEnv.VITE_SUPABASE_URL),
@@ -20,11 +23,11 @@ export const APP_CONFIG = {
     supabaseAnonKey: readEnv(env.VITE_SUPABASE_ANON_KEY, processEnv.VITE_SUPABASE_ANON_KEY),
 
     // 2. MORALIS (The Deep Dive Data)
-    moralisKey: readEnv(env.VITE_MORALIS_KEY, processEnv.VITE_MORALIS_KEY),
+    moralisKey: readBackendEnv(processEnv.MORALIS_API_KEY),
 
     // 2.5 HELIUS (Solana-first forensic RPC)
-    heliusKey: readEnv(env.VITE_HELIUS_KEY, processEnv.VITE_HELIUS_KEY, processEnv.HELIUS_API_KEY),
+    heliusKey: readBackendEnv(processEnv.HELIUS_API_KEY),
 
     // 3. ALCHEMY (Robust Fallback)
-    alchemyKey: readEnv(env.VITE_ALCHEMY_KEY, processEnv.VITE_ALCHEMY_KEY)
+    alchemyKey: readBackendEnv(processEnv.ALCHEMY_API_KEY)
 };

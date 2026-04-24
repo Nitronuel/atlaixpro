@@ -79,14 +79,15 @@ To run this project locally, follow these steps:
 3.  Environment Configuration:
     Create a .env.local file in the root directory and add your API keys:
     
-    VITE_MORALIS_KEY=your_moralis_key
-    VITE_ALCHEMY_KEY=your_alchemy_key
-    VITE_GOPLUS_KEY=your_goplus_app_key
-    VITE_GOPLUS_SECRET=your_goplus_app_secret
+    MORALIS_API_KEY=your_moralis_key
+    ALCHEMY_API_KEY=your_alchemy_key
+    HELIUS_API_KEY=your_helius_key
+    GOPLUS_KEY=your_goplus_app_key
+    GOPLUS_SECRET=your_goplus_app_secret
     VITE_SUPABASE_URL=your_supabase_project_url
     VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
     
-    >  Note: Ask the team lead for the required keys if you don't have them. Keep service-role keys on backend-only infrastructure and do not expose them through `VITE_` environment variables.
+    >  Note: Ask the team lead for the required keys if you don't have them. Provider keys are backend-only; only public browser configuration should use the `VITE_` prefix.
 
 4.  Run the development server:
     

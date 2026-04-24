@@ -1,13 +1,15 @@
 
 import { APP_CONFIG } from '../config';
 import { SolanaProvider } from './SolanaProvider';
+import { fetchProvider } from './ProviderGateway';
 
 
 export class SolanaRpcService {
+    private static readonly IS_BROWSER = typeof window !== 'undefined';
     private static readonly IS_DEV = import.meta.env.DEV;
     private static RPC_ENDPOINTS = [
-        ...(APP_CONFIG.heliusKey ? [SolanaRpcService.IS_DEV ? '/api/solana-helius' : `https://mainnet.helius-rpc.com/?api-key=${APP_CONFIG.heliusKey}`] : []),
-        ...(APP_CONFIG.alchemyKey ? [SolanaRpcService.IS_DEV ? '/api/solana-alchemy' : `https://solana-mainnet.g.alchemy.com/v2/${APP_CONFIG.alchemyKey}`] : []),
+        ...(SolanaRpcService.IS_BROWSER ? ['/api/providers/solana-helius'] : (APP_CONFIG.heliusKey ? [`https://mainnet.helius-rpc.com/?api-key=${APP_CONFIG.heliusKey}`] : [])),
+        ...(SolanaRpcService.IS_BROWSER ? ['/api/providers/solana-alchemy'] : (APP_CONFIG.alchemyKey ? [`https://solana-mainnet.g.alchemy.com/v2/${APP_CONFIG.alchemyKey}`] : [])),
         SolanaRpcService.IS_DEV ? '/api/solana-public' : 'https://api.mainnet-beta.solana.com'
     ];
 
@@ -402,7 +404,7 @@ export class SolanaRpcService {
             const dateStr = new Date(timestamp * 1000).toISOString();
             const url = `https://solana-gateway.moralis.io/token/mainnet/${mintAddress}/price?toDate=${encodeURIComponent(dateStr)}`;
 
-            const response = await fetch(url, {
+            const response = await fetchProvider('moralis', url, {
                 headers: {
                     'accept': 'application/json',
                     'X-API-Key': this.MORALIS_KEY

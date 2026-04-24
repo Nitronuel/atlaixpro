@@ -82,25 +82,26 @@ const IS_DEV = Boolean((typeof import.meta !== 'undefined' && (import.meta as Im
 const RPC_TIMEOUT_MS = 12000;
 const DEFAULT_PROVIDER_RETRY_LIMIT = 1;
 const PROVIDER_WARN_COOLDOWN_MS = 5000;
-const HAS_HELIUS = Boolean(APP_CONFIG.heliusKey);
+const HAS_HELIUS = IS_BROWSER || Boolean(APP_CONFIG.heliusKey);
 const HELIUS_RPC_URL = APP_CONFIG.heliusKey
     ? `https://mainnet.helius-rpc.com/?api-key=${APP_CONFIG.heliusKey}`
     : null;
 const ALCHEMY_RPC_URL = APP_CONFIG.alchemyKey
     ? `https://solana-mainnet.g.alchemy.com/v2/${APP_CONFIG.alchemyKey}`
     : null;
-const HELIUS_ENDPOINT = APP_CONFIG.heliusKey
-    ? ((IS_DEV && IS_BROWSER) ? '/api/solana-helius' : HELIUS_RPC_URL)
-    : null;
-const ALCHEMY_ENDPOINT = APP_CONFIG.alchemyKey
-    ? ((IS_DEV && IS_BROWSER) ? '/api/solana-alchemy' : ALCHEMY_RPC_URL)
-    : null;
+const HELIUS_ENDPOINT = IS_BROWSER
+    ? '/api/providers/solana-helius'
+    : HELIUS_RPC_URL;
+const ALCHEMY_ENDPOINT = IS_BROWSER
+    ? '/api/providers/solana-alchemy'
+    : ALCHEMY_RPC_URL;
 const PUBLIC_ENDPOINT = (IS_DEV && IS_BROWSER) ? '/api/solana-public' : 'https://api.mainnet-beta.solana.com';
 const RPC_ENDPOINTS = [
     HELIUS_ENDPOINT,
     ALCHEMY_ENDPOINT,
     PUBLIC_ENDPOINT
 ].filter(Boolean) as string[];
+
 const TX_BATCH_SIZE = 8;
 const endpointCooldowns = new Map<string, number>();
 const warningCooldowns = new Map<string, number>();
@@ -198,11 +199,11 @@ function normalizeRpcParams(method: string, params: unknown) {
 }
 
 function isHeliusEndpoint(url: string) {
-    return url.includes('helius-rpc.com') || url.includes('/api/solana-helius');
+    return url.includes('helius-rpc.com') || url.includes('/api/solana-helius') || url.includes('/api/providers/solana-helius');
 }
 
 function isAlchemyEndpoint(url: string) {
-    return url.includes('alchemy.com') || url.includes('/api/solana-alchemy');
+    return url.includes('alchemy.com') || url.includes('/api/solana-alchemy') || url.includes('/api/providers/solana-alchemy');
 }
 
 function getProviderRpcParams(method: string, params: unknown, url: string) {

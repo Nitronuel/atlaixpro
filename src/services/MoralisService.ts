@@ -1,6 +1,7 @@
 
 import { APP_CONFIG } from '../config';
 import { SolanaRpcService } from './SolanaRpcService';
+import { fetchProvider } from './ProviderGateway';
 
 // API Key from Config
 const MORALIS_API_KEY = APP_CONFIG.moralisKey;
@@ -91,7 +92,7 @@ export const MoralisService = {
         const url = `https://deep-index.moralis.io/api/v2.2/erc20/metadata?chain=${hexChain}&addresses%5B0%5D=${tokenAddress}`;
 
         try {
-            const response = await fetch(url, {
+            const response = await fetchProvider('moralis', url, {
                 headers: { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY }
             });
 
@@ -137,7 +138,7 @@ export const MoralisService = {
         }
 
         try {
-            const response = await fetch(url, {
+            const response = await fetchProvider('moralis', url, {
                 headers: {
                     'accept': 'application/json',
                     'X-API-Key': MORALIS_API_KEY
@@ -256,7 +257,7 @@ export const MoralisService = {
                         if (cursor) url += `&cursor=${cursor}`;
                     }
 
-                    const response = await fetch(url, {
+                    const response = await fetchProvider('moralis', url, {
                         headers: { 'accept': 'application/json', 'X-API-Key': APP_CONFIG.moralisKey }
                     });
 
@@ -309,7 +310,7 @@ export const MoralisService = {
                 } else {
                     // EVM Native Balance via Moralis
                     const url = `https://deep-index.moralis.io/api/v2.2/${address}/balance?chain=${hexChain}`;
-                    const response = await fetch(url, {
+                    const response = await fetchProvider('moralis', url, {
                         headers: { 'accept': 'application/json', 'X-API-Key': APP_CONFIG.moralisKey }
                     });
                     if (response.ok) {
@@ -379,7 +380,7 @@ export const MoralisService = {
         const url = `https://deep-index.moralis.io/api/v2.2/dateToBlock?chain=${hexChain}&date=${date}`;
 
         try {
-            const response = await fetch(url, {
+            const response = await fetchProvider('moralis', url, {
                 headers: { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY }
             });
             if (response.ok) {
@@ -419,7 +420,7 @@ export const MoralisService = {
         }
 
         try {
-            const response = await fetch(url, {
+            const response = await fetchProvider('moralis', url, {
                 headers: { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY }
             });
             if (!response.ok) return 0;
@@ -501,7 +502,7 @@ export const MoralisService = {
             const url = `https://deep-index.moralis.io/api/v2.2/${walletAddress}?chain=${hexChain}&order=DESC&limit=50`;
 
             try {
-                const response = await fetch(url, {
+                const response = await fetchProvider('moralis', url, {
                     headers: { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY }
                 });
 
@@ -550,7 +551,7 @@ export const MoralisService = {
         const url = `https://deep-index.moralis.io/api/v2.2/${walletAddress}/erc20/transfers?chain=${hexChain}&contract_addresses%5B0%5D=${tokenAddress}&order=DESC&limit=50`;
 
         try {
-            const response = await fetch(url, {
+            const response = await fetchProvider('moralis', url, {
                 headers: { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY }
             });
 

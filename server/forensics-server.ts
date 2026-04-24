@@ -39,10 +39,31 @@ function loadEnvFile(filename: string, override = false) {
 loadEnvFile('.env');
 loadEnvFile('.env.local', true);
 
+const LEGACY_BACKEND_ENV_MAP: Record<string, string> = {
+    VITE_MORALIS_KEY: 'MORALIS_API_KEY',
+    VITE_ALCHEMY_KEY: 'ALCHEMY_API_KEY',
+    VITE_HELIUS_KEY: 'HELIUS_API_KEY',
+    VITE_GOPLUS_KEY: 'GOPLUS_KEY',
+    VITE_GOPLUS_SECRET: 'GOPLUS_SECRET'
+};
+
+for (const [legacyKey, backendKey] of Object.entries(LEGACY_BACKEND_ENV_MAP)) {
+    if (!process.env[backendKey] && process.env[legacyKey]) {
+        process.env[backendKey] = process.env[legacyKey];
+    }
+}
+
 const { analyzeForensicToken } = await import('../src/services/forensics/engine');
 const { analyzeAlchemyHubToken } = await import('../src/services/forensics/alchemy-hub');
 const { analyzeAlchemyHubEvmToken } = await import('../src/services/forensics/alchemy-hub-evm');
 const { getAlchemyHubChain, isEvmChain } = await import('../src/services/forensics/alchemy-hub-chains');
+
+const PROVIDER_TIMEOUT_MS = 18_000;
+const PROVIDER_ALLOWED_HOSTS = new Set([
+    'deep-index.moralis.io',
+    'solana-gateway.moralis.io',
+    'api.gopluslabs.io'
+]);
 
 function json(response: import('node:http').ServerResponse, status: number, body: unknown) {
     response.writeHead(status, {
@@ -76,6 +97,141 @@ async function readJsonBody(request: import('node:http').IncomingMessage) {
     return raw ? JSON.parse(raw) : {};
 }
 
+function readEnv(...keys: string[]) {
+    for (const key of keys) {
+        const value = process.env[key]?.trim();
+        if (value) return value;
+    }
+    return '';
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = PROVIDER_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch(input, {
+            ...init,
+            signal: controller.signal
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+function providerErrorMessage(provider: string, status: number, text: string) {
+    const details = text.trim().slice(0, 240);
+    return details || `${provider} request failed with status ${status}`;
+}
+
+async function proxyProviderRequest(
+    response: import('node:http').ServerResponse,
+    provider: 'moralis' | 'goplus',
+    body: { url?: string; method?: string; headers?: Record<string, string>; body?: string }
+) {
+    const target = body.url ? new URL(body.url) : null;
+    if (!target || target.protocol !== 'https:' || !PROVIDER_ALLOWED_HOSTS.has(target.hostname)) {
+        json(response, 400, { error: 'Provider URL is not allowed.' });
+        return;
+    }
+
+    const method = (body.method || 'GET').toUpperCase();
+    if (!['GET', 'POST'].includes(method)) {
+        json(response, 400, { error: 'Provider method is not allowed.' });
+        return;
+    }
+
+    const headers = new Headers();
+    const safeHeaders = body.headers || {};
+    for (const [key, value] of Object.entries(safeHeaders)) {
+        const normalizedKey = key.toLowerCase();
+        if (normalizedKey === 'accept' || normalizedKey === 'content-type') {
+            headers.set(key, value);
+        }
+    }
+
+    if (provider === 'moralis') {
+        const moralisKey = readEnv('MORALIS_API_KEY');
+        if (!moralisKey) {
+            json(response, 500, { error: 'Moralis API key is not configured on the backend.' });
+            return;
+        }
+        headers.set('X-API-Key', moralisKey);
+        headers.set('accept', headers.get('accept') || 'application/json');
+    }
+
+    const providerResponse = await fetchWithTimeout(target, {
+        method,
+        headers,
+        body: method === 'GET' ? undefined : body.body
+    });
+    const text = await providerResponse.text();
+
+    response.writeHead(providerResponse.status, {
+        'Content-Type': providerResponse.headers.get('content-type') || 'application/json',
+        'Access-Control-Allow-Origin': '*'
+    });
+    response.end(providerResponse.ok ? text : JSON.stringify({ error: providerErrorMessage(provider, providerResponse.status, text) }));
+}
+
+async function proxyAlchemyRpc(
+    response: import('node:http').ServerResponse,
+    body: { network?: string; payload?: unknown }
+) {
+    const network = String(body.network || '');
+    if (!/^[a-z0-9-]+$/.test(network)) {
+        json(response, 400, { error: 'Alchemy network is not allowed.' });
+        return;
+    }
+
+    const alchemyKey = readEnv('ALCHEMY_API_KEY');
+    if (!alchemyKey) {
+        json(response, 500, { error: 'Alchemy API key is not configured on the backend.' });
+        return;
+    }
+
+    const providerResponse = await fetchWithTimeout(`https://${network}.g.alchemy.com/v2/${alchemyKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body.payload || {})
+    });
+    const text = await providerResponse.text();
+
+    response.writeHead(providerResponse.status, {
+        'Content-Type': providerResponse.headers.get('content-type') || 'application/json',
+        'Access-Control-Allow-Origin': '*'
+    });
+    response.end(providerResponse.ok ? text : JSON.stringify({ error: providerErrorMessage('Alchemy', providerResponse.status, text) }));
+}
+
+async function proxySolanaRpc(response: import('node:http').ServerResponse, provider: 'helius' | 'alchemy', payload: unknown) {
+    const key = provider === 'helius'
+        ? readEnv('HELIUS_API_KEY')
+        : readEnv('ALCHEMY_API_KEY');
+
+    if (!key) {
+        json(response, 500, { error: `${provider === 'helius' ? 'Helius' : 'Alchemy'} API key is not configured on the backend.` });
+        return;
+    }
+
+    const target = provider === 'helius'
+        ? `https://mainnet.helius-rpc.com/?api-key=${key}`
+        : `https://solana-mainnet.g.alchemy.com/v2/${key}`;
+
+    const providerResponse = await fetchWithTimeout(target, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {})
+    });
+    const text = await providerResponse.text();
+
+    response.writeHead(providerResponse.status, {
+        'Content-Type': providerResponse.headers.get('content-type') || 'application/json',
+        'Access-Control-Allow-Origin': '*'
+    });
+    response.end(providerResponse.ok ? text : JSON.stringify({ error: providerErrorMessage(provider, providerResponse.status, text) }));
+}
+
 queue.start(async (tokenAddress, stage) => {
     stage('history_reconstruction');
     const report = await analyzeForensicToken(tokenAddress);
@@ -90,6 +246,56 @@ const server = createServer(async (request, response) => {
     if (method === 'OPTIONS') {
         json(response, 204, {});
         return;
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/providers/moralis') {
+        try {
+            await proxyProviderRequest(response, 'moralis', await readJsonBody(request));
+            return;
+        } catch (error) {
+            json(response, 500, { error: error instanceof Error ? error.message : 'Moralis proxy failed.' });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/providers/goplus') {
+        try {
+            await proxyProviderRequest(response, 'goplus', await readJsonBody(request));
+            return;
+        } catch (error) {
+            json(response, 500, { error: error instanceof Error ? error.message : 'GoPlus proxy failed.' });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/providers/alchemy-rpc') {
+        try {
+            await proxyAlchemyRpc(response, await readJsonBody(request));
+            return;
+        } catch (error) {
+            json(response, 500, { error: error instanceof Error ? error.message : 'Alchemy proxy failed.' });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/providers/solana-helius') {
+        try {
+            await proxySolanaRpc(response, 'helius', await readJsonBody(request));
+            return;
+        } catch (error) {
+            json(response, 500, { error: error instanceof Error ? error.message : 'Helius proxy failed.' });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/providers/solana-alchemy') {
+        try {
+            await proxySolanaRpc(response, 'alchemy', await readJsonBody(request));
+            return;
+        } catch (error) {
+            json(response, 500, { error: error instanceof Error ? error.message : 'Solana Alchemy proxy failed.' });
+            return;
+        }
     }
 
     if (method === 'POST' && requestUrl.pathname === '/api/forensics/jobs') {

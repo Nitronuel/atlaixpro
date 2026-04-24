@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
-  const heliusKey = env.VITE_HELIUS_KEY || env.HELIUS_API_KEY || '';
+  const heliusKey = env.HELIUS_API_KEY || '';
   return {
     build: {
       rollupOptions: {
@@ -56,7 +56,7 @@ export default defineConfig(({ mode }) => {
           }
         },
         '/api/solana-alchemy': {
-          target: `https://solana-mainnet.g.alchemy.com/v2/${env.VITE_ALCHEMY_KEY || ''}`,
+          target: `https://solana-mainnet.g.alchemy.com/v2/${env.ALCHEMY_API_KEY || ''}`,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/solana-alchemy/, ''),
           headers: {
@@ -73,6 +73,10 @@ export default defineConfig(({ mode }) => {
           }
         },
         '/api/forensics': {
+          target: 'http://127.0.0.1:3101',
+          changeOrigin: true
+        },
+        '/api/providers': {
           target: 'http://127.0.0.1:3101',
           changeOrigin: true
         }
