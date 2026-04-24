@@ -1,13 +1,14 @@
 
-// Avoid circular import - use direct API calls or minimal imports
 import { APP_CONFIG } from '../config';
+import { SolanaProvider } from './SolanaProvider';
 
 
 export class SolanaRpcService {
+    private static readonly IS_DEV = import.meta.env.DEV;
     private static RPC_ENDPOINTS = [
-        `https://mainnet.helius-rpc.com/?api-key=${APP_CONFIG.heliusKey}`,
-        'https://rpc.ankr.com/solana',
-        'https://api.mainnet-beta.solana.com'
+        ...(APP_CONFIG.heliusKey ? [SolanaRpcService.IS_DEV ? '/api/solana-helius' : `https://mainnet.helius-rpc.com/?api-key=${APP_CONFIG.heliusKey}`] : []),
+        ...(APP_CONFIG.alchemyKey ? [SolanaRpcService.IS_DEV ? '/api/solana-alchemy' : `https://solana-mainnet.g.alchemy.com/v2/${APP_CONFIG.alchemyKey}`] : []),
+        SolanaRpcService.IS_DEV ? '/api/solana-public' : 'https://api.mainnet-beta.solana.com'
     ];
 
     private static currentEndpointIndex = 0;
@@ -34,7 +35,7 @@ export class SolanaRpcService {
         try {
             const response = await fetch(targetUrl, options);
 
-            if (response.status === 429 || response.status === 403) {
+            if (response.status === 429 || response.status === 401 || response.status === 403) {
                 console.warn(`[SolanaRpc] Error ${response.status} on ${targetUrl}. Rotating...`);
                 this.rotateEndpoint();
 
@@ -65,23 +66,35 @@ export class SolanaRpcService {
     }
 
     private static async rpcCall(method: string, params: any[]): Promise<any> {
-        try {
-            // Pass the CURRENT endpoint to fetchWithRetry
-            const data = await this.fetchWithRetry(this.getEndpoint(), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: 1,
-                    method,
-                    params
-                })
-            });
-            return data.result;
-        } catch (e) {
-            console.error(`RPC ${method} failed:`, e);
-            throw e;
+        let lastError: unknown = null;
+
+        for (let attempt = 0; attempt < this.RPC_ENDPOINTS.length; attempt++) {
+            try {
+                const data = await this.fetchWithRetry(this.getEndpoint(), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 1,
+                        method,
+                        params
+                    })
+                }, 1);
+
+                if (data?.error) {
+                    throw new Error(data.error.message || `RPC ${method} returned an error response`);
+                }
+
+                return data.result;
+            } catch (e) {
+                lastError = e;
+                console.warn(`RPC ${method} failed on ${this.getEndpoint()}:`, e);
+                this.rotateEndpoint();
+            }
         }
+
+        console.error(`RPC ${method} failed on all configured Solana endpoints:`, lastError);
+        throw lastError;
     }
 
     static async getAccountInfo(address: string): Promise<any> {
@@ -218,10 +231,9 @@ export class SolanaRpcService {
     }
 
     /**
-     * Finds the largest incoming transfer (Buy/Receive) using Helius Enhanced API.
-     * 100x faster than manual RPC scanning.
+     * Finds the largest incoming transfer (buy/receive) using normalized Solana history.
      */
-    // Simple in-memory cache for wallet history to avoid spamming Helius for every asset
+    // Simple in-memory cache for wallet history to avoid repeated deep scans per wallet.
     // Key: walletAddress, Value: { timestamp: number, transactions: any[] }
     private static historyCache = new Map<string, { timestamp: number, transactions: any[] }>();
 
@@ -275,27 +287,9 @@ export class SolanaRpcService {
                 break;
             }
 
-            let url = `https://api.helius.xyz/v0/addresses/${walletAddress}/transactions?api-key=${SolanaRpcService.HELIUS_KEY}`;
-            if (beforeSignature) url += `&before=${beforeSignature}`;
-
-            // Throttle to 10 RPS based on user input (Aggressive)
-            // Safety net: 429 errors are handled below by pausing 2s.
-            await new Promise(r => setTimeout(r, 100));
-
             try {
-                const response = await fetch(url);
-                if (response.status === 429) {
-                    console.warn(`[SolanaRpc] Rate Limit 429. Pausing...`);
-                    await new Promise(r => setTimeout(r, 2000));
-                    continue;
-                }
-                if (!response.ok) {
-                    consecutiveFailures++;
-                    if (consecutiveFailures > 3) break;
-                    continue;
-                }
-
-                const pageStats = await response.json();
+                await new Promise(r => setTimeout(r, 100));
+                const pageStats = await SolanaProvider.getParsedAddressTransactions(walletAddress, beforeSignature || undefined);
                 if (!Array.isArray(pageStats) || pageStats.length === 0) break;
 
                 allTransactions = [...allTransactions, ...pageStats];
@@ -312,18 +306,18 @@ export class SolanaRpcService {
                 if (pageStats.length < 100) break; // End of history
 
             } catch (e) {
-                console.error("Helius Fetch Error", e);
-                break;
+                console.error("Parsed Solana history fetch error", e);
+                consecutiveFailures++;
+                if (consecutiveFailures > 3) break;
+                await new Promise(r => setTimeout(r, 2000));
             }
         }
 
         this.historyCache.set(walletAddress, { timestamp: Date.now(), transactions: allTransactions });
     }
 
-    private static HELIUS_KEY = APP_CONFIG.heliusKey;
-
     /**
-     * Finds the largest incoming transfer (Buy/Receive) using Helius Enhanced API.
+     * Finds the largest incoming transfer (buy/receive) using normalized Solana history.
      * EXPECTS history to be preloaded via preloadHistory for performance, but falls back to cache check.
      * It does NOT perform a new fetch if cache is missed, to strictly separate concerns and avoid race conditions.
      */

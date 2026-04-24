@@ -102,10 +102,32 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     }, [searchQuery, marketData]);
 
     // Load Data Function
-    const loadData = async (force: boolean = false) => {
-        if (marketData.length === 0 || force) setIsLoading(true);
+    const loadData = async (force: boolean = false, partial: boolean = false) => {
+        if (force) setIsLoading(true);
+
         try {
-            const response = await DatabaseService.getMarketData(force, false);
+            if (!force && marketData.length === 0) {
+                const cached = DatabaseService.getCachedMarketData();
+                if (cached?.data.length) {
+                    setMarketData(cached.data);
+                    setLastUpdated(new Date());
+                    setIsLoading(false);
+                }
+
+                const hydrated = await DatabaseService.getInitialMarketData();
+                if (hydrated.data.length) {
+                    setMarketData(hydrated.data);
+                    setLastUpdated(new Date());
+                    setIsLoading(false);
+                }
+
+                const response = await DatabaseService.getMarketData(true, false);
+                setMarketData(response.data);
+                setLastUpdated(new Date());
+                return;
+            }
+
+            const response = await DatabaseService.getMarketData(force, partial);
             setMarketData(response.data);
             setLastUpdated(new Date());
         } catch (e) {
@@ -118,7 +140,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     useEffect(() => {
         loadData();
         const interval = setInterval(() => {
-            loadData(false);
+            if (typeof document !== 'undefined' && document.hidden) {
+                return;
+            }
+            loadData(false, true);
         }, 15000);
         return () => clearInterval(interval);
     }, [timeFrame]);
@@ -304,16 +329,61 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         e.currentTarget.style.filter = 'grayscale(100%) opacity(0.5)';
     };
 
+    const getTokenKey = (coin: MarketCoin, context: string) =>
+        coin.address || coin.pairAddress || `${context}-${coin.chain}-${coin.ticker}-${coin.name}`;
+
     const getChainIcon = (chain: string) => {
-        switch (chain) {
-            case 'bitcoin': return 'https://cryptologos.cc/logos/bitcoin-btc-logo.png';
-            case 'ethereum': return 'https://cryptologos.cc/logos/ethereum-eth-logo.png';
-            case 'solana': return 'https://cryptologos.cc/logos/solana-sol-logo.png';
-            case 'bsc': return 'https://cryptologos.cc/logos/bnb-bnb-logo.png';
-            case 'base': return 'https://cryptologos.cc/logos/ethereum-eth-logo.png';
-            case 'xrp': return 'https://cryptologos.cc/logos/xrp-xrp-logo.png';
-            default: return 'https://via.placeholder.com/20';
-        }
+        const normalized = (chain || '').toLowerCase();
+
+        const icons: Record<string, string> = {
+            bitcoin: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="12" fill="#F7931A"/>
+                    <path fill="#FFF" d="M17.288 10.291c.24-1.59-.974-2.45-2.64-3.03l.54-2.153-1.315-.33-.525 2.107c-.345-.087-.705-.167-1.064-.25l.526-2.127-1.32-.33-.54 2.165c-.285-.067-.565-.132-.84-.2l-1.815-.45-.35 1.407s.975.225.955.236c.535.136.63.486.615.766l-1.477 5.92c-.075.166-.24.406-.614.314.015.02-.96-.24-.96-.24l-.66 1.51 1.71.426.93.242-.54 2.19 1.32.327.54-2.17c.36.1.705.19 1.05.273l-.51 2.154 1.32.33.545-2.19c2.24.427 3.93.257 4.64-1.774.57-1.637-.03-2.58-1.217-3.196.854-.193 1.5-.76 1.68-1.93h.01zm-3.01 4.22c-.404 1.64-3.157.75-4.05.53l.72-2.9c.896.23 3.757.67 3.33 2.37zm.41-4.24c-.37 1.49-2.662.735-3.405.55l.654-2.64c.744.18 3.137.524 2.75 2.084v.006z"/>
+                </svg>
+            `,
+            ethereum: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="12" fill="#1E1E1E"/>
+                    <path fill="#8A92B2" d="M12.056 2 4.69 12.223l7.365 4.354 7.365-4.35L12.056 2z"/>
+                    <path fill="#62688F" d="M12.056 2v14.576l7.365-4.353L12.056 2z"/>
+                    <path fill="#C1CCF0" d="M11.944 17.97 4.58 13.62 11.943 22l7.37-8.38-7.372 4.35h.003z"/>
+                    <path fill="#8A92B2" d="M12.056 22v-4.03l7.365-4.35L12.056 22z"/>
+                </svg>
+            `,
+            solana: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <defs>
+                        <linearGradient id="solana-g" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#00FFA3"/>
+                            <stop offset="1" stop-color="#DC1FFF"/>
+                        </linearGradient>
+                    </defs>
+                    <circle cx="12" cy="12" r="12" fill="#0B0F14"/>
+                    <path fill="url(#solana-g)" d="m18.876 16.031-2.962 3.139a.92.92 0 0 1-.673.285H4.46a.438.438 0 0 1-.321-.72l2.965-3.139A.92.92 0 0 1 7.758 15h10.782a.438.438 0 0 1 .336.72Zm-2.962-6.335a.92.92 0 0 0-.673-.286H4.46a.438.438 0 0 0-.321.72l2.965 3.139a.92.92 0 0 0 .654.286H18.54a.438.438 0 0 0 .336-.72l-2.962-3.139ZM4.46 6.723h10.781a.92.92 0 0 0 .673-.286l2.962-3.139a.438.438 0 0 0-.336-.72H7.758a.92.92 0 0 0-.654.286L4.139 5.003a.438.438 0 0 0 .321.72Z"/>
+                </svg>
+            `,
+            bsc: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="12" fill="#F3BA2F"/>
+                    <path fill="#111827" d="M16.624 13.92 19.3415 16.6354 11.9885 23.9884 4.6355 16.6364 7.353 13.92l4.6355 4.6595 4.6356-4.6595Zm4.6366-4.6366L24 12l-2.7154 2.7164L18.5682 12l2.6924-2.7164Zm-9.272.001 2.7163 2.6914-2.7164 2.7174v-.001L9.2721 12l2.7164-2.7154Zm-9.2722-.001L5.4088 12l-2.6914 2.6924L0 12l2.7164-2.7164ZM11.9885.0115l7.353 7.329-2.7174 2.7154-4.6356-4.6356-4.6355 4.6595-2.7174-2.7154 7.353-7.353Z"/>
+                </svg>
+            `,
+            xrp: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="12" fill="#111827"/>
+                    <path fill="#FFF" d="M5.52 5.955A3.521 3.521 0 0 0 1.996 9.48v.558A2.12 2.12 0 0 1 0 12.157l.03.562-.03.561a2.12 2.12 0 0 1 1.996 2.121v1.948a3.69 3.69 0 0 0 3.68 3.696v-1.123a2.56 2.56 0 0 1-2.557-2.558v-1.963a3.239 3.239 0 0 0-1.42-2.682 3.26 3.26 0 0 0 1.42-2.682V9.48A2.412 2.412 0 0 1 5.52 7.078h.437V5.955Zm12.538 0v1.123h.437a2.39 2.39 0 0 1 2.386 2.401v.558a3.26 3.26 0 0 0 1.42 2.682 3.239 3.239 0 0 0-1.42 2.682v1.963a2.56 2.56 0 0 1-2.557 2.558v1.123a3.69 3.69 0 0 0 3.68-3.696V15.4A2.12 2.12 0 0 1 24 13.281l-.03-.562.03-.561a2.12 2.12 0 0 1-1.996-2.12V9.478a3.518 3.518 0 0 0-3.509-3.524ZM6.253 10.478l3.478 3.259a3.393 3.393 0 0 0 4.553 0l3.478-3.26h-1.669l-2.65 2.464a2.133 2.133 0 0 1-2.886 0L7.922 10.478Zm5.606 4.884a3.36 3.36 0 0 0-2.128.886l-3.493 3.274h1.668l2.667-2.495a2.133 2.133 0 0 1 2.885 0l2.65 2.495h1.67l-3.494-3.274a3.36 3.36 0 0 0-2.425-.886Z"/>
+                </svg>
+            `,
+            base: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <rect x="4" y="4" width="16" height="16" rx="2" fill="#0052FF"/>
+                </svg>
+            `
+        };
+
+        const svg = icons[normalized] ?? icons.ethereum;
+        return `data:image/svg+xml;utf8,${encodeURIComponent(svg.replace(/\\s+/g, ' ').trim())}`;
     };
 
     const SortHeader = ({ label, sortKey, minWidth }: { label: string, sortKey: string, minWidth?: string }) => {
@@ -388,7 +458,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                 <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
                                     {suggestions.map((coin) => (
                                         <div
-                                            key={coin.id}
+                                            key={getTokenKey(coin, 'suggestion')}
                                             className="flex items-center gap-3 px-4 py-3 hover:bg-card-hover cursor-pointer transition-colors border-b border-border/50 last:border-none"
                                             onClick={() => {
                                                 handleTokenNavigation(coin);
@@ -501,7 +571,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
                                     return (
                                         <tr
-                                            key={coin.id}
+                                            key={getTokenKey(coin, 'feed')}
                                             onClick={() => handleTokenNavigation(coin)}
                                             className="cursor-pointer hover:bg-card-hover/50 transition-colors"
                                         >

@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+data/forensics-cache/
+data/forensics-queue/
 *.local
 .env
 .env.test
@@ -25,5 +27,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-.env.example

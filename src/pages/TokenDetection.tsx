@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Check, TrendingUp, AlertTriangle, Activity, Zap, Search, Wallet, Bell, Box, Flame } from 'lucide-react';
+import { ArrowLeft, Check, TrendingUp, AlertTriangle, Activity, Zap, Search, Wallet, Bell, Box, Flame, Copy, Shield } from 'lucide-react';
 
 declare var ApexCharts: any;
 
@@ -55,41 +55,78 @@ export const TokenDetection: React.FC = () => {
     return (
         <div className="space-y-6 pb-10">
             <div className="flex flex-col gap-4">
-                <button onClick={() => navigate('/detection')} className="flex items-center gap-2 text-text-medium hover:text-text-light transition-colors w-fit">
-                    <ArrowLeft size={20} /> Back to Global Radar
+                <button onClick={() => navigate('/detection')} className="flex items-center gap-2 text-text-medium hover:text-text-light transition-colors w-fit text-sm font-medium">
+                    <ArrowLeft size={18} /> Back to Global Radar
                 </button>
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-end">
-                    <div>
-                        <h1 className="text-3xl font-bold mb-1">{token} Detection Radar</h1>
-                        <div className="flex items-center gap-3 text-sm text-text-medium">
-                            <span className="bg-[#2A2E33] px-2 py-0.5 rounded text-xs border border-border text-text-light">Solana</span>
-                            <span className="font-mono">7ey...29a</span>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+                    <div className="flex flex-col gap-1.5">
+                        {/* Header: Logo, Name, Symbol */}
+                        <div className="flex items-center gap-3">
+                            <img
+                                src="https://cryptologos.cc/logos/shiba-inu-shib-logo.png"
+                                alt="Token Logo"
+                                className="w-10 h-10 rounded-full border border-border bg-card object-cover p-1"
+                            />
+                            <div>
+                                <h2 className="text-2xl font-bold flex items-center gap-2">
+                                    {token}
+                                    <span className="text-text-medium text-sm font-medium">({token.substring(0, 4).toUpperCase()})</span>
+                                </h2>
+                            </div>
+                        </div>
+
+                        {/* Sub-Header: Address, Copy, Network, Live Indicator */}
+                        <div className="flex items-center gap-3 text-text-medium text-sm ml-1 mt-1">
+                            <div className="flex items-center gap-1.5 bg-card/50 px-2.5 py-1 rounded-lg border border-border/50 transition-colors hover:border-border cursor-pointer group/copy"
+                                onClick={() => {
+                                    navigator.clipboard.writeText("7ey...29a");
+                                }}
+                            >
+                                <span className="font-mono text-xs">7ey...29a</span>
+                                <Copy size={12} className="text-text-medium group-hover/copy:text-white transition-colors" />
+                            </div>
+
+                            <div className="h-1 w-1 rounded-full bg-border"></div>
+                            <span className="text-xs">Solana</span>
+                            <div className="h-1 w-1 rounded-full bg-border"></div>
+
+                            {/* Live Pulsing Indicator */}
+                            <div className="flex items-center gap-2 px-2 py-0.5 rounded border border-primary-green/20 bg-primary-green/5">
+                                <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-green opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-green"></span>
+                                </span>
+                                <span className="text-[10px] font-bold uppercase tracking-wide text-primary-green">Live</span>
+                            </div>
                         </div>
                     </div>
-                    <div className="text-left md:text-right mt-4 md:mt-0">
-                        <div className="text-3xl font-bold text-primary-green">$0.000241</div>
-                        <div className="text-sm text-primary-green font-medium">+12.4% (24h)</div>
-                    </div>
+                    <button
+                        className="bg-primary-green text-main font-bold px-5 py-2 rounded-lg hover:bg-primary-green-darker transition-colors text-xs uppercase tracking-wide"
+                    >
+                        Track New
+                    </button>
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-card border border-border rounded-xl p-6">
-                <div>
-                    <div className="text-[10px] text-text-medium uppercase font-bold mb-1">Price</div>
-                    <div className="text-lg font-bold text-text-light">$0.000241</div>
-                </div>
-                <div>
-                    <div className="text-[10px] text-text-medium uppercase font-bold mb-1">Volume (24h)</div>
-                    <div className="text-lg font-bold text-text-light">$4.2M</div>
-                </div>
-                <div>
-                    <div className="text-[10px] text-text-medium uppercase font-bold mb-1">Liquidity</div>
-                    <div className="text-lg font-bold text-text-light">$425K</div>
-                </div>
-                <div>
-                    <div className="text-[10px] text-text-medium uppercase font-bold mb-1">Holder Avg Age</div>
-                    <div className="text-lg font-bold text-text-light">4.2d</div>
-                </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full">
+                {[
+                    { label: 'Price', value: '$0.000241', change: 12.4 },
+                    { label: 'Volume (24h)', value: '$4.2M' },
+                    { label: 'Liquidity', value: '$425K' },
+                    { label: 'Market Cap', value: '$2.7M' }
+                ].map((item, index) => (
+                    <div key={index} className="bg-card border border-border/50 rounded-xl p-3 flex flex-col justify-center gap-0.5 shadow-sm hover:border-border transition-colors min-h-[90px]">
+                        <span className="text-text-medium text-[9px] md:text-[10px] font-medium uppercase tracking-wider whitespace-nowrap">{item.label}</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm md:text-base font-bold text-text-light tracking-tight">{item.value}</span>
+                            {item.change !== undefined && (
+                                <span className={`text-xs font-bold ${item.change >= 0 ? 'text-primary-green' : 'text-primary-red'}`}>
+                                    {item.change >= 0 ? '+' : ''}{item.change}%
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                ))}
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-6">

@@ -1,5 +1,6 @@
 
 import { APP_CONFIG } from '../config';
+import { SolanaProvider } from './SolanaProvider';
 
 // Define the Activity Interface
 export interface RealActivity {
@@ -36,7 +37,7 @@ const getTimeAgo = (timestamp: number) => {
 export const ChainActivityService = {
 
     /**
-     * Fetch activity using Scalable Providers (Alchemy & Helius)
+     * Fetch activity using scalable on-chain providers.
      */
     getTokenActivity: async (tokenAddress: string, chain: string, priceUsd: number, pairAddress?: string): Promise<RealActivity[]> => {
         if (chain.toLowerCase() === 'solana') {
@@ -176,17 +177,11 @@ export const ChainActivityService = {
     },
 
     /**
-     * Solana Implementation using Helius Enhanced API
+     * Solana implementation using normalized Alchemy-backed RPC history.
      */
     getSolanaActivity: async (mint: string, priceUsd: number): Promise<RealActivity[]> => {
-        const HELIUS_KEY = '05af6518-9599-4204-9593-e3e3d40402dc';
-        const url = `https://api.helius.xyz/v0/addresses/${mint}/transactions?api-key=${HELIUS_KEY}`;
-
         try {
-            const response = await fetch(url);
-            if (!response.ok) return [];
-
-            const transactions = await response.json();
+            const transactions = await SolanaProvider.getParsedAddressTransactions(mint);
             if (!Array.isArray(transactions)) return [];
 
             const activities: RealActivity[] = [];
@@ -195,13 +190,11 @@ export const ChainActivityService = {
                 const timestamp = (tx.timestamp || 0) * 1000;
                 if (!timestamp) continue;
 
-                const heliusType = tx.type; // SWAP, BURN, TRANSFER
+                const txType = tx.type;
                 const signature = tx.signature;
-                const description = tx.description || '';
 
                 // --- BURN ---
-                if (heliusType === 'BURN') {
-                    // Extract amount logic...
+                if (txType === 'BURN') {
                     const transfer = (tx.tokenTransfers || []).find((t: any) => t.mint === mint);
                     const amount = transfer ? transfer.tokenAmount : 0;
                     const usdValue = amount * priceUsd;
@@ -221,20 +214,11 @@ export const ChainActivityService = {
                 }
 
                 // --- SWAP (Buy/Sell) ---
-                if (heliusType === 'SWAP') {
+                if (txType === 'SWAP') {
                     const transfer = (tx.tokenTransfers || []).find((t: any) => t.mint === mint);
                     if (transfer) {
                         const amount = transfer.tokenAmount;
                         const usdValue = amount * priceUsd;
-
-                        // Determine Buy vs Sell based on description or native transfers
-                        // Heuristic: If description says "swapped SOL for [Token]", it's a Buy.
-                        // If "swapped [Token] for SOL", it's a Sell.
-                        const isBuy = description.toLowerCase().includes(`swapped`) && !description.toLowerCase().startsWith(`swapped ${mint}`);
-                        // This description parsing is brittle. Better: 
-                        // If tokenTransfer is OUT of user account -> Sell. 
-                        // If tokenTransfer is INTO user account -> Buy.
-                        // But we need to know who the "user" is. "feePayer" is usually the user.
 
                         const user = tx.feePayer;
                         const isOut = transfer.fromUserAccount === user;
@@ -258,7 +242,7 @@ export const ChainActivityService = {
                 }
 
                 // --- TRANSFER (Whale check) ---
-                if (heliusType === 'TRANSFER') {
+                if (txType === 'TRANSFER') {
                     const transfers = (tx.tokenTransfers || []).filter((t: any) => t.mint === mint);
                     for (const t of transfers) {
                         const amount = t.tokenAmount;

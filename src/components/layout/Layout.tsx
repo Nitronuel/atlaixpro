@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { ViewState } from '../../types';
 import {
-  LayoutDashboard, Users, Target, Activity, Radar, Flame, MessageSquare,
-  Wallet, Zap, ShieldCheck, Bell, Settings, LogOut, LogIn, Menu, User, Briefcase
+  LayoutDashboard, Users, Target, Activity, Radar, MessageSquare,
+  Wallet, Zap, ShieldCheck, Bell, Settings, LogOut, LogIn, Menu, User, Briefcase, Network
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -64,19 +64,19 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
   const getPageTitle = () => {
     const path = location.pathname;
     if (path.includes('/dashboard')) return 'Overview';
-    if (path.includes('/token/')) return 'Token Details';
+    if (path.includes('/token/')) return 'Detection Engine';
     if (path.includes('/token-smart-money/')) return 'Token Smart Money View';
 
     if (path.includes('/heatmap')) return 'Token Heatmap';
     if (path.includes('/sentiment')) return 'Sentiment Intelligence';
     if (path.includes('/detection')) return 'Global Detection';
-    if (path.includes('/virality')) return 'Virality Prediction';
     if (path.includes('/ai-assistant')) return 'AI Assistant';
     if (path.includes('/wallet')) return 'Wallet Tracker';
     if (path.includes('/wallet')) return 'Wallet Tracker';
     if (path.includes('/smart-money/')) return 'Smart Wallet Profile Page';
     if (path.includes('/smart-money')) return 'Smart Money Engine';
     if (path.includes('/safe-scan')) return 'Safe Scan';
+    if (path.includes('/alchemy-hub')) return 'Alchemy Hub';
     if (path.includes('/smart-alerts')) return 'Smart Alerts';
     if (path.includes('/settings')) return 'Settings';
     return 'Overview';
@@ -89,9 +89,9 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     if (path.includes('/heatmap')) return 'Visualize concentration of normal vs. abnormal activity';
     if (path.includes('/sentiment')) return 'Monitor user opinions, reviews, and feedback trends.';
     if (path.includes('/detection')) return 'Identify anomalies, drift, or suspicious patterns';
-    if (path.includes('/virality')) return 'AI predicts tokens likely to blow up from sentiment + engagement signals';
     if (path.includes('/ai-assistant')) return 'Interact with Atlaix Intelligence';
     if (path.includes('/safe-scan')) return 'Security analysis and risk scoring for tokens';
+    if (path.includes('/alchemy-hub')) return 'Alchemy-backed holder, cluster, and funding map intelligence';
     if (path.includes('/wallet')) return 'Monitor wallet activity, performance and patterns';
     if (path.includes('/smart-alerts')) return 'Create AI-powered market alerts';
     return '';
@@ -132,7 +132,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
           <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Market & Narrative Intelligence</div>
           <NavItem active={isActive('/detection')} onClick={() => handleNavigation('/detection')} icon={<Radar size={20} />} label="Detection Engine" />
           <NavItem active={isActive('/sentiment')} onClick={() => handleNavigation('/sentiment')} icon={<Target size={20} />} label="Sentiment Intelligence" />
-          <NavItem active={isActive('/virality')} onClick={() => handleNavigation('/virality')} icon={<Flame size={20} />} label="Virality Engine" />
 
           <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Wallet & Capital Intelligence</div>
           <NavItem active={isActive('/smart-money')} onClick={() => handleNavigation('/smart-money')} icon={<Zap size={20} />} label="Smart Money Engine" />
@@ -143,6 +142,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
           <NavItem active={isActive('/smart-alerts')} onClick={() => handleNavigation('/smart-alerts')} icon={<Bell size={20} />} label="Smart Alerts" />
           <NavItem active={isActive('/ai-assistant')} onClick={() => handleNavigation('/ai-assistant')} icon={<MessageSquare size={20} />} label="AI Assistant" />
           <NavItem active={isActive('/safe-scan')} onClick={() => handleNavigation('/safe-scan')} icon={<ShieldCheck size={20} />} label="Safe Scan" />
+          <NavItem active={isActive('/alchemy-hub')} onClick={() => handleNavigation('/alchemy-hub')} icon={<Network size={20} />} label="Alchemy Hub" />
 
           <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Account</div>
           <NavItem active={isActive('/settings')} onClick={() => handleNavigation('/settings')} icon={<Settings size={20} />} label="Settings" />

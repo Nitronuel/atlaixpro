@@ -4,7 +4,6 @@ import { SolanaRpcService } from './SolanaRpcService';
 
 // API Key from Config
 const MORALIS_API_KEY = APP_CONFIG.moralisKey;
-console.log('[DEBUG] Initializing MoralisService with Key:', MORALIS_API_KEY ? MORALIS_API_KEY.substring(0, 10) + '...' : 'UNDEFINED');
 
 interface MoralisTransfer {
     transaction_hash: string;
@@ -41,6 +40,19 @@ export interface WalletBalance {
     usd_value?: number;
     price_usd?: number;
 }
+
+export const normalizeWalletBalancePayload = (payload: any, isSolana: boolean): WalletBalance => ({
+    token_address: payload.token_address || payload.mint,
+    symbol: payload.symbol,
+    name: payload.name,
+    logo: payload.logo || payload.thumbnail,
+    decimals: Number(isSolana ? (payload.decimals ?? payload.token_decimals ?? payload.tokenDecimal ?? 0) : payload.decimals),
+    balance: isSolana ? (payload.amountRaw || payload.balance || payload.amount) : (payload.balance || payload.amount),
+    possible_spam: payload.possible_spam ?? payload.possibleSpam,
+    verified_contract: payload.verified_contract ?? payload.isVerifiedContract,
+    usd_value: payload.usd_value,
+    price_usd: payload.usd_price || payload.usdPrice || 0
+});
 
 const getTimeAgo = (timestamp: string) => {
     const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
@@ -265,18 +277,7 @@ export const MoralisService = {
 
                 } while (cursor);
 
-                return allTokens.map((t: any) => ({
-                    token_address: t.token_address || t.mint,
-                    symbol: t.symbol,
-                    name: t.name,
-                    logo: t.logo || t.thumbnail,
-                    decimals: isSolana ? 0 : t.decimals,
-                    balance: t.balance || t.amount,
-                    possible_spam: t.possible_spam,
-                    verified_contract: t.verified_contract,
-                    usd_value: t.usd_value,
-                    price_usd: t.usd_price || t.usdPrice || 0
-                }));
+                return allTokens.map((t: any) => normalizeWalletBalancePayload(t, isSolana));
             } catch (error) {
                 console.error("[Moralis] Fetch tokens error", error);
                 return [];
@@ -482,7 +483,7 @@ export const MoralisService = {
     getEstimatedCostBasis: async (walletAddress: string, tokenAddress: string, chain: string): Promise<{ price: number, timestamp: number }> => {
         if (!walletAddress || !tokenAddress) return { price: 0, timestamp: 0 };
 
-        // --- SOLANA LOGIC (Unified via Helius/RPC Service) ---
+        // --- SOLANA LOGIC (Unified via normalized Solana RPC service) ---
         if (chain.toLowerCase() === 'solana') {
             try {
                 const result = await SolanaRpcService.getEstimatedEntry(walletAddress, tokenAddress);

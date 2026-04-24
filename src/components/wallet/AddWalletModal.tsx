@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { SavedWalletService } from '../../services/SavedWalletService';
+import { validateWalletAddress } from '../../utils/wallet';
 
 interface AddWalletModalProps {
     onClose: () => void;
@@ -10,12 +11,17 @@ interface AddWalletModalProps {
 export const AddWalletModal: React.FC<AddWalletModalProps> = ({ onClose, onAdded }) => {
     const [newWalletName, setNewWalletName] = useState('');
     const [newWalletAddress, setNewWalletAddress] = useState('');
+    const [error, setError] = useState('');
 
     const handleAdd = () => {
-        const addr = newWalletAddress.trim();
+        const validation = validateWalletAddress(newWalletAddress);
+        const addr = validation.normalizedAddress;
         const name = newWalletName.trim() || 'Watched Wallet';
 
-        if (!addr) return;
+        if (!validation.isValid) {
+            setError(validation.error || 'Enter a valid wallet address.');
+            return;
+        }
 
         SavedWalletService.saveWallet(addr, name, []);
         onAdded(addr);
@@ -51,11 +57,15 @@ export const AddWalletModal: React.FC<AddWalletModalProps> = ({ onClose, onAdded
                         <input
                             type="text"
                             className="bg-main border border-border rounded-lg p-3 text-text-light text-sm outline-none focus:border-primary-green transition-colors placeholder-text-dark font-mono"
-                            placeholder="0x..."
+                            placeholder="0x... or Solana address"
                             value={newWalletAddress}
-                            onChange={(e) => setNewWalletAddress(e.target.value)}
+                            onChange={(e) => {
+                                setNewWalletAddress(e.target.value);
+                                if (error) setError('');
+                            }}
                             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
                         />
+                        {error && <div className="text-xs text-primary-red">{error}</div>}
                     </div>
                 </div>
                 <div className="p-4 border-t border-border flex justify-end gap-3 bg-card-hover/10">

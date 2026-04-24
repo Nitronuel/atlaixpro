@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, ChevronDown, Zap, ArrowLeft, Globe, Clock, Plus, CheckCircle, X } from 'lucide-react';
 import { SavedWalletService } from '../services/SavedWalletService';
 import { SavedWallet, WalletCategory, WalletData } from '../types';
@@ -9,28 +9,75 @@ import { ChainSelectionModal } from '../components/wallet/ChainSelectionModal';
 import { WalletStatsGrid } from '../components/wallet/WalletStatsGrid';
 import { HoldingsTable } from '../components/wallet/HoldingsTable';
 import { WalletCard } from '../components/wallet/WalletCard';
+import { EVM_WALLET_CHAINS, PROFILE_CHAIN_OPTIONS, SUPPORTED_WALLET_CHAINS, normalizeWalletChain } from '../utils/chains';
+import { getCompatibleDefaultChain, validateWalletAddress } from '../utils/wallet';
+import { ChainType } from '../services/ChainRouter';
 
 export const WalletTracking: React.FC = () => {
     const { address } = useParams<{ address: string }>();
     const navigate = useNavigate();
     const viewMode = address ? 'profile' : 'dashboard';
+    const walletAddressState = validateWalletAddress(address || '');
+    const isProfileAddressValid = !address || walletAddressState.isValid;
 
     // UI State
     const [searchQuery, setSearchQuery] = useState('');
-    const [savedWallets, setSavedWallets] = useState<SavedWallet[]>([]);
+    const [savedWallets, setSavedWallets] = useState<SavedWallet[]>(() => {
+        const wallets = SavedWalletService.getWallets();
+        if (address && walletAddressState.isValid) {
+            const existing = wallets.find((wallet) => wallet.addr.toLowerCase() === address.toLowerCase());
+            if (existing) {
+                return wallets;
+            }
+
+            return [...wallets, SavedWalletService.ensureTrackedWallet(address)];
+        }
+        return wallets;
+    });
     const [activeFilter, setActiveFilter] = useState<string | null>(null);
-    const [searchParams] = useSearchParams();
-    const [chain, setChain] = useState(searchParams.get('chain') || 'All Chains');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [chain, setChain] = useState<ChainType>(() => {
+        const urlChain = searchParams.get('chain');
+        if (urlChain) {
+            return normalizeWalletChain(urlChain);
+        }
+
+        if (address && walletAddressState.isValid) {
+            return getCompatibleDefaultChain(walletAddressState.type);
+        }
+
+        return 'All Chains';
+    });
     const [walletType, setWalletType] = useState('Smart Money');
     const [timeFilter, setTimeFilter] = useState<'ALL' | '1D' | '1W' | '1M' | '>1M'>('ALL');
+    const [trackError, setTrackError] = useState('');
 
-    // Sync chain from URL if it changes
+    const updateProfileChain = (nextChain: ChainType) => {
+        setChain(nextChain);
+
+        if (!address) return;
+
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.set('chain', nextChain);
+        setSearchParams(nextParams, { replace: true });
+    };
+
+    const navigateToWalletProfile = (targetAddress: string) => {
+        const validation = validateWalletAddress(targetAddress);
+        const nextChain = getCompatibleDefaultChain(validation.type);
+        navigate(`/wallet/${validation.normalizedAddress}?chain=${encodeURIComponent(nextChain)}`);
+    };
+
+    // Sync chain from URL if it changes externally
     useEffect(() => {
-        const urlChain = searchParams.get('chain');
-        if (urlChain && urlChain !== chain) {
+        const rawUrlChain = searchParams.get('chain');
+        if (!rawUrlChain) return;
+
+        const urlChain = normalizeWalletChain(rawUrlChain);
+        if (urlChain !== chain) {
             setChain(urlChain);
         }
-    }, [searchParams]);
+    }, [searchParams, chain]);
 
     // Modal State
     const [showAddModal, setShowAddModal] = useState(false);
@@ -46,13 +93,19 @@ export const WalletTracking: React.FC = () => {
     const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // Load saved wallets
-    useEffect(() => {
-        setSavedWallets(SavedWalletService.getWallets());
-    }, []);
-
     // Helper: Restore wallet meta if we are viewing a saved wallet
-    const existingWallet = address ? SavedWalletService.getWallet(address) : null;
+    const existingWallet = useMemo(() => {
+        if (!address) return null;
+        return savedWallets.find((wallet) => wallet.addr.toLowerCase() === address.toLowerCase()) || null;
+    }, [address, savedWallets]);
+
+    useEffect(() => {
+        if (!address || !walletAddressState.isValid) return;
+
+        SavedWalletService.ensureTrackedWallet(address);
+        setSavedWallets(SavedWalletService.getWallets());
+    }, [address, walletAddressState.isValid]);
+
     useEffect(() => {
         if (existingWallet) {
             setEditName(existingWallet.name);
@@ -64,10 +117,42 @@ export const WalletTracking: React.FC = () => {
         setIsEditing(false);
         // FIX: Only reset time filter if the ADDRESS changes, not on every render
         // setTimeFilter('ALL'); 
-    }, [address]); // Only run when navigating to a new address
+    }, [address, existingWallet?.addr, existingWallet?.name, existingWallet?.categories]); // Keep profile state in sync without re-triggering every render
+
+    useEffect(() => {
+        if (!address || !walletAddressState.isValid) return;
+
+        const compatibleDefault = getCompatibleDefaultChain(walletAddressState.type);
+        if (walletAddressState.type === 'solana' && chain !== 'Solana') {
+            updateProfileChain('Solana');
+            return;
+        }
+
+        if (walletAddressState.type === 'evm' && chain === 'Solana') {
+            updateProfileChain(compatibleDefault);
+        }
+    }, [address, walletAddressState.isValid, walletAddressState.type, chain]);
 
     // Use Custom Hook for Data
-    const { loading, portfolioData, walletStats } = useWalletPortfolio(address, chain, undefined, timeFilter);
+    const { loading, portfolioData, walletStats, refreshPortfolio } = useWalletPortfolio(
+        isProfileAddressValid ? address : undefined,
+        chain,
+        undefined,
+        timeFilter
+    );
+
+    useEffect(() => {
+        if (!address || !existingWallet || loading) return;
+
+        const updated = SavedWalletService.updateWalletStats(address, {
+            bal: walletStats.netWorth,
+            win: walletStats.winRate,
+            pnl: walletStats.totalPnL
+        }, walletStats);
+        if (updated) {
+            setSavedWallets(SavedWalletService.getWallets());
+        }
+    }, [address, existingWallet?.addr, walletStats.netWorth, walletStats.winRate, walletStats.totalPnL, walletStats.activePositions, walletStats.profitableTrader, loading]);
 
     const toggleFilter = (name: string) => setActiveFilter(activeFilter === name ? null : name);
 
@@ -100,24 +185,29 @@ export const WalletTracking: React.FC = () => {
     }, [activeFilter]);
 
     const handleTrack = (addrInput?: string) => {
-        const target = addrInput || searchQuery.trim();
-        if (!target) return;
+        const validation = validateWalletAddress(addrInput || searchQuery);
+        if (!validation.isValid) {
+            setTrackError(validation.error || 'Enter a valid wallet address.');
+            return;
+        }
 
-        // Check if it's an EVM address
-        if (target.startsWith('0x') && target.length === 42) {
+        const target = validation.normalizedAddress;
+        setTrackError('');
+
+        if (validation.type === 'evm') {
             setPendingAddress(target);
             setShowChainModal(true);
             return;
         }
 
-        navigate(`/wallet/${target}`);
+        navigate(`/wallet/${target}?chain=Solana`);
         setSearchQuery('');
     };
 
     const handleChainSelect = (selectedChain: string) => {
         if (!pendingAddress) return;
 
-        setChain(selectedChain);
+        setChain(selectedChain as ChainType);
         setShowChainModal(false);
         navigate(`/wallet/${pendingAddress}?chain=${selectedChain}`);
         setPendingAddress(null);
@@ -142,18 +232,13 @@ export const WalletTracking: React.FC = () => {
         setSelectedCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
     };
 
-    // Hardcoded Trending Wallets (simulated)
-    const trendingWallets: WalletData[] = [
-        { id: 't1', addr: '0x7a...9b2c', tag: 'Smart Money', bal: '$2.4M', pnl: '+450%', win: '85%', tokens: 0, time: 'Active 2h ago', type: 'whale', categories: ['Smart Money', 'Early'] },
-        { id: 't2', addr: '0x3f...8a1d', tag: 'Smart Money', bal: '$4.2M', pnl: '+120%', win: '-', tokens: 0, time: 'Active 5m ago', type: 'whale', categories: ['Whale', 'Hodler'] },
-        { id: 't3', addr: '0x9c...2e4f', tag: 'Smart Money', bal: '$850K', pnl: '+800%', win: '60%', tokens: 0, time: 'Active 1m ago', type: 'whale', categories: ['Sniper', 'Degen'] },
-        { id: 't4', addr: '0xb2...5d3a', tag: 'Smart Money', bal: '$1.2M', pnl: '+300%', win: '90%', tokens: 0, time: 'Active 10m ago', type: 'whale', categories: ['Insider', 'Fresh'] },
-        { id: 't5', addr: '0x1d...4f8b', tag: 'Smart Money', bal: '$1.5M', pnl: '+150%', win: '70%', tokens: 0, time: 'Active 3h ago', type: 'whale', categories: ['Smart Money', 'Whale'] },
-        { id: 't6', addr: '0x5e...7c9a', tag: 'Smart Money', bal: '$3.1M', pnl: '+220%', win: '75%', tokens: 0, time: 'Active 1h ago', type: 'whale', categories: ['Copy Trade', 'High Vol'] }
-    ];
-
     const getDisplayWallets = (): WalletData[] => {
-        return savedWallets.map((w, i) => ({
+        const filteredWallets = savedWallets.filter((wallet) => {
+            if (walletType === 'All Types') return true;
+            return wallet.categories?.includes(walletType as WalletCategory);
+        });
+
+        return filteredWallets.map((w, i) => ({
             id: i,
             addr: w.addr,
             tag: w.name,
@@ -200,28 +285,32 @@ export const WalletTracking: React.FC = () => {
                                         className="bg-transparent border-none text-text-light outline-none w-full text-sm placeholder-text-dark"
                                         placeholder="Search wallet address..."
                                         value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        onChange={(e) => {
+                                            setSearchQuery(e.target.value);
+                                            if (trackError) setTrackError('');
+                                        }}
                                         onKeyDown={(e) => e.key === 'Enter' && handleTrack()}
                                     />
                                 </div>
                                 <button className="bg-primary-green text-main font-bold px-4 py-2 rounded-lg hover:bg-primary-green-darker transition-colors whitespace-nowrap text-sm" onClick={() => handleTrack()}>Track</button>
                             </div>
                         </div>
+                        {trackError && <p className="text-xs text-primary-red">{trackError}</p>}
                     </div>
 
                     {/* Filters */}
                     <div className="flex items-center gap-3 overflow-x-auto custom-scrollbar pb-1">
                         <div className="filter-wrapper relative flex-shrink-0">
-                            <button ref={el => (buttonRefs.current['chain'] = el)} className={`filter-pill ${activeFilter === 'chain' ? 'active' : ''}`} onClick={() => toggleFilter('chain')}>
-                                <Globe size={16} /> {chain} <ChevronDown size={14} />
-                            </button>
-                            {activeFilter === 'chain' && (
-                                <div className="filter-popup" style={getDropdownStyle('chain')}>
-                                    {['All Chains', 'Ethereum', 'Solana', 'BSC', 'Base'].map(c => (
-                                        <div key={c} className="filter-list-item" onClick={() => { setChain(c); setActiveFilter(null); }}>{c}</div>
-                                    ))}
-                                </div>
-                            )}
+                                <button ref={el => (buttonRefs.current['chain'] = el)} className={`filter-pill ${activeFilter === 'chain' ? 'active' : ''}`} onClick={() => toggleFilter('chain')}>
+                                    <Globe size={16} /> {chain} <ChevronDown size={14} />
+                                </button>
+                                {activeFilter === 'chain' && (
+                                    <div className="filter-popup" style={getDropdownStyle('chain')}>
+                                        {SUPPORTED_WALLET_CHAINS.map(c => (
+                                        <div key={c.id} className="filter-list-item" onClick={() => { setChain(c.id); setActiveFilter(null); }}>{c.id}</div>
+                                        ))}
+                                    </div>
+                                )}
                         </div>
                         <div className="filter-wrapper relative flex-shrink-0">
                             <button ref={el => (buttonRefs.current['type'] = el)} className={`filter-pill ${activeFilter === 'type' ? 'active' : ''}`} onClick={() => toggleFilter('type')}>
@@ -245,7 +334,7 @@ export const WalletTracking: React.FC = () => {
                                 <WalletCard
                                     key={w.id}
                                     wallet={w}
-                                    onClick={(wallet) => navigate(`/wallet/${wallet.addr}`)}
+                                    onClick={(wallet) => navigateToWalletProfile(wallet.addr)}
                                     setDeleteConfirmId={setDeleteConfirmId}
                                     deleteConfirmId={deleteConfirmId}
                                     refreshWallets={() => setSavedWallets(SavedWalletService.getWallets())}
@@ -261,20 +350,10 @@ export const WalletTracking: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Trending Wallets */}
                     <div className="mt-8">
                         <h2 className="text-lg font-bold text-text-light mb-4">Trending Wallets</h2>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {trendingWallets.map(w => (
-                                <WalletCard
-                                    key={w.id}
-                                    wallet={w}
-                                    onClick={() => handleTrack(w.addr)}
-                                    setDeleteConfirmId={setDeleteConfirmId}
-                                    deleteConfirmId={deleteConfirmId}
-                                    refreshWallets={() => { }}
-                                />
-                            ))}
+                        <div className="bg-card border border-border rounded-xl p-5 text-sm text-text-medium">
+                            Trending wallet discovery is temporarily hidden until it is backed by real wallet telemetry.
                         </div>
                     </div>
                 </>
@@ -306,8 +385,8 @@ export const WalletTracking: React.FC = () => {
                                 </button>
                                 {activeFilter === 'profileChain' && (
                                     <div className="filter-popup" style={getDropdownStyle('profileChain')}>
-                                        {['All Chains', 'Ethereum', 'Base', 'BSC', 'Polygon'].map(c => (
-                                            <div key={c} className={`filter-list-item ${chain === c ? 'bg-primary-green/10 text-primary-green' : ''}`} onClick={() => { setChain(c); setActiveFilter(null); }}>{c}</div>
+                                        {PROFILE_CHAIN_OPTIONS.filter(option => walletAddressState.type !== 'solana' || option === 'Solana').map(c => (
+                                            <div key={c} className={`filter-list-item ${chain === c ? 'bg-primary-green/10 text-primary-green' : ''}`} onClick={() => { updateProfileChain(c); setActiveFilter(null); }}>{c}</div>
                                         ))}
                                     </div>
                                 )}
@@ -315,6 +394,11 @@ export const WalletTracking: React.FC = () => {
                         </div>
                     </div>
 
+                    {!isProfileAddressValid ? (
+                        <div className="bg-card border border-border rounded-xl p-6 text-sm text-primary-red">
+                            {walletAddressState.error}
+                        </div>
+                    ) : (
                     <div className="grid grid-cols-1 md:grid-cols-[300px_1fr] gap-6">
                         <div className="flex flex-col gap-6">
                             {/* Wallet Info Card */}
@@ -370,24 +454,41 @@ export const WalletTracking: React.FC = () => {
                                 <div className="text-2xl font-bold text-text-light mb-1">
                                     {portfolioData ? portfolioData.netWorth : walletStats.netWorth || 'Loading...'}
                                 </div>
-                                <div className="w-full min-h-[150px] flex items-center justify-center text-text-dark text-xs bg-main/30 rounded border border-border/10">
-                                    Chart Area
+                                <div className="w-full min-h-[150px] flex items-center justify-center text-text-medium text-xs bg-main/30 rounded border border-border/10 text-center px-4">
+                                    Net worth history chart is temporarily disabled until the historical series is sourced from real portfolio snapshots.
                                 </div>
                             </div>
                         </div>
 
                         {/* Holdings Table */}
-                        <HoldingsTable portfolioData={portfolioData} loading={loading} chain={chain} timeFilter={timeFilter} />
+                        <HoldingsTable
+                            portfolioData={portfolioData}
+                            loading={loading}
+                            chain={chain}
+                            timeFilter={timeFilter}
+                            onRefresh={refreshPortfolio}
+                        />
                     </div>
+                    )}
                 </>
             )}
 
-            {showAddModal && <AddWalletModal onClose={() => setShowAddModal(false)} onAdded={(addr) => navigate(`/wallet/${addr}`)} />}
+            {showAddModal && (
+                <AddWalletModal
+                    onClose={() => setShowAddModal(false)}
+                    onAdded={(addr) => {
+                        const validation = validateWalletAddress(addr);
+                        const nextChain = validation.type === 'solana' ? 'Solana' : 'All Chains';
+                        navigate(`/wallet/${addr}?chain=${nextChain}`);
+                    }}
+                />
+            )}
 
             <ChainSelectionModal
                 isOpen={showChainModal}
                 onClose={() => { setShowChainModal(false); setPendingAddress(null); }}
                 onSelectChain={handleChainSelect}
+                chains={EVM_WALLET_CHAINS.filter(chain => !chain.isAggregate)}
             />
         </div>
     );

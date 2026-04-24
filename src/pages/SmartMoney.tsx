@@ -1,48 +1,245 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    Search, Filter, ChevronDown, ArrowUpRight, ArrowDownRight,
-    Wallet, Clock, Zap, TrendingUp, Activity, ExternalLink,
-    ChevronRight, Shield, AlertTriangle, Layers
+    Search, Filter, ChevronDown,
+    Wallet, Activity, Layers
 } from 'lucide-react';
+import { SavedWalletService } from '../services/SavedWalletService';
+import { DatabaseService } from '../services/DatabaseService';
+import { SavedWallet } from '../types';
+import { ChainRouter } from '../services/ChainRouter';
+import { ChainActivityService } from '../services/ChainActivityService';
+import { detectWalletAddressType } from '../utils/wallet';
+import { formatCompactNumber } from '../utils/format';
 
-// --- Mock Data ---
+interface SmartTokenAggregate {
+    id: string;
+    ticker: string;
+    name: string;
+    amount: string;
+    count: number;
+    image: string;
+}
 
-const MOCK_INFLOWS = [
-    { id: 1, ticker: 'ETH', name: 'Ethereum', amount: '$1.2M', count: 25, change: '+12%', type: 'net-inflow', image: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png' },
-    { id: 2, ticker: 'SOL', name: 'Solana', amount: '$850k', count: 42, change: '+8%', type: 'net-inflow', image: 'https://assets.coingecko.com/coins/images/4128/small/solana.png' },
-    { id: 3, ticker: 'LINK', name: 'Chainlink', amount: '$420k', count: 18, change: '+15%', type: 'net-inflow', image: 'https://assets.coingecko.com/coins/images/877/small/chainlink-new-logo.png' },
-    { id: 4, ticker: 'ONDO', name: 'Ondo', amount: '$310k', count: 12, change: '+5%', type: 'net-inflow', image: 'https://assets.coingecko.com/coins/images/17926/small/ondo.png' },
-];
+interface SmartWalletEvent {
+    id: string;
+    type: 'buy' | 'sell';
+    wallet: string;
+    token: string;
+    amount: string;
+    time: string;
+}
 
-const MOCK_OUTFLOWS = [
-    { id: 1, ticker: 'USDC', name: 'USD Coin', amount: '$1.5M', count: 55, change: '-5%', type: 'outflow', image: 'https://assets.coingecko.com/coins/images/6319/small/USD_Coin_icon.png' },
-    { id: 2, ticker: 'PEPE', name: 'Pepe', amount: '$900k', count: 32, change: '-12%', type: 'outflow', image: 'https://assets.coingecko.com/coins/images/29850/small/pepe-token.jpeg' },
-    { id: 3, ticker: 'WIF', name: 'dogwifhat', amount: '$600k', count: 28, change: '-8%', type: 'outflow', image: 'https://assets.coingecko.com/coins/images/33566/small/dogwifhat.jpeg' },
-    { id: 4, ticker: 'ARB', name: 'Arbitrum', amount: '$250k', count: 15, change: '-3%', type: 'outflow', image: 'https://assets.coingecko.com/coins/images/16547/small/arbitrum.png' },
-];
+const STABLE_TOKEN_SYMBOLS = new Set(['USDC', 'USDT', 'DAI', 'USDE', 'FDUSD', 'USDS', 'TUSD']);
 
-const TRENDING_WALLETS = [
-    { id: 1, address: '0x7a...9f2b', tag: 'Whale', winRate: '78%', successfulTokens: '78%', pnl: '+$133.9k', score: 92, volume: '$133.90M', pnlPercent: '+120%' },
-    { id: 2, address: '0x3c...1a8d', tag: 'Smart Money', winRate: '82%', successfulTokens: '82%', pnl: '+$450.2k', score: 88, volume: '$5.1M', pnlPercent: '+45%' },
-    { id: 3, address: '0x9b...4e1c', tag: 'Smart Money', winRate: '65%', successfulTokens: '65%', pnl: '+$89.5k', score: 85, volume: '$1.2M', pnlPercent: '+15%' },
-    { id: 4, address: '0x2d...8f3a', tag: 'Sniper', winRate: '90%', successfulTokens: '90%', pnl: '+$67.1k', score: 81, volume: '$850k', pnlPercent: '+210%' },
-    { id: 5, address: '0x1f...5e9b', tag: 'Whale', winRate: '72%', successfulTokens: '72%', pnl: '+$210.5k', score: 79, volume: '$3.5M', pnlPercent: '+35%' },
-];
+const shortenWallet = (wallet: string) => `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
 
-const RECENT_EVENTS = [
-    { id: 1, type: 'buy', wallet: 'Whale...9f2b', token: 'ETH', amount: '$125k', time: '2 mins ago' },
-    { id: 2, type: 'sell', wallet: 'Smart...1a8d', token: 'PEPE', amount: '$45k', time: '5 mins ago' },
-    { id: 3, type: 'buy', wallet: 'Sniper...8f3a', token: 'MOG', amount: '$12k', time: '8 mins ago' },
-    { id: 4, type: 'buy', wallet: 'Whale...5e9b', token: 'SOL', amount: '$250k', time: '12 mins ago' },
-    { id: 5, type: 'sell', wallet: 'Early...4e1c', token: 'WIF', amount: '$85k', time: '15 mins ago' },
-    { id: 6, type: 'buy', wallet: 'Smart...1a8d', token: 'LINK', amount: '$60k', time: '22 mins ago' },
-];
+const parseUsd = (value: string) => {
+    const numeric = Number.parseFloat(value.replace(/[$,]/g, '').trim());
+    return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const getWalletChain = (walletAddress: string) => {
+    return detectWalletAddressType(walletAddress) === 'solana' ? 'Solana' : 'All Chains';
+};
+
+const getEventAgeSeconds = (timeLabel: string) => {
+    const normalized = timeLabel.toLowerCase().trim();
+    const match = normalized.match(/(\d+)\s*([smhd])/);
+    if (!match) return Number.MAX_SAFE_INTEGER;
+    const value = Number.parseInt(match[1], 10);
+    const unit = match[2];
+    if (unit === 's') return value;
+    if (unit === 'm') return value * 60;
+    if (unit === 'h') return value * 3600;
+    return value * 86400;
+};
 
 export const SmartMoney: React.FC = () => {
     const navigate = useNavigate();
     const [timeRange, setTimeRange] = useState('24h');
     const [chain, setChain] = useState('all');
+    const [smartWallets, setSmartWallets] = useState<SavedWallet[]>([]);
+    const [loadingWallets, setLoadingWallets] = useState(true);
+    const [recentEvents, setRecentEvents] = useState<SmartWalletEvent[]>([]);
+    const [topInflows, setTopInflows] = useState<SmartTokenAggregate[]>([]);
+    const [topOutflows, setTopOutflows] = useState<SmartTokenAggregate[]>([]);
+
+    useEffect(() => {
+        const loadWallets = async () => {
+            setLoadingWallets(true);
+            const sharedWallets = await DatabaseService.fetchSmartMoneyWallets();
+            const nextWallets = sharedWallets.length ? sharedWallets : SavedWalletService.getSmartMoneyWallets();
+            setSmartWallets(nextWallets);
+            setLoadingWallets(false);
+        };
+
+        loadWallets();
+    }, []);
+
+    useEffect(() => {
+        const hydrateSmartMoneyPanels = async () => {
+            if (!smartWallets.length) {
+                setRecentEvents([]);
+                setTopInflows([]);
+                setTopOutflows([]);
+                return;
+            }
+
+            const sampledWallets = smartWallets.slice(0, 8);
+            const smartWalletSet = new Set(sampledWallets.map((wallet) => wallet.addr.toLowerCase()));
+
+            const portfolioResults = await Promise.all(sampledWallets.map(async (wallet) => {
+                try {
+                    const portfolio = await ChainRouter.fetchPortfolio(getWalletChain(wallet.addr), wallet.addr);
+                    return { wallet, portfolio };
+                } catch {
+                    return null;
+                }
+            }));
+
+            const validPortfolios = portfolioResults.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+            if (!validPortfolios.length) {
+                setRecentEvents([]);
+                setTopInflows([]);
+                setTopOutflows([]);
+                return;
+            }
+
+            const holdingMap = new Map<string, {
+                ticker: string;
+                name: string;
+                totalUsd: number;
+                walletSet: Set<string>;
+                image: string;
+                address: string;
+                chain: string;
+                currentPrice: number;
+            }>();
+
+            validPortfolios.forEach(({ wallet, portfolio }) => {
+                portfolio.assets
+                    .filter((asset) => asset.rawValue > 25)
+                    .slice(0, 8)
+                    .forEach((asset) => {
+                        const key = `${(asset.chain || 'unknown').toLowerCase()}:${asset.address.toLowerCase()}`;
+                        const existing = holdingMap.get(key);
+                        if (existing) {
+                            existing.totalUsd += asset.rawValue;
+                            existing.walletSet.add(wallet.addr);
+                            return;
+                        }
+
+                        holdingMap.set(key, {
+                            ticker: asset.symbol,
+                            name: asset.symbol,
+                            totalUsd: asset.rawValue,
+                            walletSet: new Set([wallet.addr]),
+                            image: asset.logo,
+                            address: asset.address,
+                            chain: asset.chain || 'Ethereum',
+                            currentPrice: asset.currentPrice,
+                        });
+                    });
+            });
+
+            const tokenCandidates = Array.from(holdingMap.values())
+                .sort((a, b) => b.totalUsd - a.totalUsd)
+                .slice(0, 8);
+
+            setTopInflows(tokenCandidates
+                .filter((token) => !STABLE_TOKEN_SYMBOLS.has(token.ticker.toUpperCase()))
+                .slice(0, 4)
+                .map((token) => ({
+                    id: token.address,
+                    ticker: token.ticker,
+                    name: token.name,
+                    amount: formatCompactNumber(token.totalUsd, '$', 1),
+                    count: token.walletSet.size,
+                    image: token.image
+                })));
+
+            const activityResults = await Promise.all(tokenCandidates.map(async (token) => {
+                try {
+                    const tokenDetails = await DatabaseService.getTokenDetails(token.address, token.chain.toLowerCase());
+                    const activity = await ChainActivityService.getTokenActivity(
+                        token.address,
+                        token.chain,
+                        token.currentPrice,
+                        tokenDetails?.pairAddress
+                    );
+
+                    const smartEvents = activity.filter((event) => smartWalletSet.has(event.wallet.toLowerCase()));
+                    return {
+                        token,
+                        tokenDetails,
+                        smartEvents
+                    };
+                } catch {
+                    return {
+                        token,
+                        tokenDetails: null,
+                        smartEvents: []
+                    };
+                }
+            }));
+
+            const eventRows: SmartWalletEvent[] = activityResults.flatMap(({ smartEvents, token }) =>
+                smartEvents
+                    .filter((event) => event.type === 'Buy' || event.type === 'Sell')
+                    .map((event, index) => ({
+                        id: `${token.address}-${event.hash}-${index}`,
+                        type: event.type === 'Buy' ? 'buy' : 'sell',
+                        wallet: shortenWallet(event.wallet),
+                        token: token.ticker,
+                        amount: event.usd,
+                        time: event.time
+                    }))
+            );
+
+            eventRows.sort((a, b) => getEventAgeSeconds(a.time) - getEventAgeSeconds(b.time));
+            setRecentEvents(eventRows.slice(0, 8));
+
+            const outflowMap = new Map<string, {
+                ticker: string;
+                name: string;
+                totalUsd: number;
+                walletSet: Set<string>;
+                image: string;
+            }>();
+
+            activityResults.forEach(({ token, smartEvents }) => {
+                const sells = smartEvents.filter((event) => event.type === 'Sell');
+                if (!sells.length) return;
+
+                const totalUsd = sells.reduce((sum, event) => sum + parseUsd(event.usd), 0);
+                const sellWallets = new Set(sells.map((event) => event.wallet.toLowerCase()));
+                outflowMap.set(token.address, {
+                    ticker: token.ticker,
+                    name: token.name,
+                    totalUsd,
+                    walletSet: sellWallets,
+                    image: token.image
+                });
+            });
+
+            const resolvedOutflows = Array.from(outflowMap.values())
+                .sort((a, b) => b.totalUsd - a.totalUsd)
+                .slice(0, 4)
+                .map((token) => ({
+                    id: token.ticker,
+                    ticker: token.ticker,
+                    name: token.name,
+                    amount: formatCompactNumber(token.totalUsd, '$', 1),
+                    count: token.walletSet.size,
+                    image: token.image
+                }));
+
+            setTopOutflows(resolvedOutflows);
+        };
+
+        hydrateSmartMoneyPanels();
+    }, [smartWallets, timeRange, chain]);
 
     return (
         <div className="flex flex-col gap-6 pb-8 animate-fade-in w-full max-w-[1600px] mx-auto">
@@ -108,10 +305,20 @@ export const SmartMoney: React.FC = () => {
                             </h3>
                         </div>
                         <div className="p-2 space-y-1">
-                            {TRENDING_WALLETS.map((wallet) => (
+                            {loadingWallets && (
+                                <div className="p-4 text-sm text-[#8F96A3]">
+                                    Loading shared smart money wallets...
+                                </div>
+                            )}
+                            {!loadingWallets && smartWallets.length === 0 && (
+                                <div className="p-4 text-sm text-[#8F96A3]">
+                                    No wallets have qualified yet. Track wallets from Wallet Tracker and strong performers will appear here automatically.
+                                </div>
+                            )}
+                            {smartWallets.map((wallet) => (
                                 <div
-                                    key={wallet.id}
-                                    onClick={() => navigate(`/smart-money/${wallet.address}`)}
+                                    key={wallet.addr}
+                                    onClick={() => navigate(`/smart-money/${wallet.addr}`)}
                                     className="p-3 hover:bg-[#1C1F22] rounded-xl transition-colors cursor-pointer group relative border-b border-[#2A2E33]/30 last:border-0"
                                 >
                                     {/* Header: Avatar, Badge, Address, Button */}
@@ -121,7 +328,8 @@ export const SmartMoney: React.FC = () => {
                                             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-inner group-hover:scale-105 transition-transform"></div>
 
                                             <div className="flex flex-col gap-0.5">
-                                                <span className="text-sm font-bold text-[#EAECEF] font-mono tracking-tight group-hover:text-primary-green transition-colors">{wallet.address}</span>
+                                                <span className="text-sm font-bold text-[#EAECEF] tracking-tight group-hover:text-primary-green transition-colors">{wallet.name}</span>
+                                                <span className="text-[10px] text-[#8F96A3] font-mono">{wallet.addr}</span>
                                             </div>
                                         </div>
 
@@ -134,21 +342,26 @@ export const SmartMoney: React.FC = () => {
                                     <div className="flex justify-between items-start pt-0 pl-10">
                                         <div className="flex flex-col text-left">
                                             <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Win Rate</span>
-                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.winRate}</span>
+                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.lastWinRate || 'N/A'}</span>
                                         </div>
                                         <div className="flex flex-col text-center">
-                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">% Successful Token</span>
-                                            <span className="text-xs font-bold text-green-400">{wallet.successfulTokens}</span>
+                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Score</span>
+                                            <span className="text-xs font-bold text-green-400">{wallet.qualification?.score || 0}/100</span>
                                         </div>
                                         <div className="flex flex-col text-center">
-                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">30d PnL</span>
-                                            <span className="text-xs font-bold text-green-400">{wallet.pnlPercent}</span>
+                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">PnL</span>
+                                            <span className="text-xs font-bold text-green-400">{wallet.lastPnl || 'N/A'}</span>
                                         </div>
                                         <div className="flex flex-col text-right">
-                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Vol</span>
-                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.volume}</span>
+                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Balance</span>
+                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.lastBalance || 'N/A'}</span>
                                         </div>
                                     </div>
+                                    {wallet.qualification?.reasons?.[0] && (
+                                        <div className="pl-10 pt-2 text-[10px] text-[#8F96A3]">
+                                            {wallet.qualification.reasons[0]}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -171,7 +384,12 @@ export const SmartMoney: React.FC = () => {
                             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
                         </div>
                         <div className="p-2 space-y-1">
-                            {RECENT_EVENTS.map((event, i) => (
+                            {!loadingWallets && recentEvents.length === 0 && (
+                                <div className="p-4 text-sm text-[#8F96A3]">
+                                    No recent buy or sell activity has been confirmed from the current smart-wallet set yet.
+                                </div>
+                            )}
+                            {recentEvents.map((event, i) => (
                                 <div
                                     key={i}
                                     onClick={() => navigate(`/token-smart-money/${event.token}`)}
@@ -218,7 +436,12 @@ export const SmartMoney: React.FC = () => {
                         </div>
 
                         <div className="p-4 flex flex-col gap-2">
-                            {MOCK_INFLOWS.map((token) => (
+                            {!loadingWallets && topInflows.length === 0 && (
+                                <div className="text-sm text-[#8F96A3]">
+                                    Smart-money inflows will appear here once qualified wallets build overlapping token positions.
+                                </div>
+                            )}
+                            {topInflows.map((token) => (
                                 <div key={token.id} className="bg-[#1C1F22] border border-[#2A2E33] hover:border-green-500/30 px-3 py-2.5 rounded-xl transition-all cursor-pointer group flex items-center justify-between h-[64px]">
                                     {/* Left: Token Info */}
                                     <div className="flex items-center gap-3">
@@ -248,7 +471,12 @@ export const SmartMoney: React.FC = () => {
                         </div>
 
                         <div className="p-4 flex flex-col gap-2">
-                            {MOCK_OUTFLOWS.map((token) => (
+                            {!loadingWallets && topOutflows.length === 0 && (
+                                <div className="text-sm text-[#8F96A3]">
+                                    No recent smart-money sell pressure has been confirmed yet.
+                                </div>
+                            )}
+                            {topOutflows.map((token) => (
                                 <div key={token.id} className="bg-[#1C1F22] border border-[#2A2E33] hover:border-red-500/30 px-3 py-2.5 rounded-xl transition-all cursor-pointer group flex items-center justify-between h-[64px]">
                                     {/* Left: Token Info */}
                                     <div className="flex items-center gap-3">

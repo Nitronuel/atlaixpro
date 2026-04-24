@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChainRouter, PortfolioData } from '../services/ChainRouter';
-import { SavedWalletService } from '../services/SavedWalletService';
-import { SavedWallet, WalletCategory } from '../types';
+import { detectWalletAddressType } from '../utils/wallet';
 
 export interface WalletStats {
     winRate: string;
@@ -19,6 +18,7 @@ export const useWalletPortfolio = (
     timeFilter: 'ALL' | '1D' | '1W' | '1M' | '>1M'
 ) => {
     const [loading, setLoading] = useState(!!(selectedWalletAddr || address));
+    const [refreshKey, setRefreshKey] = useState(0);
     const [portfolioData, setPortfolioData] = useState<PortfolioData | null>(null);
     const [walletStats, setWalletStats] = useState<WalletStats>({
         winRate: 'N/A',
@@ -30,12 +30,18 @@ export const useWalletPortfolio = (
     });
 
     const isInternalUpdate = useRef(false);
+    const forceRefreshRef = useRef(false);
+
+    useEffect(() => {
+        isInternalUpdate.current = false;
+    }, [address, selectedWalletAddr, chain]);
 
     // Detect chain helper (internal use)
     const detectChain = (addr: string) => {
         if (!addr) return null;
-        if (!addr.startsWith('0x') && addr.length >= 32 && addr.length <= 44) return 'Solana';
-        if (addr.startsWith('0x')) {
+        const type = detectWalletAddressType(addr);
+        if (type === 'solana') return 'Solana';
+        if (type === 'evm') {
             if (chain === 'Solana') return 'All Chains'; // Reset if mismatch
             return 'Ethereum'; // Default for 0x if unspecified
         }
@@ -89,7 +95,7 @@ export const useWalletPortfolio = (
                             timestamp: Date.now()
                         });
                     } else {
-                        const data = await ChainRouter.fetchPortfolio(targetChain, walletAddr);
+                        const data = await ChainRouter.fetchPortfolio(targetChain, walletAddr, forceRefreshRef.current);
                         setPortfolioData(data);
                     }
                 } catch (e) {
@@ -104,12 +110,13 @@ export const useWalletPortfolio = (
                         avgHoldTime: 'N/A'
                     });
                 } finally {
+                    forceRefreshRef.current = false;
                     setLoading(false);
                 }
             }
         };
         fetchData();
-    }, [address, selectedWalletAddr, chain]); // Re-fetch when these change
+    }, [address, selectedWalletAddr, chain, refreshKey]); // Re-fetch when these change
 
     // Reset PnL when timeFilter changes
     useEffect(() => {
@@ -289,5 +296,10 @@ export const useWalletPortfolio = (
 
     }, [portfolioData]);
 
-    return { loading, portfolioData, walletStats, setWalletStats, setPortfolioData, setLoading };
+    const refreshPortfolio = () => {
+        forceRefreshRef.current = true;
+        setRefreshKey(prev => prev + 1);
+    };
+
+    return { loading, portfolioData, walletStats, setWalletStats, setPortfolioData, setLoading, refreshPortfolio };
 };

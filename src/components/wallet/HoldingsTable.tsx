@@ -8,9 +8,10 @@ interface HoldingsTableProps {
     loading: boolean;
     chain: string;
     timeFilter: 'ALL' | '1D' | '1W' | '1M' | '>1M';
+    onRefresh?: () => void;
 }
 
-export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loading, chain, timeFilter }) => {
+export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loading, chain, timeFilter, onRefresh }) => {
     const navigate = useNavigate();
     const [visibleCount, setVisibleCount] = useState(20);
     const [showDust, setShowDust] = useState(false);
@@ -20,7 +21,12 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
             <div className="p-6 border-b border-border flex justify-between items-center">
                 <h3 className="font-bold text-lg text-text-light">Current Holdings</h3>
                 <div className="flex gap-2">
-                    <button className="p-1.5 bg-card hover:bg-card-hover border border-border rounded-lg text-text-medium hover:text-text-light transition-colors">
+                    <button
+                        className="p-1.5 bg-card hover:bg-card-hover border border-border rounded-lg text-text-medium hover:text-text-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={onRefresh}
+                        disabled={!onRefresh || loading}
+                        title={onRefresh ? 'Refresh wallet data' : 'Refresh unavailable'}
+                    >
                         <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
                     </button>
                 </div>

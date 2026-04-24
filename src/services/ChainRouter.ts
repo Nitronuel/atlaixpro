@@ -14,6 +14,7 @@ export interface PortfolioData {
         balance: string;
         value: string;
         price: string;
+        currentPrice: number;
         logo: string;
         rawValue: number;
         avgBuy?: string;
@@ -79,7 +80,7 @@ const fetchFromMoralis = async (chain: string, address: string): Promise<Portfol
 
     // 1. Fetch Real Balances
     // ALWAYS use Moralis as the Source of Truth for Balances (Universal Chain Support)
-    const balances = await MoralisService.getWalletBalances(address, chain);
+        const balances = await MoralisService.getWalletBalances(address, chain);
     const isEVM = chain.toLowerCase() !== 'solana';
 
     // 2. Identify tokens missing prices (Moralis sometimes doesn't have pricing for new pairs)
@@ -120,14 +121,16 @@ const fetchFromMoralis = async (chain: string, address: string): Promise<Portfol
     let chainLogo = 'https://cryptologos.cc/logos/ethereum-eth-logo.png';
     if (chain.toLowerCase() === 'solana') { chainLogo = 'https://cryptologos.cc/logos/solana-sol-logo.png'; }
     else if (chain.toLowerCase() === 'bsc') { chainName = 'BSC'; chainLogo = 'https://cryptologos.cc/logos/bnb-bnb-logo.png'; }
-    else if (chain.toLowerCase() === 'base') { chainName = 'Base'; chainLogo = 'https://cryptologos.cc/logos/base-base-logo.png'; }
-    else if (chain.toLowerCase() === 'polygon') { chainName = 'Polygon'; chainLogo = 'https://cryptologos.cc/logos/polygon-matic-logo.png'; }
-    else if (chain.toLowerCase() === 'avalanche') { chainName = 'Avalanche'; chainLogo = 'https://cryptologos.cc/logos/avalanche-avax-logo.png'; }
+        else if (chain.toLowerCase() === 'base') { chainName = 'Base'; chainLogo = 'https://cryptologos.cc/logos/base-base-logo.png'; }
+        else if (chain.toLowerCase() === 'arbitrum') { chainName = 'Arbitrum'; chainLogo = 'https://cryptologos.cc/logos/arbitrum-arb-logo.png'; }
+        else if (chain.toLowerCase() === 'optimism') { chainName = 'Optimism'; chainLogo = 'https://cryptologos.cc/logos/optimism-ethereum-op-logo.png'; }
+        else if (chain.toLowerCase() === 'polygon') { chainName = 'Polygon'; chainLogo = 'https://cryptologos.cc/logos/polygon-matic-logo.png'; }
+        else if (chain.toLowerCase() === 'avalanche') { chainName = 'Avalanche'; chainLogo = 'https://cryptologos.cc/logos/avalanche-avax-logo.png'; }
 
     // 4. Process Assets & Calculate Values
     const processedAssetsRaw = await Promise.all(balances.map(async b => {
         // Fix: Allow 0 decimals (Solana) but default to 18 if undefined/null
-        const decimals = (b.decimals !== undefined && b.decimals !== null) ? b.decimals : 18;
+        const decimals = (b.decimals !== undefined && b.decimals !== null) ? Number(b.decimals) : 18;
         const bal = parseFloat(b.balance) / Math.pow(10, decimals);
 
         // Price Logic: Moralis Price -> Alchemy Price -> DexScreener Price -> Derived -> 0
@@ -151,7 +154,7 @@ const fetchFromMoralis = async (chain: string, address: string): Promise<Portfol
         // --- STABILITY CHECK ---
         // Fix for Stablecoins showing $0.002 due to PulseChain/Bad DexScreener Data
         const stableSymbols = ['USDT', 'USDC', 'DAI', 'USDe', 'FDUSD', 'USDS'];
-        if (stableSymbols.includes(b.symbol.toUpperCase())) {
+        if (b.symbol && stableSymbols.includes(b.symbol.toUpperCase())) {
             // If price is suspiciously low (< $0.80) or missing, force a robust check
             if (price < 0.80) {
                 // Try fetching specific price from Moralis (Price Endpoint is often more accurate than Balances endpoint for major tokens)
@@ -205,18 +208,53 @@ const fetchFromMoralis = async (chain: string, address: string): Promise<Portfol
 };
 
 export const ChainRouter = {
-    fetchPortfolio: async (chain: string, address: string): Promise<PortfolioData> => {
+    fetchPortfolio: async (chain: string, address: string, forceRefresh: boolean = false): Promise<PortfolioData> => {
         // Normalize key for caching
         const normalizedChain = chain.toLowerCase();
         const requestKey = `moralis_${normalizedChain}_${address}`;
+
+        if (forceRefresh) {
+            return cacheManager.getOrFetch(`${requestKey}_${Date.now()}`, async () => {
+                if (chain === 'All Chains' || normalizedChain === 'all chains') {
+                    if (address.startsWith('0x')) {
+                        const chains = ['Ethereum', 'Base', 'BSC', 'Arbitrum', 'Optimism', 'Polygon', 'Avalanche'];
+                        const results = await Promise.all(chains.map(async c => {
+                            try {
+                                return await fetchFromMoralis(c, address);
+                            } catch {
+                                return null;
+                            }
+                        }));
+                        const validResults = results.filter(r => r !== null);
+                        if (validResults.length === 0) return fetchFromMoralis('Ethereum', address);
+
+                        const allAssets = validResults.flatMap(res => res?.assets || []).sort((a, b) => b.rawValue - a.rawValue);
+                        const totalUsdVal = allAssets.reduce((acc, curr) => acc + curr.rawValue, 0);
+                        const latestTimestamp = validResults.reduce((latest, current) => Math.max(latest, current?.timestamp || 0), 0);
+
+                        return {
+                            netWorth: `$${totalUsdVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                            providerUsed: 'Moralis',
+                            timestamp: latestTimestamp || Date.now(),
+                            chainIcon: 'https://cryptologos.cc/logos/ethereum-eth-logo.png',
+                            assets: allAssets,
+                            recentActivity: []
+                        };
+                    }
+
+                    return fetchFromMoralis('Solana', address);
+                }
+
+                return fetchFromMoralis(chain, address);
+            });
+        }
 
         return cacheManager.getOrFetch(requestKey, async () => {
             // Handle Multi-Chain EVM Aggregation
             if (chain === 'All Chains' || normalizedChain === 'all chains') {
                 if (address.startsWith('0x')) {
                     // It's an EVM address, fetch from major EVM chains
-                    // Prioritize likely chains: Ethereum, Base, BSC
-                    const chains = ['Ethereum', 'Base', 'BSC', 'Arbitrum'];
+                    const chains = ['Ethereum', 'Base', 'BSC', 'Arbitrum', 'Optimism', 'Polygon', 'Avalanche'];
 
                     try {
                         // Concurrent fetch with individual error handling
@@ -323,7 +361,7 @@ export const ChainRouter = {
 
         // 1. Get Actual Cost Basis & Buy Time
         // EVM -> Use Alchemy (Better Transaction History)
-        // Solana -> Use Helius/Rpc (via Moralis wrapper or Direct)
+        // Solana -> Use normalized Solana RPC history (via Moralis wrapper or direct service)
 
         let costBasis = 0;
         let buyTime = 0;

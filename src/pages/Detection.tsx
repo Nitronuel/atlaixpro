@@ -151,38 +151,37 @@ export const Detection: React.FC = () => {
                 </form>
             </div>
 
-            <div className="bg-card border border-border rounded-2xl overflow-visible shadow-sm">
-                <div className="grid grid-cols-1 xl:grid-cols-[1fr_250px]">
-                    <div className="p-6">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                            <h3 className="card-title mb-0">Global Detection Chart</h3>
-                            <div className="flex gap-2">
-                                {['1H', '4H', '12H', '24H'].map(tf => (
-                                    <button
-                                        key={tf}
-                                        className={`px-3 py-1 text-xs font-semibold rounded-full border transition-all ${timeFilter === tf ? 'bg-card-hover border-primary-green text-primary-green' : 'bg-transparent border-border text-text-medium hover:text-text-light'}`}
-                                        onClick={() => setTimeFilter(tf)}
-                                    >{tf}</button>
-                                ))}
-                            </div>
-                        </div>
-                        <div ref={chartRef} className="w-full min-h-[320px]"></div>
-                    </div>
-
-                    <div className="border-t xl:border-t-0 xl:border-l border-border p-6 bg-card-hover/20">
-                        <h3 className="card-title text-base font-bold">Quick Actions</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
-                            {[
-                                { icon: <ShieldAlert size={18} className="text-text-medium" />, label: 'Create Smart Alert' },
-                                { icon: <Wallet size={18} className="text-text-medium" />, label: 'Track Wallet' },
-                                { icon: <Radar size={18} className="text-text-medium" />, label: 'Run SafeScan' },
-                                { icon: <TrendingUp size={18} className="text-text-medium" />, label: 'View Top Gainers' },
-                            ].map((action, i) => (
-                                <button key={i} className="flex items-center gap-2 p-3 text-sm font-medium text-text-medium hover:bg-card-hover hover:text-text-light rounded-lg text-left transition-all">
-                                    {action.icon} {action.label}
-                                </button>
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-6">
+                <div className="bg-card border border-border rounded-2xl p-6">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                        <h3 className="card-title mb-0">Global Detection Chart</h3>
+                        <div className="flex gap-2">
+                            {['1H', '4H', '12H', '24H'].map(tf => (
+                                <button
+                                    key={tf}
+                                    className={`px-3 py-1 text-xs font-semibold rounded-full border transition-all ${timeFilter === tf ? 'bg-card-hover border-primary-green text-primary-green' : 'bg-transparent border-border text-text-medium hover:text-text-light'}`}
+                                    onClick={() => setTimeFilter(tf)}
+                                >{tf}</button>
                             ))}
                         </div>
+                    </div>
+                    <div ref={chartRef} className="w-full min-h-[320px]"></div>
+                </div>
+
+                <div className="bg-card border border-border rounded-2xl p-6">
+                    <h3 className="card-title text-base font-bold mb-6">Quick Actions</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
+                        {[
+                            { icon: <ShieldAlert size={20} className="text-primary-green" />, label: 'Create Smart Alert', highlight: true },
+                            { icon: <Wallet size={20} className="text-text-medium group-hover:text-text-light" />, label: 'Track Wallet', highlight: false },
+                            { icon: <Radar size={20} className="text-text-medium group-hover:text-text-light" />, label: 'Run SafeScan', highlight: false },
+                            { icon: <TrendingUp size={20} className="text-text-medium group-hover:text-text-light" />, label: 'View Top Gainers', highlight: false },
+                        ].map((action, i) => (
+                            <button key={i} className={`flex items-center gap-3 p-4 bg-transparent border border-border ${action.highlight ? 'hover:border-primary-green' : 'hover:border-text-light'} rounded-xl transition-all group text-left`}>
+                                {action.icon}
+                                <span className={`font-bold text-sm ${action.highlight ? 'text-text-light group-hover:text-primary-green' : 'text-text-medium group-hover:text-text-light'}`}>{action.label}</span>
+                            </button>
+                        ))}
                     </div>
                 </div>
             </div>

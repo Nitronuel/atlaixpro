@@ -46,6 +46,10 @@ On-Chain Data Provider: Moralis
 
 Off-Chain Data Provider: Twitter/X API
 
+Current Local Runtime Note:
+
+The repository currently runs as a Vite frontend with a local Node forensic worker for Safe Scan. Some infrastructure listed above reflects the intended production target architecture, not every component that is already wired into the local development runtime.
+
 Core Technologies:
 
 Language: TypeScript
@@ -81,10 +85,8 @@ To run this project locally, follow these steps:
     VITE_GOPLUS_SECRET=your_goplus_app_secret
     VITE_SUPABASE_URL=your_supabase_project_url
     VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-    VITE_SUPABASE_SERVICE_KEY=your_supabase_service_role_key
-    VITE_HELIUS_API_KEY=your_helius_rpc_key
     
-    >  Note: Ask the team lead for the required keys if you don't have them.
+    >  Note: Ask the team lead for the required keys if you don't have them. Keep service-role keys on backend-only infrastructure and do not expose them through `VITE_` environment variables.
 
 4.  Run the development server:
     

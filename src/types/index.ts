@@ -7,15 +7,29 @@ export type ViewState =
     | 'sentiment'
     | 'detection'
     | 'token-detection'
-    | 'virality'
     | 'ai-assistant'
     | 'wallet-tracking'
     | 'smart-money'
     | 'safe-scan'
+    | 'alchemy-hub'
     | 'smart-alerts'
     | 'settings';
 
 export type WalletCategory = 'Smart Money' | 'Whale' | 'Sniper' | 'Fresh Wallet' | 'Early Buyer' | 'Hodler' | 'Degen' | 'Insider' | 'Fresh' | 'Copy Trade' | 'High Vol' | 'Early';
+
+export interface SmartMoneyQualification {
+    score: number;
+    qualified: boolean;
+    reasons: string[];
+    evaluatedAt: number;
+    metrics: {
+        netWorthUsd: number;
+        winRate: number;
+        pnlPercent: number;
+        activePositions: number;
+        profitablePositions: number;
+    };
+}
 
 export interface SavedWallet {
     addr: string;
@@ -25,6 +39,9 @@ export interface SavedWallet {
     lastBalance?: string;
     lastWinRate?: string;
     lastPnl?: string;
+    qualification?: SmartMoneyQualification;
+    autoTracked?: boolean;
+    autoPromotedToSmartMoney?: boolean;
 }
 
 export interface Wallet {

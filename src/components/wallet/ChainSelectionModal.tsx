@@ -1,25 +1,21 @@
 import React, { useState } from 'react';
 import { X, Search } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { SupportedChainOption, SUPPORTED_WALLET_CHAINS } from '../../utils/chains';
 
 interface ChainSelectionModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSelectChain: (chain: string) => void;
+    chains?: SupportedChainOption[];
 }
 
-export const ChainSelectionModal: React.FC<ChainSelectionModalProps> = ({ isOpen, onClose, onSelectChain }) => {
+export const ChainSelectionModal: React.FC<ChainSelectionModalProps> = ({
+    isOpen,
+    onClose,
+    onSelectChain,
+    chains = SUPPORTED_WALLET_CHAINS.filter(chain => !chain.isAggregate && chain.id !== 'Solana')
+}) => {
     const [searchTerm, setSearchTerm] = useState('');
-
-    const chains = [
-        { id: 'Ethereum', name: 'Ethereum', symbol: 'ETH' },
-        { id: 'BSC', name: 'Binance Smart Chain', symbol: 'BSC' },
-        { id: 'Base', name: 'Base', symbol: 'BASE' },
-        { id: 'Arbitrum', name: 'Arbitrum', symbol: 'ARB' },
-        { id: 'Optimism', name: 'Optimism', symbol: 'OP' },
-        { id: 'Polygon', name: 'Polygon', symbol: 'MATIC' },
-        { id: 'Avalanche', name: 'Avalanche', symbol: 'AVAX' },
-    ];
 
     const filteredChains = chains.filter(c =>
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
