@@ -1,2 +1,2 @@
-/api/* http://167.86.103.70/api/:splat 200
+/api/* https://atlaixpro-production.up.railway.app/api/:splat 200
 /* /index.html 200

@@ -72,6 +72,23 @@ const PROVIDER_ALLOWED_HOSTS = new Set([
     'solana-gateway.moralis.io',
     'api.gopluslabs.io'
 ]);
+const PUBLIC_PROXY_ROUTES = [
+    {
+        prefix: '/api/dexscreener',
+        target: 'https://api.dexscreener.com',
+        methods: new Set(['GET'])
+    },
+    {
+        prefix: '/api/graph',
+        target: 'https://api.thegraph.com',
+        methods: new Set(['GET', 'POST'])
+    },
+    {
+        prefix: '/api/solana-public',
+        target: 'https://api.mainnet-beta.solana.com',
+        methods: new Set(['POST'])
+    }
+] as const;
 
 function json(response: import('node:http').ServerResponse, status: number, body: unknown) {
     response.writeHead(status, {
@@ -96,6 +113,14 @@ async function readJsonBody(request: import('node:http').IncomingMessage) {
     return raw ? JSON.parse(raw) : {};
 }
 
+async function readRawBody(request: import('node:http').IncomingMessage) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+}
+
 function readEnv(...keys: string[]) {
     for (const key of keys) {
         const value = process.env[key]?.trim();
@@ -116,6 +141,48 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}
     } finally {
         clearTimeout(timeoutId);
     }
+}
+
+async function proxyPublicApiRequest(
+    response: import('node:http').ServerResponse,
+    request: import('node:http').IncomingMessage,
+    requestUrl: URL,
+    route: typeof PUBLIC_PROXY_ROUTES[number]
+) {
+    const method = (request.method || 'GET').toUpperCase();
+
+    if (!route.methods.has(method as 'GET' | 'POST')) {
+        json(response, 405, { error: 'Method is not allowed for this proxy route.' });
+        return;
+    }
+
+    const upstreamPath = requestUrl.pathname.slice(route.prefix.length) || '/';
+    const upstreamUrl = new URL(`${upstreamPath}${requestUrl.search}`, route.target);
+    const headers = new Headers();
+    const accept = request.headers.accept;
+    const contentType = request.headers['content-type'];
+
+    if (accept) headers.set('accept', Array.isArray(accept) ? accept.join(',') : accept);
+    if (contentType) headers.set('content-type', Array.isArray(contentType) ? contentType[0] : contentType);
+    headers.set('user-agent', 'Atlaix/1.0');
+
+    if (route.prefix === '/api/solana-public') {
+        headers.set('origin', 'https://explorer.solana.com');
+    }
+
+    const body = method === 'GET' ? undefined : await readRawBody(request);
+    const providerResponse = await fetchWithTimeout(upstreamUrl, {
+        method,
+        headers,
+        body
+    });
+    const text = await providerResponse.text();
+
+    response.writeHead(providerResponse.status, {
+        'Content-Type': providerResponse.headers.get('content-type') || 'application/json',
+        'Access-Control-Allow-Origin': '*'
+    });
+    response.end(text);
 }
 
 function providerErrorMessage(provider: string, status: number, text: string) {
@@ -245,6 +312,17 @@ const server = createServer(async (request, response) => {
     if (method === 'OPTIONS') {
         json(response, 204, {});
         return;
+    }
+
+    const publicProxyRoute = PUBLIC_PROXY_ROUTES.find((route) => requestUrl.pathname.startsWith(route.prefix));
+    if (publicProxyRoute) {
+        try {
+            await proxyPublicApiRequest(response, request, requestUrl, publicProxyRoute);
+            return;
+        } catch (error) {
+            json(response, 502, { error: error instanceof Error ? error.message : 'Public API proxy failed.' });
+            return;
+        }
     }
 
     if (method === 'POST' && requestUrl.pathname === '/api/providers/moralis') {

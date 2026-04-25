@@ -4,7 +4,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "http://167.86.103.70/api/:splat"
+  to = "https://atlaixpro-production.up.railway.app/api/:splat"
   status = 200
   force = true
 
