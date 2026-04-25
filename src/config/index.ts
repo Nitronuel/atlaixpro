@@ -12,6 +12,12 @@ const readEnv = (...values: Array<string | undefined>) => {
 
 const readBackendEnv = (...values: Array<string | undefined>) => isBrowser ? '' : readEnv(...values);
 
+const readUrlEnv = (...values: Array<string | undefined>) => {
+    const value = readEnv(...values);
+    const normalized = value.replace(/^[A-Z0-9_]+=https?:\/\//i, (match) => match.slice(match.indexOf('http')));
+    return normalized.replace(/\/+$/, '');
+};
+
 export const APP_CONFIG = {
     goplusAppKey: readBackendEnv(processEnv.GOPLUS_KEY),
     goplusAppSecret: readBackendEnv(processEnv.GOPLUS_SECRET),
@@ -23,7 +29,7 @@ export const APP_CONFIG = {
     supabaseAnonKey: readEnv(env.VITE_SUPABASE_ANON_KEY, processEnv.VITE_SUPABASE_ANON_KEY),
 
     // Optional production backend origin, e.g. https://atlaix-backend.up.railway.app
-    apiBaseUrl: readEnv(env.VITE_API_BASE_URL, processEnv.VITE_API_BASE_URL),
+    apiBaseUrl: readUrlEnv(env.VITE_API_BASE_URL, processEnv.VITE_API_BASE_URL),
 
     // 2. MORALIS (The Deep Dive Data)
     moralisKey: readBackendEnv(processEnv.MORALIS_API_KEY),
