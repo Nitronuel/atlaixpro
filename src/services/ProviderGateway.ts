@@ -1,3 +1,5 @@
+import { APP_CONFIG } from '../config';
+
 type ProviderName = 'moralis' | 'goplus';
 
 type ProviderFetchInit = Omit<RequestInit, 'body'> & {
@@ -29,6 +31,12 @@ function copySafeHeaders(headers?: HeadersInit) {
     return safe;
 }
 
+function apiUrl(path: string) {
+    return APP_CONFIG.apiBaseUrl
+        ? `${APP_CONFIG.apiBaseUrl.replace(/\/$/, '')}${path}`
+        : path;
+}
+
 export function getBackendAlchemyKey() {
     return readProcessEnv('ALCHEMY_API_KEY');
 }
@@ -37,7 +45,7 @@ export async function fetchProvider(provider: ProviderName, url: string, init: P
     if (IS_BROWSER) {
         const body = typeof init.body === 'string' ? init.body : init.body ? String(init.body) : undefined;
 
-        return fetch(`/api/providers/${provider}`, {
+        return fetch(apiUrl(`/api/providers/${provider}`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -65,7 +73,7 @@ export async function fetchProvider(provider: ProviderName, url: string, init: P
 
 export async function fetchAlchemyRpc(network: string, payload: unknown) {
     if (IS_BROWSER) {
-        return fetch('/api/providers/alchemy-rpc', {
+        return fetch(apiUrl('/api/providers/alchemy-rpc'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ network, payload })

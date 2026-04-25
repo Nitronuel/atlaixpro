@@ -11,7 +11,8 @@ import {
     isSmartScannerChain
 } from './smart-money-scanner-discovery';
 
-const PORT = Number(process.env.FORENSICS_PORT || 3101);
+const PORT = Number(process.env.PORT || process.env.FORENSICS_PORT || 3101);
+const HOST = process.env.HOST || '0.0.0.0';
 const queue = new LocalDurableForensicsQueue(resolve(process.cwd()));
 
 function loadEnvFile(filename: string, override = false) {
@@ -448,7 +449,7 @@ const server = createServer(async (request, response) => {
         return;
     }
 
-    if (method === 'GET' && requestUrl.pathname === '/api/forensics/health') {
+    if (method === 'GET' && (requestUrl.pathname === '/api/forensics/health' || requestUrl.pathname === '/health')) {
         const stats = queue.getStats();
         json(response, 200, {
             ok: true,
@@ -460,6 +461,6 @@ const server = createServer(async (request, response) => {
     json(response, 404, { error: 'Not found.' });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-    console.log(`[ForensicsServer] listening on http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+    console.log(`[ForensicsServer] listening on http://${HOST}:${PORT}`);
 });

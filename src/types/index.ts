@@ -12,7 +12,6 @@ export type ViewState =
     | 'smart-money'
     | 'smart-money-scanner'
     | 'safe-scan'
-    | 'alchemy-hub'
     | 'smart-alerts'
     | 'settings';
 

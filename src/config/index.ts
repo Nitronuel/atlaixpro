@@ -22,6 +22,9 @@ export const APP_CONFIG = {
     // The "Public" Key (Safe for client-side reading)
     supabaseAnonKey: readEnv(env.VITE_SUPABASE_ANON_KEY, processEnv.VITE_SUPABASE_ANON_KEY),
 
+    // Optional production backend origin, e.g. https://atlaix-backend.up.railway.app
+    apiBaseUrl: readEnv(env.VITE_API_BASE_URL, processEnv.VITE_API_BASE_URL),
+
     // 2. MORALIS (The Deep Dive Data)
     moralisKey: readBackendEnv(processEnv.MORALIS_API_KEY),
 

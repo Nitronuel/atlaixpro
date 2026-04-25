@@ -78,9 +78,19 @@ export const SmartMoneyScanner: React.FC = () => {
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [runningJobId, setRunningJobId] = useState<string | null>(null);
 
-    useEffect(() => SmartMoneyScannerService.subscribe(() => {
-        setState(SmartMoneyScannerService.getState());
-    }), []);
+    useEffect(() => {
+        let mounted = true;
+        SmartMoneyScannerService.hydrateState().then((nextState) => {
+            if (mounted) setState(nextState);
+        });
+        const unsubscribe = SmartMoneyScannerService.subscribe(() => {
+            setState(SmartMoneyScannerService.getState());
+        });
+        return () => {
+            mounted = false;
+            unsubscribe();
+        };
+    }, []);
 
     const activeTokenJob = activeJobId
         ? state.tokenJobs.find((job) => job.id === activeJobId) || null
@@ -225,7 +235,7 @@ export const SmartMoneyScanner: React.FC = () => {
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <h3 className="text-lg font-black text-text-light">Token Queue</h3>
                         <button
-                            onClick={() => SmartMoneyScannerService.clearCompleted()}
+                            onClick={() => void SmartMoneyScannerService.clearCompleted()}
                             className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold text-text-medium transition-colors hover:text-text-light"
                         >
                             <Trash2 size={14} />

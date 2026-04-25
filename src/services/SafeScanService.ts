@@ -1,4 +1,5 @@
 import type { ForensicBundleReport } from './ForensicBundleService';
+import { APP_CONFIG } from '../config';
 import { getAlchemyHubChain, type AlchemyHubChain } from './forensics/alchemy-hub-chains';
 
 type CacheRecord = {
@@ -49,7 +50,10 @@ function writeCachedReport(tokenAddress: string, chain: AlchemyHubChain, report:
 }
 
 async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
-    const response = await fetch(input, init);
+    const url = typeof input === 'string' && input.startsWith('/api/') && APP_CONFIG.apiBaseUrl
+        ? `${APP_CONFIG.apiBaseUrl.replace(/\/$/, '')}${input}`
+        : input;
+    const response = await fetch(url, init);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
         throw new Error(
