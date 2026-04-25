@@ -1,4 +1,5 @@
 import { APP_CONFIG } from '../../config';
+import type { AlchemyHubScanDepth } from './alchemy-hub-chains';
 import type {
     EvidenceTier,
     ForensicBundleReport,
@@ -25,6 +26,44 @@ const CONNECTOR_HISTORY_SIGNATURE_LIMIT = 8;
 const TOKEN_RECENT_SIGNATURE_LIMIT = 42;
 const RPC_TIMEOUT_MS = 14_000;
 const DEXSCREENER_TIMEOUT_MS = 6_000;
+
+type AlchemyHubSolanaLimits = {
+    maxTokenAccounts: number;
+    maxRenderWallets: number;
+    holderHistoryWallets: number;
+    holderHistorySignatureLimit: number;
+    firstHopConnectorLimit: number;
+    connectorHistoryWallets: number;
+    connectorHistorySignatureLimit: number;
+    tokenRecentSignatureLimit: number;
+};
+
+const SOLANA_LIMITS: Record<AlchemyHubScanDepth, AlchemyHubSolanaLimits> = {
+    balanced: {
+        maxTokenAccounts: MAX_TOKEN_ACCOUNTS,
+        maxRenderWallets: MAX_RENDER_WALLETS,
+        holderHistoryWallets: HOLDER_HISTORY_WALLETS,
+        holderHistorySignatureLimit: HOLDER_HISTORY_SIGNATURE_LIMIT,
+        firstHopConnectorLimit: FIRST_HOP_CONNECTOR_LIMIT,
+        connectorHistoryWallets: CONNECTOR_HISTORY_WALLETS,
+        connectorHistorySignatureLimit: CONNECTOR_HISTORY_SIGNATURE_LIMIT,
+        tokenRecentSignatureLimit: TOKEN_RECENT_SIGNATURE_LIMIT
+    },
+    deep: {
+        maxTokenAccounts: 2000,
+        maxRenderWallets: 600,
+        holderHistoryWallets: 500,
+        holderHistorySignatureLimit: 32,
+        firstHopConnectorLimit: 200,
+        connectorHistoryWallets: 240,
+        connectorHistorySignatureLimit: 24,
+        tokenRecentSignatureLimit: 300
+    }
+};
+
+type AlchemyHubAnalysisOptions = {
+    depth?: AlchemyHubScanDepth;
+};
 
 type AlchemyRpcPayload<T> = {
     result?: T;
@@ -290,8 +329,9 @@ async function fetchAlchemyMintAccountsViaDas(tokenAddress: string, limit = MAX_
     const accounts: Array<{ address: string; owner: string; amount: string }> = [];
     let cursor: string | null | undefined;
     let loops = 0;
+    const maxLoops = Math.ceil(limit / 100) + 2;
 
-    while (accounts.length < limit && loops < 6) {
+    while (accounts.length < limit && loops < maxLoops) {
         const result = await alchemyRpc<AlchemyGetTokenAccountsResponse>('getTokenAccounts', {
             mintAddress: tokenAddress,
             limit: Math.min(100, limit - accounts.length),
@@ -384,10 +424,10 @@ async function fetchParsedTransactions(signatures: string[]) {
     }).then((entries) => entries.filter((entry): entry is ParsedTransaction => Boolean(entry)));
 }
 
-async function fetchRecentTokenTransactions(tokenAddress: string) {
+async function fetchRecentTokenTransactions(tokenAddress: string, limit = TOKEN_RECENT_SIGNATURE_LIMIT) {
     const signatures = await alchemyRpc<MintSignature[]>('getSignaturesForAddress', [
         tokenAddress,
-        { limit: TOKEN_RECENT_SIGNATURE_LIMIT, commitment: 'finalized' }
+        { limit, commitment: 'finalized' }
     ]).catch(() => []);
 
     return fetchParsedTransactions(signatures.map((entry) => entry.signature));
@@ -849,8 +889,10 @@ function selectBestGraphFundingLinks(args: {
     return [...bestByTarget.values()];
 }
 
-export async function analyzeAlchemyHubToken(tokenAddress: string): Promise<ForensicBundleReport> {
+export async function analyzeAlchemyHubToken(tokenAddress: string, options: AlchemyHubAnalysisOptions = {}): Promise<ForensicBundleReport> {
     const normalizedAddress = tokenAddress.trim();
+    const depth = options.depth === 'deep' ? 'deep' : 'balanced';
+    const limits = SOLANA_LIMITS[depth];
     if (!isLikelySolanaAddress(normalizedAddress)) {
         throw new Error('The provided value is not a valid Solana contract address.');
     }
@@ -858,8 +900,8 @@ export async function analyzeAlchemyHubToken(tokenAddress: string): Promise<Fore
     const [metadata, largestAccounts, mintAccounts, tokenTransactions] = await Promise.all([
         fetchTokenMetadata(normalizedAddress),
         fetchTokenLargestAccounts(normalizedAddress),
-        fetchAlchemyMintAccounts(normalizedAddress),
-        fetchRecentTokenTransactions(normalizedAddress)
+        fetchAlchemyMintAccounts(normalizedAddress, limits.maxTokenAccounts),
+        fetchRecentTokenTransactions(normalizedAddress, limits.tokenRecentSignatureLimit)
     ]);
 
     const balancesByWallet = new Map<string, bigint>();
@@ -869,26 +911,26 @@ export async function analyzeAlchemyHubToken(tokenAddress: string): Promise<Fore
 
     const trackedWallets = [...balancesByWallet.entries()]
         .sort((left, right) => Number(right[1] - left[1]))
-        .slice(0, MAX_RENDER_WALLETS)
+        .slice(0, limits.maxRenderWallets)
         .map(([wallet]) => wallet);
     const trackedWalletSet = new Set(trackedWallets);
 
-    const holderHistoryWallets = trackedWallets.slice(0, HOLDER_HISTORY_WALLETS);
+    const holderHistoryWallets = trackedWallets.slice(0, limits.holderHistoryWallets);
     const holderTransactions = await mapWithConcurrency(holderHistoryWallets, 8, async (wallet) => ({
         wallet,
-        transactions: await fetchWalletTransactions(wallet)
+        transactions: await fetchWalletTransactions(wallet, limits.holderHistorySignatureLimit)
     }));
     const holderTransactionsByWallet = new Map(holderTransactions.map((entry) => [entry.wallet, entry.transactions]));
     const walletCounterparties = buildWalletCounterpartyMap(holderTransactionsByWallet, trackedWalletSet);
     const firstHopConnectors = rankFirstHopConnectors(walletCounterparties, trackedWalletSet)
-        .slice(0, FIRST_HOP_CONNECTOR_LIMIT);
+        .slice(0, limits.firstHopConnectorLimit);
     const connectorHistoryWallets = firstHopConnectors
         .filter((entry) => entry.walletCount >= 2 || entry.count >= 2)
-        .slice(0, CONNECTOR_HISTORY_WALLETS)
+        .slice(0, limits.connectorHistoryWallets)
         .map((entry) => entry.connector);
     const connectorTransactions = await mapWithConcurrency(connectorHistoryWallets, 6, async (wallet) => ({
         wallet,
-        transactions: await fetchWalletTransactions(wallet, CONNECTOR_HISTORY_SIGNATURE_LIMIT)
+        transactions: await fetchWalletTransactions(wallet, limits.connectorHistorySignatureLimit)
     }));
     const connectorTransactionsByWallet = new Map(connectorTransactions.map((entry) => [entry.wallet, entry.transactions]));
 
@@ -1138,7 +1180,8 @@ export async function analyzeAlchemyHubToken(tokenAddress: string): Promise<Fore
         },
         evidenceHighlights: [],
         notes: [
-            'Alchemy Hub runs on a separate Alchemy-first cluster-map engine from Bubble Maps and Safe Scan.',
+            `Alchemy Hub ${depth} mode runs on a separate Alchemy-first cluster-map engine from Bubble Maps and Safe Scan.`,
+            `It expanded ${trackedWallets.length} holders with ${holderHistoryWallets.length} direct history traces and ${connectorHistoryWallets.length} connector traces.`,
             'It uses Alchemy account scans, recent holder history, and bounded 2-hop connector discovery to build the map.',
             'Safe Scan remains the deeper multi-hop forensic engine when you need full launch and bundle attribution.'
         ]

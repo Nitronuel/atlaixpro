@@ -1,5 +1,5 @@
 import type { ForensicBundleReport } from './ForensicBundleService';
-import { getAlchemyHubChain, type AlchemyHubChain } from './forensics/alchemy-hub-chains';
+import { getAlchemyHubChain, getAlchemyHubScanDepth, type AlchemyHubChain, type AlchemyHubScanDepth } from './forensics/alchemy-hub-chains';
 
 type CacheRecord = {
     savedAt: number;
@@ -19,17 +19,17 @@ function isLikelyEvmAddress(value: string) {
     return /^0x[a-fA-F0-9]{40}$/.test(value.trim());
 }
 
-function cacheKey(tokenAddress: string, chain: AlchemyHubChain) {
-    return `${CACHE_PREFIX}${chain}:${tokenAddress.toLowerCase()}`;
+function cacheKey(tokenAddress: string, chain: AlchemyHubChain, depth: AlchemyHubScanDepth) {
+    return `${CACHE_PREFIX}${chain}:${depth}:${tokenAddress.toLowerCase()}`;
 }
 
-function readCachedReport(tokenAddress: string, chain: AlchemyHubChain) {
+function readCachedReport(tokenAddress: string, chain: AlchemyHubChain, depth: AlchemyHubScanDepth) {
     try {
-        const raw = window.localStorage.getItem(cacheKey(tokenAddress, chain));
+        const raw = window.localStorage.getItem(cacheKey(tokenAddress, chain, depth));
         if (!raw) return null;
         const record = JSON.parse(raw) as CacheRecord;
         if ((Date.now() - record.savedAt) > CACHE_TTL_MS) {
-            window.localStorage.removeItem(cacheKey(tokenAddress, chain));
+            window.localStorage.removeItem(cacheKey(tokenAddress, chain, depth));
             return null;
         }
         return record.report;
@@ -38,9 +38,9 @@ function readCachedReport(tokenAddress: string, chain: AlchemyHubChain) {
     }
 }
 
-function writeCachedReport(tokenAddress: string, chain: AlchemyHubChain, report: ForensicBundleReport) {
+function writeCachedReport(tokenAddress: string, chain: AlchemyHubChain, depth: AlchemyHubScanDepth, report: ForensicBundleReport) {
     try {
-        window.localStorage.setItem(cacheKey(tokenAddress, chain), JSON.stringify({
+        window.localStorage.setItem(cacheKey(tokenAddress, chain, depth), JSON.stringify({
             savedAt: Date.now(),
             report
         } satisfies CacheRecord));
@@ -63,7 +63,7 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
 }
 
 export { type ForensicBundleReport };
-export type { AlchemyHubChain };
+export type { AlchemyHubChain, AlchemyHubScanDepth };
 
 export const AlchemyHubService = {
     isSupported(tokenAddress: string, chain: AlchemyHubChain = 'solana') {
@@ -72,21 +72,22 @@ export const AlchemyHubService = {
             : isLikelyEvmAddress(tokenAddress);
     },
 
-    async analyzeToken(tokenAddress: string, chain: AlchemyHubChain = 'solana') {
+    async analyzeToken(tokenAddress: string, chain: AlchemyHubChain = 'solana', depth: AlchemyHubScanDepth = 'balanced') {
         const normalizedAddress = tokenAddress.trim();
         const selectedChain = getAlchemyHubChain(chain).id;
+        const selectedDepth = getAlchemyHubScanDepth(depth);
         if (!this.isSupported(normalizedAddress, selectedChain)) {
             throw new Error(selectedChain === 'solana'
                 ? 'Alchemy Hub Solana scans require a valid Solana token address.'
                 : 'Alchemy Hub EVM scans require a valid 0x token contract address.');
         }
 
-        const cached = readCachedReport(normalizedAddress, selectedChain);
+        const cached = readCachedReport(normalizedAddress, selectedChain, selectedDepth);
         if (cached) {
             return cached;
         }
 
-        const inflightKey = `${selectedChain}:${normalizedAddress.toLowerCase()}`;
+        const inflightKey = `${selectedChain}:${selectedDepth}:${normalizedAddress.toLowerCase()}`;
         const inflight = inFlightReportCache.get(inflightKey);
         if (inflight) {
             return inflight;
@@ -97,14 +98,14 @@ export const AlchemyHubService = {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ tokenAddress: normalizedAddress, chain: selectedChain })
+            body: JSON.stringify({ tokenAddress: normalizedAddress, chain: selectedChain, depth: selectedDepth })
         })
             .then((payload) => {
                 const report = payload.report as ForensicBundleReport | undefined;
                 if (!report) {
                     throw new Error('Alchemy Hub backend did not return a report.');
                 }
-                writeCachedReport(normalizedAddress, selectedChain, report);
+                writeCachedReport(normalizedAddress, selectedChain, selectedDepth, report);
                 return report;
             })
             .finally(() => {

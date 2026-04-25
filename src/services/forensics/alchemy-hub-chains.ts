@@ -1,4 +1,5 @@
 export type AlchemyHubChain = 'solana' | 'eth' | 'base' | 'bsc' | 'polygon' | 'arbitrum' | 'optimism';
+export type AlchemyHubScanDepth = 'balanced' | 'deep';
 
 export const ALCHEMY_HUB_CHAINS: Array<{ id: AlchemyHubChain; label: string; kind: 'solana' | 'evm' }> = [
     { id: 'solana', label: 'Solana', kind: 'solana' },
@@ -27,3 +28,6 @@ export function isEvmChain(chain: AlchemyHubChain): chain is Exclude<AlchemyHubC
     return chain !== 'solana';
 }
 
+export function getAlchemyHubScanDepth(value: string | null | undefined): AlchemyHubScanDepth {
+    return value === 'deep' ? 'deep' : 'balanced';
+}

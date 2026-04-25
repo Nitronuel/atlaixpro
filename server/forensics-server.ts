@@ -56,7 +56,7 @@ for (const [legacyKey, backendKey] of Object.entries(LEGACY_BACKEND_ENV_MAP)) {
 const { analyzeForensicToken } = await import('../src/services/forensics/engine');
 const { analyzeAlchemyHubToken } = await import('../src/services/forensics/alchemy-hub');
 const { analyzeAlchemyHubEvmToken } = await import('../src/services/forensics/alchemy-hub-evm');
-const { getAlchemyHubChain, isEvmChain } = await import('../src/services/forensics/alchemy-hub-chains');
+const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import('../src/services/forensics/alchemy-hub-chains');
 
 const PROVIDER_TIMEOUT_MS = 18_000;
 const PROVIDER_ALLOWED_HOSTS = new Set([
@@ -327,9 +327,10 @@ const server = createServer(async (request, response) => {
 
     if (method === 'POST' && requestUrl.pathname === '/api/forensics/alchemy-hub') {
         try {
-            const body = await readJsonBody(request) as { tokenAddress?: string; chain?: string };
+            const body = await readJsonBody(request) as { tokenAddress?: string; chain?: string; depth?: string };
             const tokenAddress = normalizeAddress(body.tokenAddress || '');
             const selectedChain = getAlchemyHubChain(body.chain).id;
+            const selectedDepth = getAlchemyHubScanDepth(body.depth);
 
             if (!tokenAddress || (selectedChain === 'solana' && !isLikelySolanaAddress(tokenAddress))) {
                 json(response, 400, { error: 'A valid Solana token address is required for Solana scans.' });
@@ -342,8 +343,8 @@ const server = createServer(async (request, response) => {
             }
 
             const report = isEvmChain(selectedChain)
-                ? await analyzeAlchemyHubEvmToken(tokenAddress, selectedChain)
-                : await analyzeAlchemyHubToken(tokenAddress);
+                ? await analyzeAlchemyHubEvmToken(tokenAddress, selectedChain, { depth: selectedDepth })
+                : await analyzeAlchemyHubToken(tokenAddress, { depth: selectedDepth });
             json(response, 200, { report });
             return;
         } catch (error) {

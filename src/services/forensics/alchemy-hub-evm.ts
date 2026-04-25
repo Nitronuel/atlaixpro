@@ -1,4 +1,5 @@
 import { APP_CONFIG } from '../../config';
+import type { AlchemyHubScanDepth } from './alchemy-hub-chains';
 import type {
     EvidenceTier,
     ForensicBundleReport,
@@ -20,6 +21,35 @@ const MAX_BALANCE_WALLETS = 220;
 const FUNDING_HISTORY_WALLETS = 70;
 const FUNDING_TRANSFER_LIMIT = '0x14';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+type AlchemyHubEvmLimits = {
+    transferPageLimit: number;
+    maxTrackedWallets: number;
+    maxBalanceWallets: number;
+    fundingHistoryWallets: number;
+    fundingTransferLimit: string;
+};
+
+const EVM_LIMITS: Record<AlchemyHubScanDepth, AlchemyHubEvmLimits> = {
+    balanced: {
+        transferPageLimit: TRANSFER_PAGE_LIMIT,
+        maxTrackedWallets: MAX_TRACKED_WALLETS,
+        maxBalanceWallets: MAX_BALANCE_WALLETS,
+        fundingHistoryWallets: FUNDING_HISTORY_WALLETS,
+        fundingTransferLimit: FUNDING_TRANSFER_LIMIT
+    },
+    deep: {
+        transferPageLimit: 16,
+        maxTrackedWallets: 600,
+        maxBalanceWallets: 2000,
+        fundingHistoryWallets: 500,
+        fundingTransferLimit: '0x50'
+    }
+};
+
+type AlchemyHubEvmAnalysisOptions = {
+    depth?: AlchemyHubScanDepth;
+};
 
 type AlchemyRpcPayload<T> = {
     result?: T;
@@ -282,7 +312,7 @@ async function fetchAssetTransfers(chain: EvmChain, params: Record<string, unkno
     return transfers;
 }
 
-async function fetchTokenTransfers(chain: EvmChain, tokenAddress: string) {
+async function fetchTokenTransfers(chain: EvmChain, tokenAddress: string, maxPages = TRANSFER_PAGE_LIMIT) {
     return fetchAssetTransfers(chain, {
         fromBlock: '0x0',
         toBlock: 'latest',
@@ -292,10 +322,10 @@ async function fetchTokenTransfers(chain: EvmChain, tokenAddress: string) {
         withMetadata: true,
         excludeZeroValue: true,
         maxCount: TOKEN_TRANSFER_PAGE_SIZE
-    });
+    }, maxPages);
 }
 
-async function fetchIncomingNativeTransfers(chain: EvmChain, wallet: string) {
+async function fetchIncomingNativeTransfers(chain: EvmChain, wallet: string, maxCount = FUNDING_TRANSFER_LIMIT) {
     return fetchAssetTransfers(chain, {
         fromBlock: '0x0',
         toBlock: 'latest',
@@ -304,7 +334,7 @@ async function fetchIncomingNativeTransfers(chain: EvmChain, wallet: string) {
         toAddress: wallet,
         withMetadata: true,
         excludeZeroValue: true,
-        maxCount: FUNDING_TRANSFER_LIMIT
+        maxCount
     }, 1);
 }
 
@@ -524,15 +554,17 @@ function selectBestGraphFundingLinks(args: {
     return [...bestByTarget.values()];
 }
 
-export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: EvmChain): Promise<ForensicBundleReport> {
+export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: EvmChain, options: AlchemyHubEvmAnalysisOptions = {}): Promise<ForensicBundleReport> {
     const normalizedAddress = normalizeAddress(tokenAddress);
+    const depth = options.depth === 'deep' ? 'deep' : 'balanced';
+    const limits = EVM_LIMITS[depth];
     if (!isLikelyEvmAddress(normalizedAddress)) {
         throw new Error('A valid EVM token contract address is required.');
     }
 
     const [metadata, tokenTransfers] = await Promise.all([
         fetchEvmMetadata(chain, normalizedAddress),
-        fetchTokenTransfers(chain, normalizedAddress)
+        fetchTokenTransfers(chain, normalizedAddress, limits.transferPageLimit)
     ]);
 
     const transferWallets = dedupe(tokenTransfers.flatMap((transfer) => [
@@ -540,19 +572,19 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         normalizeAddress(transfer.to || '')
     ]).filter((wallet) => isLikelyEvmAddress(wallet) && wallet !== ZERO_ADDRESS));
 
-    const candidateWallets = transferWallets.slice(0, MAX_BALANCE_WALLETS);
+    const candidateWallets = transferWallets.slice(0, limits.maxBalanceWallets);
     const balancesByWallet = await fetchBalances(chain, normalizedAddress, candidateWallets);
     const trackedWallets = [...balancesByWallet.entries()]
         .filter(([, balance]) => balance > 0n)
         .sort((left, right) => left[1] === right[1] ? 0 : left[1] > right[1] ? -1 : 1)
-        .slice(0, MAX_TRACKED_WALLETS)
+        .slice(0, limits.maxTrackedWallets)
         .map(([wallet]) => wallet);
     const trackedWalletSet = new Set(trackedWallets);
 
-    const fundingWallets = trackedWallets.slice(0, FUNDING_HISTORY_WALLETS);
+    const fundingWallets = trackedWallets.slice(0, limits.fundingHistoryWallets);
     const fundingEntries = await mapWithConcurrency(fundingWallets, 6, async (wallet) => ({
         wallet,
-        transfers: await fetchIncomingNativeTransfers(chain, wallet)
+        transfers: await fetchIncomingNativeTransfers(chain, wallet, limits.fundingTransferLimit)
     }));
     const fundingTransfersByWallet = new Map(fundingEntries.map((entry) => [entry.wallet, entry.transfers]));
 
@@ -755,10 +787,10 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         },
         evidenceHighlights: [],
         notes: [
-            `Alchemy Hub used the ${chain} EVM engine for this token.`,
+            `Alchemy Hub used the ${chain} EVM engine in ${depth} mode for this token.`,
+            `It checked ${candidateWallets.length} balance candidates, expanded ${trackedWallets.length} holders, and traced funding for ${fundingWallets.length} wallets.`,
             'EVM clustering is built from bounded ERC-20 transfer history, current candidate balances, and native funding-source links.',
             'Holder coverage is approximate because this path derives candidates from recent transfer history rather than a full holder-index export.'
         ]
     };
 }
-
