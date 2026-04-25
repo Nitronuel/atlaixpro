@@ -104,7 +104,7 @@ export const SavedWalletService = {
             if (index !== -1) {
                 const qualification = walletStats ? SmartMoneyQualificationService.evaluate(walletStats) : wallets[index].qualification;
                 const existingCategories = wallets[index].categories || [];
-                const nextCategories = qualification?.qualified && !existingCategories.includes('Smart Money')
+                const nextCategories: WalletCategory[] = qualification?.qualified && !existingCategories.includes('Smart Money')
                     ? [...existingCategories, 'Smart Money']
                     : existingCategories;
                 const nextBalance = stats.bal || wallets[index].lastBalance;

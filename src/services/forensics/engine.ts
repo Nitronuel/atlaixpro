@@ -664,9 +664,9 @@ async function fetchTokenMetadata(tokenAddress: string) {
 
     const asset = assetResult.status === 'fulfilled' ? assetResult.value : null;
     const tokenInfo = asset?.token_info || asset?.tokenInfo || {};
-    const rawSupply = tokenInfo?.supply ?? tokenInfo?.total_supply ?? tokenSupplyResult.status === 'fulfilled'
+    const rawSupply = tokenInfo?.supply ?? tokenInfo?.total_supply ?? (tokenSupplyResult.status === 'fulfilled'
         ? tokenSupplyResult.value?.value?.amount
-        : undefined;
+        : undefined);
     const rawDecimals = tokenInfo?.decimals ?? (tokenSupplyResult.status === 'fulfilled'
         ? tokenSupplyResult.value?.value?.decimals
         : undefined);
@@ -946,8 +946,8 @@ async function fetchWalletHistory(walletAddress: string, limit: number) {
     }
 
     const heliusTransactions = await fetchTransactionsForAddressViaHelius(walletAddress, limit);
-    if (heliusTransactions.length) {
-        return heliusTransactions;
+    if (heliusTransactions.transactions.length) {
+        return heliusTransactions.transactions;
     }
 
     try {

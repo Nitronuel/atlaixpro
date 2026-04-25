@@ -716,7 +716,7 @@ export const SolanaProvider = {
     },
 
     async getParsedAddressTransactions(address: string, beforeSignature?: string, limit = 100): Promise<ParsedAddressTransaction[]> {
-        const signatures = await this.rpc<Array<{ signature: string }>>('getSignaturesForAddress', [
+        const signatures = await SolanaProvider.rpc<Array<{ signature: string }>>('getSignaturesForAddress', [
             address,
             {
                 limit,
@@ -731,7 +731,7 @@ export const SolanaProvider = {
         for (let index = 0; index < signatureValues.length; index += TX_BATCH_SIZE) {
             const chunk = signatureValues.slice(index, index + TX_BATCH_SIZE);
             const settled = await Promise.allSettled(
-                chunk.map((signature) => this.rpc<RpcParsedTransaction>('getTransaction', [
+                chunk.map((signature) => SolanaProvider.rpc<RpcParsedTransaction>('getTransaction', [
                     signature,
                     {
                         commitment: 'finalized',

@@ -1,5 +1,6 @@
 import { APP_CONFIG } from '../../config';
 import type { AlchemyHubScanDepth } from './alchemy-hub-chains';
+import type { MoralisTopHolder } from './moralis-top-holders';
 import type {
     EvidenceTier,
     ForensicBundleReport,
@@ -16,14 +17,14 @@ import type {
 } from './types';
 
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const MAX_TOKEN_ACCOUNTS = 220;
-const MAX_RENDER_WALLETS = 170;
-const HOLDER_HISTORY_WALLETS = 70;
-const HOLDER_HISTORY_SIGNATURE_LIMIT = 10;
-const FIRST_HOP_CONNECTOR_LIMIT = 22;
-const CONNECTOR_HISTORY_WALLETS = 30;
-const CONNECTOR_HISTORY_SIGNATURE_LIMIT = 8;
-const TOKEN_RECENT_SIGNATURE_LIMIT = 42;
+const MAX_TOKEN_ACCOUNTS = 440;
+const MAX_RENDER_WALLETS = 340;
+const HOLDER_HISTORY_WALLETS = 140;
+const HOLDER_HISTORY_SIGNATURE_LIMIT = 20;
+const FIRST_HOP_CONNECTOR_LIMIT = 44;
+const CONNECTOR_HISTORY_WALLETS = 60;
+const CONNECTOR_HISTORY_SIGNATURE_LIMIT = 16;
+const TOKEN_RECENT_SIGNATURE_LIMIT = 84;
 const RPC_TIMEOUT_MS = 14_000;
 const DEXSCREENER_TIMEOUT_MS = 6_000;
 
@@ -50,19 +51,21 @@ const SOLANA_LIMITS: Record<AlchemyHubScanDepth, AlchemyHubSolanaLimits> = {
         tokenRecentSignatureLimit: TOKEN_RECENT_SIGNATURE_LIMIT
     },
     deep: {
-        maxTokenAccounts: 2000,
-        maxRenderWallets: 600,
-        holderHistoryWallets: 500,
-        holderHistorySignatureLimit: 32,
-        firstHopConnectorLimit: 200,
-        connectorHistoryWallets: 240,
-        connectorHistorySignatureLimit: 24,
-        tokenRecentSignatureLimit: 300
+        maxTokenAccounts: 4000,
+        maxRenderWallets: 1200,
+        holderHistoryWallets: 1000,
+        holderHistorySignatureLimit: 64,
+        firstHopConnectorLimit: 400,
+        connectorHistoryWallets: 480,
+        connectorHistorySignatureLimit: 48,
+        tokenRecentSignatureLimit: 600
     }
 };
 
 type AlchemyHubAnalysisOptions = {
     depth?: AlchemyHubScanDepth;
+    holderSeeds?: MoralisTopHolder[];
+    seedOnly?: boolean;
 };
 
 type AlchemyRpcPayload<T> = {
@@ -136,6 +139,28 @@ function parseBigIntLike(value: string | number | bigint | null | undefined) {
     }
     if (typeof value === 'string') return parseRawAmount(value);
     return 0n;
+}
+
+function parseDecimalAmount(value: string, decimals: number) {
+    const normalized = value.trim().replace(/,/g, '');
+    if (!/^\d+(\.\d+)?$/.test(normalized)) return 0n;
+    const [whole, fraction = ''] = normalized.split('.');
+    const scaledFraction = fraction.padEnd(decimals, '0').slice(0, decimals);
+    return BigInt(`${whole}${scaledFraction || ''.padEnd(decimals, '0')}`);
+}
+
+function normalizeHolderSeedBalance(seed: MoralisTopHolder, decimals: number, totalSupplyRaw: bigint) {
+    const rawBalance = parseBigIntLike(seed.rawBalance);
+    if (rawBalance > 0n) return rawBalance;
+
+    const decimalBalance = parseDecimalAmount(seed.rawBalance, decimals);
+    if (decimalBalance > 0n) return decimalBalance;
+
+    if (seed.percentage === null || !Number.isFinite(seed.percentage) || seed.percentage <= 0) {
+        return 0n;
+    }
+
+    return (totalSupplyRaw * BigInt(Math.round(seed.percentage * 1_000_000))) / 100_000_000n;
 }
 
 function dedupe<T>(values: T[]) {
@@ -893,6 +918,13 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
     const normalizedAddress = tokenAddress.trim();
     const depth = options.depth === 'deep' ? 'deep' : 'balanced';
     const limits = SOLANA_LIMITS[depth];
+    const holderSeedLimit = options.seedOnly && options.holderSeeds?.length
+        ? options.holderSeeds.length
+        : null;
+    const maxRenderWallets = holderSeedLimit ?? limits.maxRenderWallets;
+    const holderHistoryLimit = holderSeedLimit
+        ? Math.min(100, holderSeedLimit)
+        : limits.holderHistoryWallets;
     if (!isLikelySolanaAddress(normalizedAddress)) {
         throw new Error('The provided value is not a valid Solana contract address.');
     }
@@ -900,22 +932,34 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
     const [metadata, largestAccounts, mintAccounts, tokenTransactions] = await Promise.all([
         fetchTokenMetadata(normalizedAddress),
         fetchTokenLargestAccounts(normalizedAddress),
-        fetchAlchemyMintAccounts(normalizedAddress, limits.maxTokenAccounts),
+        options.seedOnly && options.holderSeeds?.length
+            ? Promise.resolve([])
+            : fetchAlchemyMintAccounts(normalizedAddress, limits.maxTokenAccounts),
         fetchRecentTokenTransactions(normalizedAddress, limits.tokenRecentSignatureLimit)
     ]);
 
     const balancesByWallet = new Map<string, bigint>();
-    for (const account of mintAccounts) {
-        balancesByWallet.set(account.owner, (balancesByWallet.get(account.owner) || 0n) + parseBigIntLike(account.amount));
+    for (const seed of options.holderSeeds || []) {
+        const wallet = seed.wallet.trim();
+        if (!isLikelySolanaAddress(wallet)) continue;
+        const balance = normalizeHolderSeedBalance(seed, metadata.decimals, metadata.totalSupplyRaw);
+        if (balance > 0n) {
+            balancesByWallet.set(wallet, (balancesByWallet.get(wallet) || 0n) + balance);
+        }
+    }
+    if (!options.seedOnly || !options.holderSeeds?.length) {
+        for (const account of mintAccounts) {
+            balancesByWallet.set(account.owner, (balancesByWallet.get(account.owner) || 0n) + parseBigIntLike(account.amount));
+        }
     }
 
     const trackedWallets = [...balancesByWallet.entries()]
         .sort((left, right) => Number(right[1] - left[1]))
-        .slice(0, limits.maxRenderWallets)
+        .slice(0, maxRenderWallets)
         .map(([wallet]) => wallet);
     const trackedWalletSet = new Set(trackedWallets);
 
-    const holderHistoryWallets = trackedWallets.slice(0, limits.holderHistoryWallets);
+    const holderHistoryWallets = trackedWallets.slice(0, holderHistoryLimit);
     const holderTransactions = await mapWithConcurrency(holderHistoryWallets, 8, async (wallet) => ({
         wallet,
         transactions: await fetchWalletTransactions(wallet, limits.holderHistorySignatureLimit)
@@ -1180,10 +1224,16 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
         },
         evidenceHighlights: [],
         notes: [
-            `Alchemy Hub ${depth} mode runs on a separate Alchemy-first cluster-map engine from Bubble Maps and Safe Scan.`,
+            options.holderSeeds?.length
+                ? `Safe Scan seeded the map with ${options.holderSeeds.length} Moralis top holders before running the Alchemy lite cluster pass.`
+                : `Alchemy Hub ${depth} mode runs on a separate Alchemy-first cluster-map engine from Bubble Maps and Safe Scan.`,
             `It expanded ${trackedWallets.length} holders with ${holderHistoryWallets.length} direct history traces and ${connectorHistoryWallets.length} connector traces.`,
-            'It uses Alchemy account scans, recent holder history, and bounded 2-hop connector discovery to build the map.',
-            'Safe Scan remains the deeper multi-hop forensic engine when you need full launch and bundle attribution.'
+            options.seedOnly
+                ? 'Safe Scan limits the visible holder set to wallets returned by Moralis, then uses Alchemy for history, transfer links, and funding-source mapping.'
+                : 'It uses Alchemy account scans, recent holder history, and bounded 2-hop connector discovery to build the map.',
+            options.holderSeeds?.length
+                ? 'Moralis improves holder selection, while Alchemy remains the source for wallet history, transfer links, and funding-source mapping.'
+                : 'Safe Scan remains the deeper multi-hop forensic engine when you need full launch and bundle attribution.'
         ]
     };
 }

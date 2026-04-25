@@ -9,17 +9,18 @@ import type {
     ForensicWalletCluster
 } from './types';
 import { EVM_ALCHEMY_NETWORK_BY_CHAIN, type AlchemyHubChain } from './alchemy-hub-chains';
+import type { MoralisTopHolder } from './moralis-top-holders';
 
 type EvmChain = Exclude<AlchemyHubChain, 'solana'>;
 
 const RPC_TIMEOUT_MS = 14_000;
 const DEXSCREENER_TIMEOUT_MS = 6_000;
-const TRANSFER_PAGE_LIMIT = 3;
+const TRANSFER_PAGE_LIMIT = 6;
 const TOKEN_TRANSFER_PAGE_SIZE = '0x3e8';
-const MAX_TRACKED_WALLETS = 150;
-const MAX_BALANCE_WALLETS = 220;
-const FUNDING_HISTORY_WALLETS = 70;
-const FUNDING_TRANSFER_LIMIT = '0x14';
+const MAX_TRACKED_WALLETS = 300;
+const MAX_BALANCE_WALLETS = 440;
+const FUNDING_HISTORY_WALLETS = 140;
+const FUNDING_TRANSFER_LIMIT = '0x28';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 type AlchemyHubEvmLimits = {
@@ -39,16 +40,18 @@ const EVM_LIMITS: Record<AlchemyHubScanDepth, AlchemyHubEvmLimits> = {
         fundingTransferLimit: FUNDING_TRANSFER_LIMIT
     },
     deep: {
-        transferPageLimit: 16,
-        maxTrackedWallets: 600,
-        maxBalanceWallets: 2000,
-        fundingHistoryWallets: 500,
-        fundingTransferLimit: '0x50'
+        transferPageLimit: 32,
+        maxTrackedWallets: 1200,
+        maxBalanceWallets: 4000,
+        fundingHistoryWallets: 1000,
+        fundingTransferLimit: '0xa0'
     }
 };
 
 type AlchemyHubEvmAnalysisOptions = {
     depth?: AlchemyHubScanDepth;
+    holderSeeds?: MoralisTopHolder[];
+    seedOnly?: boolean;
 };
 
 type AlchemyRpcPayload<T> = {
@@ -558,6 +561,12 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
     const normalizedAddress = normalizeAddress(tokenAddress);
     const depth = options.depth === 'deep' ? 'deep' : 'balanced';
     const limits = EVM_LIMITS[depth];
+    const holderSeedLimit = options.seedOnly && options.holderSeeds?.length
+        ? options.holderSeeds.length
+        : null;
+    const maxBalanceWallets = holderSeedLimit ?? limits.maxBalanceWallets;
+    const maxTrackedWallets = holderSeedLimit ? Math.min(250, holderSeedLimit) : limits.maxTrackedWallets;
+    const fundingHistoryLimit = holderSeedLimit ? Math.min(100, holderSeedLimit) : limits.fundingHistoryWallets;
     if (!isLikelyEvmAddress(normalizedAddress)) {
         throw new Error('A valid EVM token contract address is required.');
     }
@@ -571,17 +580,23 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         normalizeAddress(transfer.from || ''),
         normalizeAddress(transfer.to || '')
     ]).filter((wallet) => isLikelyEvmAddress(wallet) && wallet !== ZERO_ADDRESS));
+    const moralisWallets = dedupe((options.holderSeeds || [])
+        .map((seed) => normalizeAddress(seed.wallet))
+        .filter((wallet) => isLikelyEvmAddress(wallet) && wallet !== ZERO_ADDRESS));
 
-    const candidateWallets = transferWallets.slice(0, limits.maxBalanceWallets);
+    const candidateWallets = (options.seedOnly && moralisWallets.length
+        ? moralisWallets
+        : dedupe([...moralisWallets, ...transferWallets])
+    ).slice(0, maxBalanceWallets);
     const balancesByWallet = await fetchBalances(chain, normalizedAddress, candidateWallets);
     const trackedWallets = [...balancesByWallet.entries()]
         .filter(([, balance]) => balance > 0n)
         .sort((left, right) => left[1] === right[1] ? 0 : left[1] > right[1] ? -1 : 1)
-        .slice(0, limits.maxTrackedWallets)
+        .slice(0, maxTrackedWallets)
         .map(([wallet]) => wallet);
     const trackedWalletSet = new Set(trackedWallets);
 
-    const fundingWallets = trackedWallets.slice(0, limits.fundingHistoryWallets);
+    const fundingWallets = trackedWallets.slice(0, fundingHistoryLimit);
     const fundingEntries = await mapWithConcurrency(fundingWallets, 6, async (wallet) => ({
         wallet,
         transfers: await fetchIncomingNativeTransfers(chain, wallet, limits.fundingTransferLimit)
@@ -787,10 +802,16 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         },
         evidenceHighlights: [],
         notes: [
-            `Alchemy Hub used the ${chain} EVM engine in ${depth} mode for this token.`,
+            options.holderSeeds?.length
+                ? `Safe Scan seeded the EVM scan with ${options.holderSeeds.length} Moralis top holders before running the Alchemy ${chain} lite cluster pass.`
+                : `Alchemy Hub used the ${chain} EVM engine in ${depth} mode for this token.`,
             `It checked ${candidateWallets.length} balance candidates, expanded ${trackedWallets.length} holders, and traced funding for ${fundingWallets.length} wallets.`,
-            'EVM clustering is built from bounded ERC-20 transfer history, current candidate balances, and native funding-source links.',
-            'Holder coverage is approximate because this path derives candidates from recent transfer history rather than a full holder-index export.'
+            options.seedOnly
+                ? 'Safe Scan limits EVM balance candidates to Moralis top-holder wallets, then uses Alchemy for live balances, token-transfer links, and native funding-source mapping.'
+                : 'EVM clustering is built from bounded ERC-20 transfer history, current candidate balances, and native funding-source links.',
+            options.holderSeeds?.length
+                ? 'Moralis improves holder coverage by selecting the top holders first; Alchemy verifies live balances and maps wallet relationships.'
+                : 'Holder coverage is approximate because this path derives candidates from recent transfer history rather than a full holder-index export.'
         ]
     };
 }

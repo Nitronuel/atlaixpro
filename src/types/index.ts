@@ -10,6 +10,7 @@ export type ViewState =
     | 'ai-assistant'
     | 'wallet-tracking'
     | 'smart-money'
+    | 'smart-money-scanner'
     | 'safe-scan'
     | 'alchemy-hub'
     | 'smart-alerts'

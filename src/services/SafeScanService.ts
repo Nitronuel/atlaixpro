@@ -6,13 +6,12 @@ type CacheRecord = {
     report: ForensicBundleReport;
 };
 
-const CACHE_PREFIX = 'atlaix-alchemy-hub-report:';
+const CACHE_PREFIX = 'atlaix-safe-scan-report:';
 const CACHE_TTL_MS = 3 * 60 * 1000;
 const inFlightReportCache = new Map<string, Promise<ForensicBundleReport>>();
 
 function isLikelySolanaAddress(value: string) {
-    const trimmed = value.trim();
-    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed);
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value.trim());
 }
 
 function isLikelyEvmAddress(value: string) {
@@ -20,7 +19,7 @@ function isLikelyEvmAddress(value: string) {
 }
 
 function cacheKey(tokenAddress: string, chain: AlchemyHubChain) {
-    return `${CACHE_PREFIX}${chain}:deep:${tokenAddress.toLowerCase()}`;
+    return `${CACHE_PREFIX}${chain}:lite:${tokenAddress.toLowerCase()}`;
 }
 
 function readCachedReport(tokenAddress: string, chain: AlchemyHubChain) {
@@ -56,7 +55,7 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
         throw new Error(
             typeof payload?.error === 'string'
                 ? payload.error
-                : `Alchemy Hub backend request failed with status ${response.status}.`
+                : `Safe Scan backend request failed with status ${response.status}.`
         );
     }
     return payload;
@@ -65,7 +64,7 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
 export { type ForensicBundleReport };
 export type { AlchemyHubChain };
 
-export const AlchemyHubService = {
+export const SafeScanService = {
     isSupported(tokenAddress: string, chain: AlchemyHubChain = 'solana') {
         return chain === 'solana'
             ? isLikelySolanaAddress(tokenAddress)
@@ -77,32 +76,28 @@ export const AlchemyHubService = {
         const selectedChain = getAlchemyHubChain(chain).id;
         if (!this.isSupported(normalizedAddress, selectedChain)) {
             throw new Error(selectedChain === 'solana'
-                ? 'Alchemy Hub Solana scans require a valid Solana token address.'
-                : 'Alchemy Hub EVM scans require a valid 0x token contract address.');
+                ? 'Safe Scan Solana scans require a valid Solana token address.'
+                : 'Safe Scan EVM scans require a valid 0x token contract address.');
         }
 
         const cached = readCachedReport(normalizedAddress, selectedChain);
-        if (cached) {
-            return cached;
-        }
+        if (cached) return cached;
 
-        const inflightKey = `${selectedChain}:deep:${normalizedAddress.toLowerCase()}`;
+        const inflightKey = `${selectedChain}:lite:${normalizedAddress.toLowerCase()}`;
         const inflight = inFlightReportCache.get(inflightKey);
-        if (inflight) {
-            return inflight;
-        }
+        if (inflight) return inflight;
 
-        const request = fetchJson('/api/forensics/alchemy-hub', {
+        const request = fetchJson('/api/forensics/safe-scan', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ tokenAddress: normalizedAddress, chain: selectedChain, depth: 'deep' })
+            body: JSON.stringify({ tokenAddress: normalizedAddress, chain: selectedChain })
         })
             .then((payload) => {
                 const report = payload.report as ForensicBundleReport | undefined;
                 if (!report) {
-                    throw new Error('Alchemy Hub backend did not return a report.');
+                    throw new Error('Safe Scan backend did not return a report.');
                 }
                 writeCachedReport(normalizedAddress, selectedChain, report);
                 return report;

@@ -1,5 +1,10 @@
 import { extractJitoTipTransfers, FORENSIC_MAX_TRACKED_HOPS, inferJitoLaunchSignals } from './forensics/engine';
 import type { ForensicBundleReport } from './forensics/types';
+export type {
+    ForensicGraphCluster,
+    ForensicGraphEdge,
+    ForensicGraphNode
+} from './forensics/types';
 
 type CacheRecord = {
     savedAt: number;

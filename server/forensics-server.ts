@@ -4,6 +4,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { URL } from 'node:url';
 import { LocalDurableForensicsQueue } from './forensics-queue';
+import {
+    discoverSmartScannerEarlyBuyers,
+    isLikelyEvmAddress,
+    isLikelySolanaAddress,
+    isSmartScannerChain
+} from './smart-money-scanner-discovery';
 
 const PORT = Number(process.env.FORENSICS_PORT || 3101);
 const queue = new LocalDurableForensicsQueue(resolve(process.cwd()));
@@ -56,6 +62,7 @@ for (const [legacyKey, backendKey] of Object.entries(LEGACY_BACKEND_ENV_MAP)) {
 const { analyzeForensicToken } = await import('../src/services/forensics/engine');
 const { analyzeAlchemyHubToken } = await import('../src/services/forensics/alchemy-hub');
 const { analyzeAlchemyHubEvmToken } = await import('../src/services/forensics/alchemy-hub-evm');
+const { fetchMoralisTopHolders } = await import('../src/services/forensics/moralis-top-holders');
 const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import('../src/services/forensics/alchemy-hub-chains');
 
 const PROVIDER_TIMEOUT_MS = 18_000;
@@ -77,15 +84,6 @@ function json(response: import('node:http').ServerResponse, status: number, body
 
 function normalizeAddress(value: string) {
     return value.trim();
-}
-
-function isLikelySolanaAddress(value: string) {
-    const trimmed = value.trim();
-    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed);
-}
-
-function isLikelyEvmAddress(value: string) {
-    return /^0x[a-fA-F0-9]{40}$/.test(value.trim());
 }
 
 async function readJsonBody(request: import('node:http').IncomingMessage) {
@@ -350,6 +348,79 @@ const server = createServer(async (request, response) => {
         } catch (error) {
             json(response, 500, {
                 error: error instanceof Error ? error.message : 'Could not build Alchemy Hub map.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/forensics/safe-scan') {
+        try {
+            const body = await readJsonBody(request) as { tokenAddress?: string; chain?: string };
+            const tokenAddress = normalizeAddress(body.tokenAddress || '');
+            const selectedChain = getAlchemyHubChain(body.chain).id;
+
+            if (!tokenAddress || (selectedChain === 'solana' && !isLikelySolanaAddress(tokenAddress))) {
+                json(response, 400, { error: 'A valid Solana token address is required for Solana scans.' });
+                return;
+            }
+
+            if (isEvmChain(selectedChain) && !isLikelyEvmAddress(tokenAddress)) {
+                json(response, 400, { error: 'A valid 0x token contract address is required for EVM scans.' });
+                return;
+            }
+
+            const holderSeeds = await fetchMoralisTopHolders(tokenAddress, selectedChain, 300);
+            const report = isEvmChain(selectedChain)
+                ? await analyzeAlchemyHubEvmToken(tokenAddress, selectedChain, { depth: 'balanced', holderSeeds, seedOnly: true })
+                : await analyzeAlchemyHubToken(tokenAddress, { depth: 'balanced', holderSeeds, seedOnly: true });
+
+            json(response, 200, {
+                report,
+                holderSeedCount: holderSeeds.length
+            });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'Could not build Safe Scan map.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/smart-money-scanner/early-buyers') {
+        try {
+            const body = await readJsonBody(request) as { tokenAddress?: string; chain?: string; limit?: number };
+            const tokenAddress = normalizeAddress(body.tokenAddress || '');
+            const selectedChain = String(body.chain || '').toLowerCase();
+            const limit = Math.max(10, Math.min(Number(body.limit || 100), 300));
+
+            if (!isSmartScannerChain(selectedChain)) {
+                json(response, 400, { error: 'Select a supported scanner network.' });
+                return;
+            }
+
+            if (selectedChain === 'solana' && !isLikelySolanaAddress(tokenAddress)) {
+                json(response, 400, { error: 'A valid Solana token address is required.' });
+                return;
+            }
+
+            if (selectedChain !== 'solana' && !isLikelyEvmAddress(tokenAddress)) {
+                json(response, 400, { error: 'A valid 0x token contract address is required.' });
+                return;
+            }
+
+            const buyers = await discoverSmartScannerEarlyBuyers(tokenAddress, selectedChain, limit);
+
+            json(response, 200, {
+                tokenAddress,
+                chain: selectedChain,
+                buyers,
+                discoverySource: buyers[0]?.source || 'none'
+            });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'Could not discover early buyers.'
             });
             return;
         }

@@ -174,7 +174,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
     loading,
     error,
     report,
-    graphLayoutStyle = 'standard'
+    graphLayoutStyle = 'standard' as ForensicGraphLayoutStyle
 }) => {
     const tokenDecimals = report?.tokenDecimals ?? 0;
     const [expandedClusters, setExpandedClusters] = useState<Record<string, boolean>>({});
