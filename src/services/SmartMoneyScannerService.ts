@@ -102,7 +102,7 @@ type ScannerState = {
 };
 
 const STORAGE_KEY = 'atlaix-smart-money-scanner';
-const DEFAULT_LIMIT = 100;
+const DEFAULT_LIMIT = 10;
 const PNL_ASSET_VALUE_FLOOR_USD = 1;
 const PNL_ASSET_BATCH_SIZE = 4;
 const hasSupabaseConfig = Boolean(APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseAnonKey);

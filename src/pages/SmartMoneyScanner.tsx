@@ -116,7 +116,7 @@ export const SmartMoneyScanner: React.FC = () => {
     const navigate = useNavigate();
     const [tokenAddress, setTokenAddress] = useState('');
     const [chain, setChain] = useState<SmartMoneyScannerChain>('eth');
-    const [limit, setLimit] = useState(100);
+    const [limit, setLimit] = useState(10);
     const [state, setState] = useState(() => SmartMoneyScannerService.getState());
     const [error, setError] = useState<string | null>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -232,6 +232,7 @@ export const SmartMoneyScanner: React.FC = () => {
                     onChange={(event) => setLimit(Number(event.target.value))}
                     className="rounded-xl border border-border bg-[#16181A] px-4 py-3 text-sm font-bold text-text-light outline-none focus:border-primary-green/60"
                 >
+                    <option value={10}>First 10</option>
                     <option value={50}>First 50</option>
                     <option value={100}>First 100</option>
                     <option value={200}>First 200</option>
