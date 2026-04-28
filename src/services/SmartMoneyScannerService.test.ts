@@ -57,9 +57,10 @@ describe('SmartMoneyScannerService metrics', () => {
         expect(metrics.losingTrades).toBe(1);
         expect(metrics.winRatePct).toBe(50);
         expect(metrics.pnlPct).toBeCloseTo(26.67, 1);
-        expect(metrics.capitalEfficiency).toBeCloseTo(26.67, 1);
+        expect(metrics.capitalEfficiency).toBe(15);
         expect(metrics.avgBuyUsd).toBeCloseTo(750, 0);
         expect(metrics.stats.winRate).toBe('50%');
         expect(metrics.stats.totalPnL).toBe('+26.67%');
+        expect(metrics.tokensTraded).toBe(2);
     });
 });

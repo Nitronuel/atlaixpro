@@ -500,6 +500,9 @@ function buildWalletMetricsFromPortfolio(portfolio: Awaited<ReturnType<typeof Ch
     const winners = pnlAssets.filter((asset) => (asset.pnlPercent || 0) > 0);
     const losingTrades = pnlAssets.filter((asset) => (asset.pnlPercent || 0) <= 0).length;
     const winRate = pnlAssets.length ? `${Math.round((winners.length / pnlAssets.length) * 100)}%` : 'N/A';
+    const averagePnlAcrossHeldTokens = pnlAssets.length
+        ? pnlAssets.reduce((sum, asset) => sum + (asset.pnlPercent || 0), 0) / pnlAssets.length
+        : null;
     let totalCostBasis = 0;
     let totalCurrentValueForPnl = 0;
 
@@ -535,7 +538,7 @@ function buildWalletMetricsFromPortfolio(portfolio: Awaited<ReturnType<typeof Ch
         totalPnlUsd,
         pnlPct: pnlAverage,
         winRatePct,
-        capitalEfficiency: pnlAverage,
+        capitalEfficiency: averagePnlAcrossHeldTokens,
         avgBuyUsd: pnlAssets.length && totalCostBasis > 0 ? totalCostBasis / pnlAssets.length : null,
         tradesAnalyzed: pnlAssets.length,
         winningTrades: winners.length,

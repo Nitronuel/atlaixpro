@@ -357,7 +357,8 @@ export const SmartMoneyScanner: React.FC = () => {
                                     <th className="px-3 py-2">Net worth</th>
                                     <th className="px-3 py-2">Win rate</th>
                                     <th className="px-3 py-2">PnL</th>
-                                    <th className="px-3 py-2">Cap efficiency</th>
+                                    <th className="px-3 py-2">Avg capital efficiency</th>
+                                    <th className="px-3 py-2">Tokens held</th>
                                     <th className="px-3 py-2">Avg buy</th>
                                     <th className="px-3 py-2">Score</th>
                                     <th className="px-3 py-2">Action</th>
@@ -406,6 +407,7 @@ export const SmartMoneyScanner: React.FC = () => {
                                         <td className="px-3 py-3 text-text-medium">{formatPlainPercent(job.winRatePct, job.winRate)}</td>
                                         <td className="px-3 py-3 text-text-medium">{formatPercentValue(job.pnlPct, job.pnl)}</td>
                                         <td className="px-3 py-3 text-text-medium">{formatPercentValue(job.capitalEfficiency)}</td>
+                                        <td className="px-3 py-3 text-text-medium">{job.tokensTraded ?? '-'}</td>
                                         <td className="px-3 py-3 text-text-medium">{formatCurrencyValue(job.avgBuyUsd)}</td>
                                         <td className="px-3 py-3">
                                             <div className="font-bold text-text-light">{job.scoreRiskAdjusted ?? job.scoreTotal ?? job.score ?? '-'}</div>
@@ -423,7 +425,7 @@ export const SmartMoneyScanner: React.FC = () => {
                                     </tr>
                                 )) : (
                                     <tr>
-                                        <td colSpan={13} className="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-text-medium">
+                                        <td colSpan={14} className="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-text-medium">
                                             Early buyers will appear here after discovery.
                                         </td>
                                     </tr>
