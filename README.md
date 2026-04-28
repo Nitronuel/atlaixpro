@@ -7,7 +7,7 @@ Atlaix is an AI-powered intelligence platform built to interpret crypto market b
 
 This repository contains the source code for the Atlaix platform.
 
-Project Status: Functional MVP (Path to Closed Beta)
+Project Status: Functional MVP
 
 The Atlaix platform is currently in a functional MVP stage, with a clear and immediate roadmap to launching our Closed Beta.
 
