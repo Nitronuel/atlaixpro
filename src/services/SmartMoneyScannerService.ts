@@ -103,6 +103,8 @@ type ScannerState = {
 
 const STORAGE_KEY = 'atlaix-smart-money-scanner';
 const DEFAULT_LIMIT = 100;
+const PNL_ASSET_VALUE_FLOOR_USD = 1;
+const PNL_ASSET_BATCH_SIZE = 4;
 const hasSupabaseConfig = Boolean(APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseAnonKey);
 const supabase = hasSupabaseConfig
     ? createClient(APP_CONFIG.supabaseUrl, APP_CONFIG.supabaseAnonKey, {
@@ -434,10 +436,66 @@ function formatCurrency(value: number) {
     });
 }
 
+function parseUsdValue(value?: string | number | null) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (!value || value === 'N/A') return null;
+    const parsed = Number(value.replace(/[$,\s]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function enrichPortfolioWithTokenPnl(
+    portfolio: Awaited<ReturnType<typeof ChainRouter.fetchPortfolio>>,
+    walletAddress: string,
+    fallbackChain: ChainType
+): Promise<Awaited<ReturnType<typeof ChainRouter.fetchPortfolio>>> {
+    const assets = [...(portfolio.assets || [])];
+    const activeIndexes = assets
+        .map((asset, index) => ({ asset, index }))
+        .filter(({ asset }) => (asset.rawValue || 0) > PNL_ASSET_VALUE_FLOOR_USD)
+        .sort((left, right) => (right.asset.rawValue || 0) - (left.asset.rawValue || 0));
+
+    for (let start = 0; start < activeIndexes.length; start += PNL_ASSET_BATCH_SIZE) {
+        const batch = activeIndexes.slice(start, start + PNL_ASSET_BATCH_SIZE);
+        const results = await Promise.all(batch.map(async ({ asset, index }) => {
+            try {
+                const assetChain = asset.chain || fallbackChain;
+                const targetChain = assetChain === 'All Chains' ? fallbackChain : assetChain;
+                const pnl = await ChainRouter.fetchTokenPnL(
+                    targetChain,
+                    walletAddress,
+                    asset.address,
+                    asset.currentPrice,
+                    'ALL'
+                );
+                return { index, pnl };
+            } catch (error) {
+                console.warn(`Smart Money scanner PnL fetch failed for ${asset.symbol}`, error);
+                return { index, pnl: null };
+            }
+        }));
+
+        results.forEach(({ index, pnl }) => {
+            if (!pnl) return;
+            assets[index] = {
+                ...assets[index],
+                pnl: pnl.pnl,
+                pnlPercent: pnl.pnlPercent,
+                avgBuy: pnl.avgBuy,
+                buyTime: pnl.buyTime
+            };
+        });
+    }
+
+    return {
+        ...portfolio,
+        assets
+    };
+}
+
 function buildWalletMetricsFromPortfolio(portfolio: Awaited<ReturnType<typeof ChainRouter.fetchPortfolio>>): WalletScanMetrics {
     const assets = portfolio.assets || [];
     const netWorth = assets.reduce((sum, asset) => sum + (asset.rawValue || 0), 0);
-    const activeAssets = assets.filter((asset) => (asset.rawValue || 0) > 1);
+    const activeAssets = assets.filter((asset) => (asset.rawValue || 0) > PNL_ASSET_VALUE_FLOOR_USD);
     const pnlAssets = activeAssets.filter((asset) => typeof asset.pnlPercent === 'number');
     const winners = pnlAssets.filter((asset) => (asset.pnlPercent || 0) > 0);
     const losingTrades = pnlAssets.filter((asset) => (asset.pnlPercent || 0) <= 0).length;
@@ -447,9 +505,15 @@ function buildWalletMetricsFromPortfolio(portfolio: Awaited<ReturnType<typeof Ch
 
     pnlAssets.forEach((asset) => {
         const pnlPercent = asset.pnlPercent || 0;
+        const avgBuyPrice = parseUsdValue(asset.avgBuy);
+        const estimatedUnits = asset.currentPrice > 0 ? (asset.rawValue || 0) / asset.currentPrice : 0;
         const denominator = 1 + (pnlPercent / 100);
-        if (denominator <= 0) return;
-        const costBasis = (asset.rawValue || 0) / denominator;
+        const costBasis = avgBuyPrice !== null && estimatedUnits > 0
+            ? avgBuyPrice * estimatedUnits
+            : denominator > 0
+                ? (asset.rawValue || 0) / denominator
+                : 0;
+        if (costBasis <= 0) return;
         totalCostBasis += costBasis;
         totalCurrentValueForPnl += asset.rawValue || 0;
     });
@@ -491,6 +555,11 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
     }
     return payload;
 }
+
+export const SmartMoneyScannerInternals = {
+    buildWalletMetricsFromPortfolio,
+    parseUsdValue
+};
 
 export const SmartMoneyScannerService = {
     defaultLimit: DEFAULT_LIMIT,
@@ -690,8 +759,10 @@ export const SmartMoneyScannerService = {
         });
 
         try {
-            const portfolio = await ChainRouter.fetchPortfolio(scannerChainToPortfolioChain(walletJob.chain), walletJob.wallet, true);
-            const metrics = buildWalletMetricsFromPortfolio(portfolio);
+            const portfolioChain = scannerChainToPortfolioChain(walletJob.chain);
+            const portfolio = await ChainRouter.fetchPortfolio(portfolioChain, walletJob.wallet, true);
+            const enrichedPortfolio = await enrichPortfolioWithTokenPnl(portfolio, walletJob.wallet, portfolioChain);
+            const metrics = buildWalletMetricsFromPortfolio(enrichedPortfolio);
             const stats = metrics.stats;
             const qualification = SmartMoneyQualificationService.evaluate(stats);
             const trackedWallet = SavedWalletService.ensureTrackedWallet(
