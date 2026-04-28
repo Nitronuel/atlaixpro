@@ -1,4 +1,5 @@
 import { APP_CONFIG } from '../../config';
+import { buildBundleIntelligence } from './bundle-intelligence';
 import type { AlchemyHubScanDepth } from './alchemy-hub-chains';
 import type { MoralisTopHolder } from './moralis-top-holders';
 import type {
@@ -41,7 +42,17 @@ const KNOWN_SOLANA_PUBLIC_PROGRAMS = new Set([
     SOLANA_COMPUTE_BUDGET_PROGRAM_ID,
     SOLANA_MEMO_PROGRAM_ID,
     SOLANA_ADDRESS_LOOKUP_TABLE_PROGRAM_ID,
-    'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV'
+    'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV',
+    'whirLbMiicVdio4qvUfM5KAg6CtGVVQ4i8F9T6M2ZKc',
+    'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK',
+    'CPMMoo8L3F4NbTegBCKVNwGBXbZMBjvH9QiJm4LqgS7',
+    '675kPX9MHTjS2zt1qfr1NYaQK3aJAW85NCsjm6tU1Mp8',
+    'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB',
+    'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
+    'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN',
+    'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA',
+    '6EF8rrecthR5DkV2i6sW8rLh2UZf7y3UtwFVyX3HiPDa',
+    'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ'
 ]);
 
 type AlchemyHubSolanaLimits = {
@@ -122,12 +133,13 @@ type AlchemyDasTokenAccount = {
     mint?: string;
 };
 
-type ConnectorDecisionClass = 'risk_eligible' | 'protocol_or_system' | 'high_degree_noisy';
+type ConnectorDecisionClass = 'risk_eligible' | 'context_only' | 'protocol_or_system' | 'program_owned' | 'token_account' | 'high_degree_noisy';
 
 type ConnectorDecision = {
     decisionClass: ConnectorDecisionClass;
     riskEligible: boolean;
     reason: string;
+    address?: string;
 };
 
 type PublicSolanaConnectorDecision = {
@@ -231,7 +243,25 @@ function getTxHash(transaction: ParsedTransaction) {
     return transaction.transaction?.signatures?.[0] || '';
 }
 
-function classifySolanaConnector(connector: string, linkedWalletCount: number, maxRiskEligibleWallets: number): ConnectorDecision {
+function connectorDecisionFromPublicSource(decision: PublicSolanaConnectorDecision | undefined): ConnectorDecision | null {
+    if (!decision?.excluded) return null;
+    return {
+        address: decision.address,
+        decisionClass: decision.category,
+        riskEligible: false,
+        reason: decision.reason
+    };
+}
+
+export function classifySolanaConnector(
+    connector: string,
+    linkedWalletCount: number,
+    maxRiskEligibleWallets: number,
+    publicDecision?: PublicSolanaConnectorDecision
+): ConnectorDecision {
+    const publicSourceDecision = connectorDecisionFromPublicSource(publicDecision);
+    if (publicSourceDecision) return publicSourceDecision;
+
     if (
         connector === SOLANA_SYSTEM_PROGRAM_ID ||
         connector === TOKEN_PROGRAM_ID ||
@@ -241,6 +271,7 @@ function classifySolanaConnector(connector: string, linkedWalletCount: number, m
         connector === SOLANA_ADDRESS_LOOKUP_TABLE_PROGRAM_ID
     ) {
         return {
+            address: connector,
             decisionClass: 'protocol_or_system',
             riskEligible: false,
             reason: 'Solana protocol/program address; excluded from coordinated-risk scoring.'
@@ -249,6 +280,7 @@ function classifySolanaConnector(connector: string, linkedWalletCount: number, m
 
     if (linkedWalletCount > maxRiskEligibleWallets) {
         return {
+            address: connector,
             decisionClass: 'high_degree_noisy',
             riskEligible: false,
             reason: `High-degree connector touching ${linkedWalletCount} tracked holders; kept as context only.`
@@ -256,9 +288,10 @@ function classifySolanaConnector(connector: string, linkedWalletCount: number, m
     }
 
     return {
-        decisionClass: 'high_degree_noisy',
-        riskEligible: false,
-        reason: 'Shared external connectors are excluded from lite-scan clustering until provider identity labels confirm they are private wallets.'
+        address: connector,
+        decisionClass: 'risk_eligible',
+        riskEligible: true,
+        reason: 'Shared private-source candidate; eligible for cluster scoring.'
     };
 }
 
@@ -794,9 +827,52 @@ function filterPublicSolanaTransferEdges(
     return { edges, excludedConnectors: [...excludedByAddress.values()] };
 }
 
+export function filterPublicSolanaFundingEdges(
+    fundingEdges: Array<{ sourceWallet: string; targetWallet: string; lamports: bigint; count: number }>,
+    publicConnectorDecisions: Map<string, PublicSolanaConnectorDecision>,
+    maxRiskEligibleFanout = MAX_RISK_ELIGIBLE_SHARED_CONNECTOR_WALLETS
+) {
+    const excludedByAddress = new Map<string, ConnectorDecision>();
+    const sourceToTargets = new Map<string, Set<string>>();
+    const targetToSources = new Map<string, Set<string>>();
+
+    for (const edge of fundingEdges) {
+        const sourceTargets = sourceToTargets.get(edge.sourceWallet) || new Set<string>();
+        sourceTargets.add(edge.targetWallet);
+        sourceToTargets.set(edge.sourceWallet, sourceTargets);
+
+        const targetSources = targetToSources.get(edge.targetWallet) || new Set<string>();
+        targetSources.add(edge.sourceWallet);
+        targetToSources.set(edge.targetWallet, targetSources);
+    }
+
+    const edges = fundingEdges.filter((edge) => {
+        const sourceDecision = connectorDecisionFromPublicSource(publicConnectorDecisions.get(edge.sourceWallet));
+        const targetDecision = connectorDecisionFromPublicSource(publicConnectorDecisions.get(edge.targetWallet));
+        const highDegreeSource = (sourceToTargets.get(edge.sourceWallet)?.size || 0) > maxRiskEligibleFanout;
+        const highDegreeTarget = (targetToSources.get(edge.targetWallet)?.size || 0) > maxRiskEligibleFanout;
+
+        const decision = sourceDecision || targetDecision || (highDegreeSource || highDegreeTarget
+            ? {
+                address: highDegreeSource ? edge.sourceWallet : edge.targetWallet,
+                decisionClass: 'high_degree_noisy' as const,
+                riskEligible: false,
+                reason: 'High-degree funding source or recipient observed across many tracked holders; kept as context only.'
+            }
+            : null);
+
+        if (!decision) return true;
+        if (decision.address) excludedByAddress.set(decision.address, decision);
+        return false;
+    });
+
+    return { edges, excludedConnectors: [...excludedByAddress.values()] };
+}
+
 function buildSharedConnectorEdges(
     transactionsByWallet: Map<string, ParsedTransaction[]>,
-    trackedWallets: Set<string>
+    trackedWallets: Set<string>,
+    publicConnectorDecisions: Map<string, PublicSolanaConnectorDecision>
 ): ConnectorEdgeResult<Array<{ from: string; to: string; connector: string; strength: number } & ConnectorDecision>[number]> {
     const connectorToTracked = new Map<string, Set<string>>();
 
@@ -829,7 +905,12 @@ function buildSharedConnectorEdges(
     for (const [connector, wallets] of connectorToTracked.entries()) {
         const members = [...wallets];
         if (members.length < 2) continue;
-        const decision = classifySolanaConnector(connector, members.length, MAX_RISK_ELIGIBLE_SHARED_CONNECTOR_WALLETS);
+        const decision = classifySolanaConnector(
+            connector,
+            members.length,
+            MAX_RISK_ELIGIBLE_SHARED_CONNECTOR_WALLETS,
+            publicConnectorDecisions.get(connector)
+        );
         if (!decision.riskEligible) {
             excludedConnectors.push(decision);
             continue;
@@ -852,7 +933,8 @@ function buildSharedConnectorEdges(
 function buildSecondHopConnectorEdges(
     walletCounterparties: Map<string, Map<string, { lamports: bigint; count: number }>>,
     connectorTransactionsByWallet: Map<string, ParsedTransaction[]>,
-    trackedWallets: Set<string>
+    trackedWallets: Set<string>,
+    publicConnectorDecisions: Map<string, PublicSolanaConnectorDecision>
 ): ConnectorEdgeResult<Array<{ from: string; to: string; source: string; strength: number } & ConnectorDecision>[number]> {
     const connectorToTracked = new Map<string, Set<string>>();
     for (const [wallet, counterparties] of walletCounterparties.entries()) {
@@ -900,7 +982,12 @@ function buildSecondHopConnectorEdges(
     for (const [source, wallets] of secondHopSourceToTracked.entries()) {
         const members = [...wallets];
         if (members.length < 2) continue;
-        const decision = classifySolanaConnector(source, members.length, MAX_RISK_ELIGIBLE_SECOND_HOP_SOURCE_WALLETS);
+        const decision = classifySolanaConnector(
+            source,
+            members.length,
+            MAX_RISK_ELIGIBLE_SECOND_HOP_SOURCE_WALLETS,
+            publicConnectorDecisions.get(source)
+        );
         if (!decision.riskEligible) {
             excludedConnectors.push(decision);
             continue;
@@ -1159,23 +1246,34 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
     });
     const uniqueTransactions = [...txMap.values()];
 
-    const fundingEdges = extractFundingEdges(uniqueTransactions, trackedWalletSet);
+    const fundingEdgeCandidates = extractFundingEdges(uniqueTransactions, trackedWalletSet);
     const transferEdgeCandidates = extractMintTransferEdges(normalizedAddress, uniqueTransactions, trackedWalletSet);
-    const transferConnectorCandidates = dedupe(transferEdgeCandidates.flatMap((edge) => [edge.sourceWallet, edge.targetWallet]));
-    const publicConnectorDecisions = await classifySolanaPublicConnectors(transferConnectorCandidates);
+    const transferConnectorCandidates = transferEdgeCandidates.flatMap((edge) => [edge.sourceWallet, edge.targetWallet]);
+    const fundingConnectorCandidates = fundingEdgeCandidates.flatMap((edge) => [edge.sourceWallet, edge.targetWallet]);
+    const publicConnectorDecisionCandidates = dedupe([
+        ...transferConnectorCandidates,
+        ...fundingConnectorCandidates,
+        ...firstHopConnectors.map((entry) => entry.connector),
+        ...connectorHistoryWallets
+    ]);
+    const publicConnectorDecisions = await classifySolanaPublicConnectors(publicConnectorDecisionCandidates);
+    const fundingEdgeResult = filterPublicSolanaFundingEdges(fundingEdgeCandidates, publicConnectorDecisions);
+    const fundingEdges = fundingEdgeResult.edges;
     const transferEdgeResult = filterPublicSolanaTransferEdges(transferEdgeCandidates, publicConnectorDecisions);
     const transferEdges = transferEdgeResult.edges;
-    const connectorEdgeResult = buildSharedConnectorEdges(holderTransactionsByWallet, trackedWalletSet);
+    const connectorEdgeResult = buildSharedConnectorEdges(holderTransactionsByWallet, trackedWalletSet, publicConnectorDecisions);
     const secondHopConnectorEdgeResult = buildSecondHopConnectorEdges(
         walletCounterparties,
         connectorTransactionsByWallet,
-        trackedWalletSet
+        trackedWalletSet,
+        publicConnectorDecisions
     );
     const connectorEdges = connectorEdgeResult.edges;
     const secondHopConnectorEdges = secondHopConnectorEdgeResult.edges;
     const excludedConnectorCount =
         connectorEdgeResult.excludedConnectors.length +
         secondHopConnectorEdgeResult.excludedConnectors.length +
+        fundingEdgeResult.excludedConnectors.length +
         transferEdgeResult.excludedConnectors.length;
 
     const componentEdges = [
@@ -1222,18 +1320,18 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
         }
         const tier = strongestTier(evidenceTiers);
         const reason = directFundingEdges.length >= 2
-            ? 'This holder group is tied together by multiple direct funding edges in the recent Alchemy history window.'
+            ? 'These wallets received funds from each other or through closely linked funding transactions, suggesting coordinated control.'
             : sharedConnectors.length
-                ? 'This holder group repeatedly converges through private-candidate shared connector wallets in recent history.'
+                ? 'These wallets repeatedly interact through the same non-public intermediary wallet.'
                 : sharedSecondHopSources.length
-                    ? 'This holder group shares second-hop funding sources discovered through connector-wallet expansion.'
+                    ? 'These wallets trace back to the same funding source through an intermediary wallet.'
                 : directTransferEdges.length
-                    ? 'This holder group is linked by recent direct token-transfer behavior.'
-                    : 'This holder group forms a bounded component inside the Alchemy holder graph.';
+                    ? 'These wallets have recently transferred this token between each other, suggesting coordinated holder activity.'
+                    : 'These wallets form a connected holder group based on transfer and funding relationships.';
 
         return {
             clusterId,
-            clusterName: `Alchemy Cluster ${index + 1}`,
+            clusterName: `Holder Cluster ${index + 1}`,
             evidenceTier: tier,
             userEvidenceLabel: tierLabel(tier),
             walletCount: wallets.length,
@@ -1280,8 +1378,8 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
             currentHoldingsTokens: amount.toString(),
             currentHoldingsPct: calculatePct(amount, metadata.totalSupplyRaw),
             flagReason: clusterId
-                ? 'Included in the bounded Alchemy cluster map.'
-                : 'Visible as an independent top holder outside the current Alchemy cluster threshold.'
+                ? 'This wallet is part of a connected holder cluster.'
+                : 'This wallet is a major holder but is not strongly linked to the detected clusters.'
         };
     });
 
@@ -1332,6 +1430,22 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
     const top20Pct = largestAccounts
         .slice(0, 20)
         .reduce((sum, account) => sum + calculatePct(parseRawAmount(account.amount), metadata.totalSupplyRaw), 0);
+    const evidenceByTier = {
+        tier1: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_1').length,
+        tier2: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_2').length,
+        tier3: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_3').length
+    };
+    const coverageLevel = mintAccounts.length > 0 ? 'full' : 'degraded_history';
+    const bundleIntelligence = buildBundleIntelligence({
+        walletsInvolved: 0,
+        supplyControlledPct: 0,
+        retentionPct: null,
+        inferredBundleCount: 0,
+        insiderClusterCount: 0,
+        tier1EvidenceCount: evidenceByTier.tier1,
+        tier2EvidenceCount: evidenceByTier.tier2,
+        coverageLevel
+    });
 
     return {
         tokenAddress: normalizedAddress,
@@ -1373,12 +1487,9 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
             blockZeroBundleClusterCount: 0,
             maxTrackedHops: 2,
             trackedHopDepth: 2,
-            evidenceByTier: {
-                tier1: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_1').length,
-                tier2: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_2').length,
-                tier3: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_3').length
-            }
+            evidenceByTier
         },
+        bundleIntelligence,
         scanStats: {
             walletsExpanded: trackedWallets.length,
             transactionsDecoded: uniqueTransactions.length,
@@ -1390,7 +1501,7 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
             usedHeliusHistory: false,
             usedWalletApi: false,
             historySource: 'signature_paging',
-            coverageLevel: mintAccounts.length > 0 ? 'full' : 'degraded_history'
+            coverageLevel
         },
         walletClusters,
         ecosystemGraph: {
@@ -1401,17 +1512,17 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
         evidenceHighlights: [],
         notes: [
             options.holderSeeds?.length
-                ? `Safe Scan seeded the map with ${options.holderSeeds.length} Moralis top holders before running the Alchemy lite cluster pass.`
-                : `Alchemy Hub ${depth} mode runs on a separate Alchemy-first cluster-map engine from Bubble Maps and Safe Scan.`,
+                ? `Safe Scan seeded the map with ${options.holderSeeds.length} indexed top holders before running the cluster pass.`
+                : `Safe Scan ${depth} mode runs a separate cluster-map engine from Bubble Maps and the full Safe Scan pass.`,
             excludedConnectorCount
                 ? `Excluded ${excludedConnectorCount} Solana public connector${excludedConnectorCount === 1 ? '' : 's'} from clustering and graph links, including shared external connectors, protocol programs, program-owned accounts, or token-account vaults.`
                 : 'No Solana public connector candidates were excluded in this run.',
             `It expanded ${trackedWallets.length} holders with ${holderHistoryWallets.length} direct history traces and ${connectorHistoryWallets.length} connector traces.`,
             options.seedOnly
-                ? 'Safe Scan limits the visible holder set to wallets returned by Moralis, then uses Alchemy for history, transfer links, and funding-source mapping.'
-                : 'It uses Alchemy account scans, recent holder history, and bounded 2-hop connector discovery to build the map.',
+                ? 'Safe Scan limits the visible holder set to indexed top-holder wallets, then maps history, transfer links, and funding sources.'
+                : 'It uses account scans, recent holder history, and bounded 2-hop connector discovery to build the map.',
             options.holderSeeds?.length
-                ? 'Moralis improves holder selection, while Alchemy remains the source for wallet history, transfer links, and funding-source mapping.'
+                ? 'Indexed holder selection improves coverage before Safe Scan maps wallet history, transfer links, and funding sources.'
                 : 'Safe Scan remains the deeper multi-hop forensic engine when you need full launch and bundle attribution.'
         ]
     };

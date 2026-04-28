@@ -1,5 +1,6 @@
 import { APP_CONFIG } from '../../config';
 import { SolanaProvider } from '../SolanaProvider';
+import { buildBundleIntelligence, calculateRetentionPct } from './bundle-intelligence';
 import { fetchOrderedTransactionsForAddress, fetchRecentSignaturesForAddress } from './helius-history';
 import type {
     BundleCandidate,
@@ -38,6 +39,8 @@ const LAUNCH_SIGNATURE_PAGE_SIZE = 40;
 const RECENT_SIGNATURE_LIMIT = 25;
 const TOP_HOLDER_SEED_COUNT = 28;
 const LAUNCH_BUYER_LIMIT = 12;
+const LAUNCH_COHORT_BLOCK_SPAN = 3;
+const LAUNCH_COHORT_LAST_OFFSET = LAUNCH_COHORT_BLOCK_SPAN - 1;
 const MAX_INDEPENDENT_GRAPH_WALLETS = 120;
 const DEFAULT_JITO_TIP_ACCOUNTS = [
     '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
@@ -138,12 +141,16 @@ function getTierLabel(tier: EvidenceTier): ForensicWalletCluster['userEvidenceLa
 }
 
 function getLaunchBand(slot: number, earliestSlot: number | undefined): LaunchBuyer['launchBand'] {
-    if (earliestSlot === undefined) return 'block_51_plus';
+    if (earliestSlot === undefined) return 'block_3_plus';
     const delta = slot - earliestSlot;
     if (delta <= 0) return 'block_0';
-    if (delta <= 5) return 'block_1_5';
-    if (delta <= 50) return 'block_6_50';
-    return 'block_51_plus';
+    if (delta === 1) return 'block_1';
+    if (delta === 2) return 'block_2';
+    return 'block_3_plus';
+}
+
+function isInLaunchCohort(slot: number, earliestSlot: number | undefined) {
+    return earliestSlot !== undefined && slot >= earliestSlot && slot <= earliestSlot + LAUNCH_COHORT_LAST_OFFSET;
 }
 
 function walletShort(address: string) {
@@ -483,7 +490,7 @@ export function inferJitoLaunchSignals(args: {
                     to: right.wallet,
                     tier: 'TIER_1',
                     label: 'shared_jito_tip_wallet',
-                    reason: `Both launch entries used the same Jito tip-paying wallet ${sharedTipWallets[0]}.`,
+                    reason: 'Both early launch transactions used the same priority-fee payer, which may indicate shared execution control.',
                     txHash: left.txHash,
                     score: 8
                 });
@@ -495,7 +502,7 @@ export function inferJitoLaunchSignals(args: {
                     to: right.wallet,
                     tier: 'TIER_2',
                     label: 'same_slot_jito_router',
-                    reason: 'Both launch entries tipped Jito in the same slot.',
+                    reason: 'Both early launch transactions used priority execution in the same block.',
                     txHash: left.txHash,
                     score: 6
                 });
@@ -507,7 +514,7 @@ export function inferJitoLaunchSignals(args: {
                     to: right.wallet,
                     tier: 'TIER_2',
                     label: 'shared_jito_tip_account',
-                    reason: `Both launch entries paid into the same Jito tip account ${sharedTipAccounts[0]}.`,
+                    reason: 'Both early launch transactions used the same priority-execution route.',
                     txHash: left.txHash,
                     score: 5
                 });
@@ -519,7 +526,7 @@ export function inferJitoLaunchSignals(args: {
                     to: right.wallet,
                     tier: 'TIER_2',
                     label: 'matching_jito_tip_amount',
-                    reason: `Both launch entries used the same Jito tip amount ${matchingTipAmounts[0]} lamports.`,
+                    reason: 'Both early launch transactions used the same priority-fee amount.',
                     txHash: left.txHash,
                     score: 4
                 });
@@ -1124,7 +1131,7 @@ function collectSharedFundingEdges(wallets: string[], fundingSources: Map<string
                     to: uniqueWallets[inner],
                     tier: 'TIER_1',
                     label: 'shared_funded_by_source',
-                    reason: `Both wallets were funded by ${sourceWallet} according to Helius Wallet API enrichment.`,
+                    reason: 'Both wallets appear to have been funded by the same source wallet.',
                     score: 8
                 }));
             }
@@ -1451,9 +1458,9 @@ function buildClusterGraph(args: {
         const clusterName = isDeployerCluster
             ? 'Deployer-Linked Cluster'
             : containsBlockZero.length >= 2
-                ? 'Block Zero Bundle Cluster'
+                ? 'Insider Cluster'
                 : containsSnipers.length >= 2
-                    ? 'Sniper Coordination Cluster'
+                    ? 'Early Buyer Coordination Cluster'
                     : `Launch Coordination Cluster ${clusterIndex}`;
         const dominantReasons = dedupe(componentEdges.map((edge) => edge.label)).slice(0, 4);
 
@@ -1587,14 +1594,14 @@ function buildEvidenceHighlights(args: {
                 : 'No qualifying bundle candidates were emitted from the current launch sample.'
         },
         {
-            title: 'Block-zero cluster coverage',
+            title: 'Block 0-2 cluster coverage',
             tier: blockZeroWallets.length >= 2 ? 'TIER_2' : 'TIER_3',
-            description: `${blockZeroWallets.length} wallet${blockZeroWallets.length === 1 ? '' : 's'} were observed at block zero and checked against cluster evidence.`
+            description: `${blockZeroWallets.length} wallet${blockZeroWallets.length === 1 ? '' : 's'} were observed across launch blocks 0, 1, and 2, then checked against cluster evidence.`
         },
         {
-            title: 'Sniper window activity',
+            title: 'Block 0-2 entrant activity',
             tier: sniperWallets.length >= 2 ? 'TIER_2' : 'TIER_3',
-            description: `${sniperWallets.length} wallet${sniperWallets.length === 1 ? '' : 's'} entered within five slots of the first observed launch buyer.`
+            description: `${sniperWallets.length} wallet${sniperWallets.length === 1 ? '' : 's'} entered within the first three launch blocks.`
         },
         {
             title: 'Jito-linked routing',
@@ -1663,16 +1670,17 @@ export async function analyzeForensicToken(tokenAddress: string): Promise<Forens
         })
         .filter((buyer) => buyer.acquisitionType !== 'internal_rebalance');
 
-    const includedLaunchBuyers = dedupe(launchBuyers.map((buyer) => buyer.wallet))
-        .map((wallet) => launchBuyers.find((buyer) => buyer.wallet === wallet))
+    const launchCohortBuyers = launchBuyers.filter((buyer) => isInLaunchCohort(buyer.slot, earliestSlot));
+    const includedLaunchBuyers = dedupe(launchCohortBuyers.map((buyer) => buyer.wallet))
+        .map((wallet) => launchCohortBuyers.find((buyer) => buyer.wallet === wallet))
         .filter((buyer): buyer is LaunchBuyer => Boolean(buyer))
         .slice(0, LAUNCH_BUYER_LIMIT);
 
     const blockZeroWallets = includedLaunchBuyers
-        .filter((buyer) => earliestSlot !== undefined && buyer.slot === earliestSlot)
+        .filter((buyer) => isInLaunchCohort(buyer.slot, earliestSlot))
         .map((buyer) => buyer.wallet);
     const sniperWallets = includedLaunchBuyers
-        .filter((buyer) => earliestSlot !== undefined && buyer.slot <= earliestSlot + 4)
+        .filter((buyer) => isInLaunchCohort(buyer.slot, earliestSlot))
         .map((buyer) => buyer.wallet);
     const topHolderWallets = tokenAccounts
         .slice()
@@ -1744,6 +1752,10 @@ export async function analyzeForensicToken(tokenAddress: string): Promise<Forens
     const sniperRaw = sumWalletBalances(sniperWallets);
     const clusteredRaw = sumWalletBalances(clusteredWallets);
     const networkRaw = sumWalletBalances(networkLinkedWallets);
+    const blockZeroWalletSet = new Set(blockZeroWallets);
+    const blockZeroAcquiredRaw = includedLaunchBuyers
+        .filter((buyer) => blockZeroWalletSet.has(buyer.wallet))
+        .reduce((sum, buyer) => sum + buyer.amount, 0n);
     const coordinatedWallets = dedupe([
         ...deployerLinkedWallets,
         ...blockZeroWallets,
@@ -1776,6 +1788,17 @@ export async function analyzeForensicToken(tokenAddress: string): Promise<Forens
         : ((expandedGraph.usedWalletApi || usedWalletFundingApi || usedWalletIdentityApi)
             ? 'degraded_history'
             : 'degraded_history_and_enrichment');
+    const bundleIntelligence = buildBundleIntelligence({
+        walletsInvolved: dedupe(blockZeroWallets).length,
+        supplyControlledPct: calculatePct(blockZeroRaw, metadata.totalSupplyRaw),
+        retentionPct: calculateRetentionPct(blockZeroAcquiredRaw, blockZeroRaw),
+        inferredBundleCount: bundleCandidates.length,
+        insiderClusterCount: blockZeroBundleClusterCount,
+        tier1EvidenceCount: clusterGraph.evidenceTierCounts.tier1,
+        tier2EvidenceCount: clusterGraph.evidenceTierCounts.tier2,
+        deployerLinkedPct: calculatePct(deployerRaw, metadata.totalSupplyRaw),
+        coverageLevel
+    });
 
     return {
         tokenAddress: normalizedAddress,
@@ -1792,9 +1815,9 @@ export async function analyzeForensicToken(tokenAddress: string): Promise<Forens
             sniperWallets: dedupe(sniperWallets),
             launchBands: {
                 block0Wallets: includedLaunchBuyers.filter((buyer) => buyer.launchBand === 'block_0').length,
-                block15Wallets: includedLaunchBuyers.filter((buyer) => buyer.launchBand === 'block_1_5').length,
-                block650Wallets: includedLaunchBuyers.filter((buyer) => buyer.launchBand === 'block_6_50').length,
-                block51PlusWallets: includedLaunchBuyers.filter((buyer) => buyer.launchBand === 'block_51_plus').length
+                block15Wallets: includedLaunchBuyers.filter((buyer) => buyer.launchBand === 'block_1' || buyer.launchBand === 'block_2').length,
+                block650Wallets: 0,
+                block51PlusWallets: launchBuyers.filter((buyer) => buyer.launchBand === 'block_3_plus').length
             }
         },
         supplyAttribution: {
@@ -1819,6 +1842,7 @@ export async function analyzeForensicToken(tokenAddress: string): Promise<Forens
             trackedHopDepth,
             evidenceByTier: clusterGraph.evidenceTierCounts
         },
+        bundleIntelligence,
         scanStats: {
             walletsExpanded: expandedGraph.trackedWallets.length,
             transactionsDecoded: allTransactions.length,
@@ -1844,21 +1868,21 @@ export async function analyzeForensicToken(tokenAddress: string): Promise<Forens
         }),
         notes: [
             APP_CONFIG.heliusKey
-                ? 'This forensic engine is running in Helius-first mode where supported, with fallback Solana RPC used for resilience.'
-                : 'This forensic engine is using fallback Solana RPC only, so bundle and cluster attribution may be weaker without Helius.',
+                ? 'This forensic engine is running with enhanced indexed history where supported, with fallback Solana RPC used for resilience.'
+                : 'This forensic engine is using fallback Solana RPC only, so bundle and cluster attribution may be weaker without indexed history.',
             launchReconstruction.usedHeliusHistory
-                ? `Launch reconstruction used Helius getTransactionsForAddress for ordered historical coverage across ${launchReconstruction.heliusPageCount} page${launchReconstruction.heliusPageCount === 1 ? '' : 's'}.`
-                : `Launch reconstruction used signature paging and decoded transaction sampling because ordered Helius history was not available for this run.${launchReconstruction.degradedReason ? ` ${launchReconstruction.degradedReason}` : ''}`,
+                ? `Launch reconstruction used ordered historical coverage across ${launchReconstruction.heliusPageCount} page${launchReconstruction.heliusPageCount === 1 ? '' : 's'}.`
+                : `Launch reconstruction used signature paging and decoded transaction sampling because ordered history was not available for this run.${launchReconstruction.degradedReason ? ` ${launchReconstruction.degradedReason}` : ''}`,
             expandedGraph.usedWalletApi || usedWalletFundingApi || usedWalletIdentityApi
                 ? 'Wallet API enrichment contributed funded-by and identity signals to cluster scoring.'
                 : 'Wallet API enrichment was unavailable, so cluster scoring relied on on-chain transaction evidence only.',
             `Relationship expansion was capped at ${FORENSIC_MAX_TRACKED_HOPS} hops and reached ${trackedHopDepth || 0} hop${trackedHopDepth === 1 ? '' : 's'} in this run.`,
             bundleCandidates.length
-                ? `${bundleCandidates.length} inferred bundle candidate${bundleCandidates.length === 1 ? '' : 's'} were scored across the launch cohort, with ${blockZeroBundleClusterCount} block-zero-linked cluster${blockZeroBundleClusterCount === 1 ? '' : 's'}.`
+                ? `${bundleCandidates.length} inferred bundle candidate${bundleCandidates.length === 1 ? '' : 's'} were scored across the first ${LAUNCH_COHORT_BLOCK_SPAN} launch blocks, with ${blockZeroBundleClusterCount} block 0-2-linked cluster${blockZeroBundleClusterCount === 1 ? '' : 's'}.`
                 : 'No qualifying bundle candidates cleared the evidence thresholds in this launch sample.',
             jitoSignals.tippedBuyerWallets.length
-                ? `Jito tip analysis linked ${jitoSignals.tippedBuyerWallets.length} launch wallet${jitoSignals.tippedBuyerWallets.length === 1 ? '' : 's'} to tipped execution patterns.`
-                : 'No launch transactions in the analyzed sample paid into the live Jito tip-account set.',
+                ? `Priority-fee analysis linked ${jitoSignals.tippedBuyerWallets.length} launch wallet${jitoSignals.tippedBuyerWallets.length === 1 ? '' : 's'} to tipped execution patterns.`
+                : 'No launch transactions in the analyzed sample showed a matching priority-fee payment pattern.',
             rawLaunchEvents.length === 0
                 ? 'The engine fell back to recent decoded transactions because the reconstructed launch slice produced no positive buyer events.'
                 : 'The engine used reconstructed launch history instead of only recent token activity.'

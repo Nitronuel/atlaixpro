@@ -1,6 +1,18 @@
 import { ChainRouter, type ChainType } from './ChainRouter';
 import { SavedWalletService } from './SavedWalletService';
 import { SmartMoneyQualificationService } from './SmartMoneyQualificationService';
+import {
+    classifySmartMoneyWallet,
+    type SmartMoneyDecision,
+    type SmartMoneyDiscoverySource,
+    type SmartMoneyIntelligenceConfidence,
+    type SmartMoneyNumericMetrics,
+    type SmartMoneyProcessStatus,
+    type SmartMoneyReasonCode,
+    type SmartMoneyRiskFlag,
+    type SmartMoneyScoreBreakdown,
+    type SmartMoneyWalletType
+} from './SmartMoneyWalletClassifier';
 import { APP_CONFIG } from '../config';
 import type { WalletStats } from '../hooks/useWalletPortfolio';
 import type { SmartMoneyQualification } from '../types';
@@ -62,6 +74,26 @@ export type WalletScanJob = {
     source?: 'moralis-swaps' | 'alchemy-transfers';
     confidence?: 'high' | 'low';
     error?: string;
+} & Partial<SmartMoneyNumericMetrics & SmartMoneyScoreBreakdown> & {
+    processStatus?: SmartMoneyProcessStatus;
+    decision?: SmartMoneyDecision;
+    walletType?: SmartMoneyWalletType;
+    intelligenceConfidence?: SmartMoneyIntelligenceConfidence;
+    discoverySource?: SmartMoneyDiscoverySource;
+    sourceTokenSymbol?: string | null;
+    sourceTokenName?: string | null;
+    firstBuyUsd?: number | null;
+    firstBuyAmountRaw?: string | null;
+    firstSeenTx?: string | null;
+    reasonCodes?: SmartMoneyReasonCode[];
+    riskFlags?: SmartMoneyRiskFlag[];
+    decisionSummary?: string;
+    savedToTracker?: boolean;
+    actionTaken?: 'none' | 'saved' | 'tracked' | 'ignored';
+};
+
+type WalletScanMetrics = SmartMoneyNumericMetrics & {
+    stats: WalletStats;
 };
 
 type ScannerState = {
@@ -81,7 +113,9 @@ const supabase = hasSupabaseConfig
     })
     : null;
 let supabaseScannerAvailable = hasSupabaseConfig;
+let supabaseScannerIntelligenceColumnsAvailable = true;
 let warnedAboutScannerSupabase = false;
+let warnedAboutScannerIntelligenceSchema = false;
 
 function now() {
     return Date.now();
@@ -98,7 +132,7 @@ function readState(): ScannerState {
         const parsed = JSON.parse(raw) as Partial<ScannerState>;
         return {
             tokenJobs: Array.isArray(parsed.tokenJobs) ? parsed.tokenJobs : [],
-            walletJobs: Array.isArray(parsed.walletJobs) ? parsed.walletJobs : []
+            walletJobs: Array.isArray(parsed.walletJobs) ? parsed.walletJobs.map(normalizeWalletJob) : []
         };
     } catch {
         return { tokenJobs: [], walletJobs: [] };
@@ -113,6 +147,12 @@ function writeState(state: ScannerState) {
 function warnScannerSupabaseOnce(message: string) {
     if (warnedAboutScannerSupabase) return;
     warnedAboutScannerSupabase = true;
+    console.warn(message);
+}
+
+function warnScannerIntelligenceSchemaOnce(message: string) {
+    if (warnedAboutScannerIntelligenceSchema) return;
+    warnedAboutScannerIntelligenceSchema = true;
     console.warn(message);
 }
 
@@ -139,7 +179,7 @@ function mapTokenJobRow(row: any): TokenScanJob {
 }
 
 function mapWalletJobRow(row: any): WalletScanJob {
-    return {
+    return normalizeWalletJob({
         id: row.id,
         tokenJobId: row.token_job_id,
         wallet: row.wallet,
@@ -162,8 +202,43 @@ function mapWalletJobRow(row: any): WalletScanJob {
         exchange: row.exchange,
         source: row.source,
         confidence: row.confidence,
-        error: row.error || undefined
-    };
+        error: row.error || undefined,
+        processStatus: row.process_status,
+        decision: row.decision,
+        walletType: row.wallet_type,
+        intelligenceConfidence: row.intelligence_confidence,
+        discoverySource: row.discovery_source,
+        sourceTokenSymbol: row.source_token_symbol,
+        sourceTokenName: row.source_token_name,
+        firstBuyUsd: row.first_buy_usd === null ? null : Number(row.first_buy_usd),
+        firstBuyAmountRaw: row.first_buy_amount_raw,
+        firstSeenTx: row.first_seen_tx,
+        netWorthUsd: row.net_worth_usd === null ? null : Number(row.net_worth_usd),
+        realizedPnlUsd: row.realized_pnl_usd === null ? null : Number(row.realized_pnl_usd),
+        unrealizedPnlUsd: row.unrealized_pnl_usd === null ? null : Number(row.unrealized_pnl_usd),
+        totalPnlUsd: row.total_pnl_usd === null ? null : Number(row.total_pnl_usd),
+        pnlPct: row.pnl_pct === null ? null : Number(row.pnl_pct),
+        winRatePct: row.win_rate_pct === null ? null : Number(row.win_rate_pct),
+        capitalEfficiency: row.capital_efficiency === null ? null : Number(row.capital_efficiency),
+        avgBuyUsd: row.avg_buy_usd === null ? null : Number(row.avg_buy_usd),
+        tradesAnalyzed: row.trades_analyzed ?? null,
+        winningTrades: row.winning_trades ?? null,
+        losingTrades: row.losing_trades ?? null,
+        tokensTraded: row.tokens_traded ?? null,
+        daysActive: row.days_active === null ? null : Number(row.days_active),
+        lastActiveAt: row.last_active_at,
+        scoreTotal: row.score_total ?? null,
+        scoreProfitability: row.score_profitability ?? null,
+        scoreConsistency: row.score_consistency ?? null,
+        scoreTiming: row.score_timing ?? null,
+        scoreCapitalEfficiency: row.score_capital_efficiency ?? null,
+        scoreRiskAdjusted: row.score_risk_adjusted ?? null,
+        reasonCodes: row.reason_codes || undefined,
+        riskFlags: row.risk_flags || undefined,
+        decisionSummary: row.decision_summary,
+        savedToTracker: row.saved_to_tracker ?? undefined,
+        actionTaken: row.action_taken
+    });
 }
 
 function tokenJobPayload(job: TokenScanJob) {
@@ -212,6 +287,47 @@ function walletJobPayload(job: WalletScanJob) {
     };
 }
 
+function walletJobPayloadWithIntelligence(job: WalletScanJob) {
+    return {
+        ...walletJobPayload(job),
+        process_status: job.processStatus || null,
+        decision: job.decision || null,
+        wallet_type: job.walletType || null,
+        intelligence_confidence: job.intelligenceConfidence || null,
+        discovery_source: job.discoverySource || null,
+        source_token_symbol: job.sourceTokenSymbol || null,
+        source_token_name: job.sourceTokenName || null,
+        first_buy_usd: job.firstBuyUsd ?? job.buyerUsdValue ?? null,
+        first_buy_amount_raw: job.firstBuyAmountRaw || null,
+        first_seen_tx: job.firstSeenTx || job.txHash || null,
+        net_worth_usd: job.netWorthUsd ?? null,
+        realized_pnl_usd: job.realizedPnlUsd ?? null,
+        unrealized_pnl_usd: job.unrealizedPnlUsd ?? null,
+        total_pnl_usd: job.totalPnlUsd ?? null,
+        pnl_pct: job.pnlPct ?? null,
+        win_rate_pct: job.winRatePct ?? null,
+        capital_efficiency: job.capitalEfficiency ?? null,
+        avg_buy_usd: job.avgBuyUsd ?? null,
+        trades_analyzed: job.tradesAnalyzed ?? null,
+        winning_trades: job.winningTrades ?? null,
+        losing_trades: job.losingTrades ?? null,
+        tokens_traded: job.tokensTraded ?? null,
+        days_active: job.daysActive ?? null,
+        last_active_at: job.lastActiveAt || null,
+        score_total: job.scoreTotal ?? job.score ?? null,
+        score_profitability: job.scoreProfitability ?? null,
+        score_consistency: job.scoreConsistency ?? null,
+        score_timing: job.scoreTiming ?? null,
+        score_capital_efficiency: job.scoreCapitalEfficiency ?? null,
+        score_risk_adjusted: job.scoreRiskAdjusted ?? job.score ?? null,
+        reason_codes: job.reasonCodes || null,
+        risk_flags: job.riskFlags || null,
+        decision_summary: job.decisionSummary || null,
+        saved_to_tracker: job.savedToTracker ?? null,
+        action_taken: job.actionTaken || null
+    };
+}
+
 async function syncTokenJob(job: TokenScanJob) {
     if (!canUseSupabaseScanner()) return;
     const { error } = await supabase!
@@ -225,10 +341,22 @@ async function syncTokenJob(job: TokenScanJob) {
 
 async function syncWalletJobs(jobs: WalletScanJob[]) {
     if (!jobs.length || !canUseSupabaseScanner()) return;
+    const payloadBuilder = supabaseScannerIntelligenceColumnsAvailable ? walletJobPayloadWithIntelligence : walletJobPayload;
     const { error } = await supabase!
         .from('smart_money_scan_wallets')
-        .upsert(jobs.map(walletJobPayload), { onConflict: 'id' });
+        .upsert(jobs.map(payloadBuilder), { onConflict: 'id' });
     if (error) {
+        if (supabaseScannerIntelligenceColumnsAvailable && /column|schema cache|PGRST204/i.test(error.message)) {
+            supabaseScannerIntelligenceColumnsAvailable = false;
+            warnScannerIntelligenceSchemaOnce(`Smart Money scanner is syncing legacy wallet fields only. Run supabase/smart_money_scanner.sql to store the new intelligence columns: ${error.message}`);
+            const fallback = await supabase!
+                .from('smart_money_scan_wallets')
+                .upsert(jobs.map(walletJobPayload), { onConflict: 'id' });
+            if (!fallback.error) return;
+            warnScannerSupabaseOnce(`Smart Money scanner wallet sync skipped: ${fallback.error.message}`);
+            supabaseScannerAvailable = false;
+            return;
+        }
         warnScannerSupabaseOnce(`Smart Money scanner wallet sync skipped: ${error.message}`);
         supabaseScannerAvailable = false;
     }
@@ -259,6 +387,45 @@ function scannerChainToPortfolioChain(chain: SmartMoneyScannerChain): ChainType 
     return map[chain];
 }
 
+function normalizeWalletJob(job: WalletScanJob): WalletScanJob {
+    const classification = classifySmartMoneyWallet({
+        status: job.status,
+        source: job.source,
+        confidence: job.confidence,
+        buyerUsdValue: job.buyerUsdValue ?? job.firstBuyUsd ?? null,
+        score: job.score,
+        qualification: job.qualification,
+        netWorthUsd: job.netWorthUsd,
+        realizedPnlUsd: job.realizedPnlUsd,
+        unrealizedPnlUsd: job.unrealizedPnlUsd,
+        totalPnlUsd: job.totalPnlUsd,
+        pnlPct: job.pnlPct,
+        winRatePct: job.winRatePct,
+        capitalEfficiency: job.capitalEfficiency,
+        avgBuyUsd: job.avgBuyUsd,
+        tradesAnalyzed: job.tradesAnalyzed,
+        winningTrades: job.winningTrades,
+        losingTrades: job.losingTrades,
+        tokensTraded: job.tokensTraded,
+        daysActive: job.daysActive,
+        lastActiveAt: job.lastActiveAt
+    });
+
+    return {
+        ...job,
+        firstBuyUsd: job.firstBuyUsd ?? job.buyerUsdValue ?? null,
+        firstBuyAmountRaw: job.firstBuyAmountRaw ?? null,
+        firstSeenTx: job.firstSeenTx ?? job.txHash ?? null,
+        ...classification,
+        decision: job.decision ?? classification.decision,
+        walletType: job.walletType ?? classification.walletType,
+        intelligenceConfidence: job.intelligenceConfidence ?? classification.intelligenceConfidence,
+        reasonCodes: job.reasonCodes ?? classification.reasonCodes,
+        riskFlags: job.riskFlags ?? classification.riskFlags,
+        decisionSummary: job.decisionSummary ?? classification.decisionSummary
+    };
+}
+
 function formatCurrency(value: number) {
     return value.toLocaleString('en-US', {
         style: 'currency',
@@ -267,24 +434,49 @@ function formatCurrency(value: number) {
     });
 }
 
-function buildWalletStatsFromPortfolio(portfolio: Awaited<ReturnType<typeof ChainRouter.fetchPortfolio>>): WalletStats {
+function buildWalletMetricsFromPortfolio(portfolio: Awaited<ReturnType<typeof ChainRouter.fetchPortfolio>>): WalletScanMetrics {
     const assets = portfolio.assets || [];
     const netWorth = assets.reduce((sum, asset) => sum + (asset.rawValue || 0), 0);
     const activeAssets = assets.filter((asset) => (asset.rawValue || 0) > 1);
     const pnlAssets = activeAssets.filter((asset) => typeof asset.pnlPercent === 'number');
     const winners = pnlAssets.filter((asset) => (asset.pnlPercent || 0) > 0);
+    const losingTrades = pnlAssets.filter((asset) => (asset.pnlPercent || 0) <= 0).length;
     const winRate = pnlAssets.length ? `${Math.round((winners.length / pnlAssets.length) * 100)}%` : 'N/A';
-    const pnlAverage = pnlAssets.length
-        ? pnlAssets.reduce((sum, asset) => sum + (asset.pnlPercent || 0), 0) / pnlAssets.length
-        : null;
+    let totalCostBasis = 0;
+    let totalCurrentValueForPnl = 0;
+
+    pnlAssets.forEach((asset) => {
+        const pnlPercent = asset.pnlPercent || 0;
+        const denominator = 1 + (pnlPercent / 100);
+        if (denominator <= 0) return;
+        const costBasis = (asset.rawValue || 0) / denominator;
+        totalCostBasis += costBasis;
+        totalCurrentValueForPnl += asset.rawValue || 0;
+    });
+
+    const totalPnlUsd = totalCostBasis > 0 ? totalCurrentValueForPnl - totalCostBasis : null;
+    const pnlAverage = totalCostBasis > 0 ? (totalPnlUsd! / totalCostBasis) * 100 : null;
+    const winRatePct = pnlAssets.length ? (winners.length / pnlAssets.length) * 100 : null;
 
     return {
-        netWorth: formatCurrency(netWorth),
-        winRate,
-        totalPnL: pnlAverage === null ? 'N/A' : `${pnlAverage >= 0 ? '+' : ''}${pnlAverage.toFixed(2)}%`,
-        activePositions: activeAssets.length,
-        profitableTrader: winners.length.toString(),
-        avgHoldTime: 'N/A'
+        stats: {
+            netWorth: formatCurrency(netWorth),
+            winRate,
+            totalPnL: pnlAverage === null ? 'N/A' : `${pnlAverage >= 0 ? '+' : ''}${pnlAverage.toFixed(2)}%`,
+            activePositions: activeAssets.length,
+            profitableTrader: winners.length.toString(),
+            avgHoldTime: 'N/A'
+        },
+        netWorthUsd: netWorth,
+        totalPnlUsd,
+        pnlPct: pnlAverage,
+        winRatePct,
+        capitalEfficiency: pnlAverage,
+        avgBuyUsd: pnlAssets.length && totalCostBasis > 0 ? totalCostBasis / pnlAssets.length : null,
+        tradesAnalyzed: pnlAssets.length,
+        winningTrades: winners.length,
+        losingTrades,
+        tokensTraded: activeAssets.length
     };
 }
 
@@ -425,7 +617,7 @@ export const SmartMoneyScannerService = {
                     existingJobs.add(key);
                     return true;
                 })
-                .map((buyer) => ({
+                .map((buyer) => normalizeWalletJob({
                     id: buildId('wallet'),
                     tokenJobId: job.id,
                     wallet: buyer.wallet,
@@ -437,10 +629,15 @@ export const SmartMoneyScannerService = {
                     firstSeenAt: buyer.firstSeenAt,
                     txHash: buyer.txHash,
                     buyerUsdValue: buyer.usdValue,
+                    firstBuyUsd: buyer.usdValue ?? null,
+                    firstBuyAmountRaw: buyer.amountRaw,
+                    firstSeenTx: buyer.txHash,
                     pairAddress: buyer.pairAddress,
                     exchange: buyer.exchange,
                     source: buyer.source,
-                    confidence: buyer.confidence
+                    confidence: buyer.confidence,
+                    savedToTracker: existingWallets.has(buyer.wallet.toLowerCase()),
+                    actionTaken: existingWallets.has(buyer.wallet.toLowerCase()) ? 'tracked' : 'none'
                 }));
 
             const readyJob: TokenScanJob = {
@@ -494,7 +691,8 @@ export const SmartMoneyScannerService = {
 
         try {
             const portfolio = await ChainRouter.fetchPortfolio(scannerChainToPortfolioChain(walletJob.chain), walletJob.wallet, true);
-            const stats = buildWalletStatsFromPortfolio(portfolio);
+            const metrics = buildWalletMetricsFromPortfolio(portfolio);
+            const stats = metrics.stats;
             const qualification = SmartMoneyQualificationService.evaluate(stats);
             const trackedWallet = SavedWalletService.ensureTrackedWallet(
                 walletJob.wallet,
@@ -512,10 +710,20 @@ export const SmartMoneyScannerService = {
             }, stats);
 
             const nextStatus: WalletJobStatus = qualification.qualified ? 'qualified' : 'tracked';
+            const classification = classifySmartMoneyWallet({
+                ...metrics,
+                status: nextStatus,
+                source: walletJob.source,
+                confidence: walletJob.confidence,
+                buyerUsdValue: walletJob.buyerUsdValue ?? walletJob.firstBuyUsd ?? null,
+                score: qualification.score,
+                qualification
+            });
             const current = readState();
             const nextWalletJobs = current.walletJobs.map((entry) => entry.id === walletJob.id
                 ? {
                     ...entry,
+                    ...classification,
                     status: nextStatus,
                     updatedAt: now(),
                     netWorth: stats.netWorth,
@@ -524,7 +732,9 @@ export const SmartMoneyScannerService = {
                     activePositions: stats.activePositions,
                     profitablePositions: stats.profitableTrader,
                     score: qualification.score,
-                    qualification
+                    qualification,
+                    savedToTracker: true,
+                    actionTaken: qualification.qualified ? 'saved' as const : 'tracked' as const
                 }
                 : entry);
             const jobWallets = nextWalletJobs.filter((entry) => entry.tokenJobId === tokenJobId);

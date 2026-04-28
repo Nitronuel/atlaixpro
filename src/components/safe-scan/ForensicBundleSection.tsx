@@ -101,6 +101,13 @@ const tierRiskLabel = (tier: string) => {
     return 'Watchlist';
 };
 
+const bundleTypeLabel = (type: string) => {
+    if (type === 'operational') return 'Operational';
+    if (type === 'suspicious') return 'Suspicious';
+    if (type === 'exploitative') return 'Exploitative';
+    return 'None';
+};
+
 const CLUSTER_PALETTE = ['#4CC9F0', '#8B5CF6', '#F59E0B', '#10B981', '#EC4899', '#F97316', '#22D3EE', '#A3E635'];
 const ALCHEMY_CLUSTER_PALETTE = ['#F97316', '#EC4899', '#8B5CF6', '#4CC9F0', '#10B981', '#F59E0B', '#22D3EE', '#A3E635'];
 const CLUSTER_WALLET_DETAIL_BATCH_SIZE = 8;
@@ -352,8 +359,8 @@ export const ForensicBundleSection: React.FC<Props> = ({
             description: 'A modern view of how supply is distributed across linked wallets, launch-window actors, and the remaining float.',
             items: [
                 { label: 'Deployer-linked', value: report.supplyAttribution.deployerLinkedPct, accent: '#5EF38C', glow: 'rgba(94,243,140,0.35)' },
-                { label: 'Block-zero wallets', value: report.supplyAttribution.blockZeroPct, accent: '#FFD166', glow: 'rgba(255,209,102,0.35)' },
-                { label: 'Sniper-window wallets', value: report.supplyAttribution.sniperPct, accent: '#FF7A59', glow: 'rgba(255,122,89,0.35)' },
+                { label: 'Block 0-2 wallets', value: report.supplyAttribution.blockZeroPct, accent: '#FFD166', glow: 'rgba(255,209,102,0.35)' },
+                { label: 'Block 0-2 entrants', value: report.supplyAttribution.sniperPct, accent: '#FF7A59', glow: 'rgba(255,122,89,0.35)' },
                 { label: 'Confirmed clusters', value: report.supplyAttribution.clusteredPct, accent: '#6FDBFF', glow: 'rgba(111,219,255,0.35)' },
                 { label: 'Remaining circulating', value: report.supplyAttribution.remainingPct, accent: '#5EF38C', glow: 'rgba(94,243,140,0.28)' }
             ]
@@ -472,6 +479,27 @@ export const ForensicBundleSection: React.FC<Props> = ({
     const selectedCluster = selectedNode?.clusterId
         ? report?.ecosystemGraph.clusters.find((cluster) => cluster.clusterId === selectedNode.clusterId) ?? null
         : null;
+    const bundleIntelligence = report?.bundleIntelligence ?? {
+        detected: Boolean(report && (report.launchSummary.blockZeroWallets.length || report.launchSummary.launchBuyerCount)),
+        type: 'none' as const,
+        riskLevel: 'low' as const,
+        confidence: 'low' as const,
+        walletsInvolved: report ? Math.max(report.launchSummary.blockZeroWallets.length, report.launchSummary.launchBuyerCount) : 0,
+        supplyControlledPct: report?.supplyAttribution.blockZeroPct ?? 0,
+        retentionPct: null,
+        exitPressure: 'unknown' as const,
+        reasons: ['Bundle intelligence will refresh on the next scan.']
+    };
+    const bundledWalletCount = bundleIntelligence.walletsInvolved;
+    const detectedBundleClusterCount = report?.bundleInsights.blockZeroBundleClusterCount ?? 0;
+    const detectedBundleCandidateCount = report?.bundleInsights.inferredBundleCount ?? 0;
+    const bundleSummaryText = detectedBundleClusterCount > 0
+        ? `${detectedBundleClusterCount} bundle cluster${detectedBundleClusterCount === 1 ? '' : 's'} detected`
+        : detectedBundleCandidateCount > 0
+            ? `${detectedBundleCandidateCount} bundle candidate${detectedBundleCandidateCount === 1 ? '' : 's'} detected`
+            : bundleIntelligence.detected
+                ? `${bundleTypeLabel(bundleIntelligence.type)} activity`
+                : `Earliest observed block ${report?.launchSummary.earliestObservedSlot ?? 'N/A'}`;
 
     return (
         <div className="flex flex-col gap-6">
@@ -483,7 +511,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                     </div>
                     <h3 className="text-xl font-bold text-text-light mb-2">Bundle and coordinated-wallet intelligence</h3>
                     <p className="text-sm text-text-medium max-w-3xl leading-relaxed">
-                        This layer extends Safe Scan with sampled launch-window forensics, wallet-link clustering, block-zero and sniper detection, and coordinated supply attribution.
+                        This layer extends Safe Scan with first-three-block launch forensics, wallet-link clustering, bundle-wallet detection, and coordinated supply attribution.
                     </p>
                 </div>
                 {report ? (
@@ -553,13 +581,13 @@ export const ForensicBundleSection: React.FC<Props> = ({
                         <div className="bg-card-hover/20 border border-border rounded-2xl p-5">
                             <div className="flex items-center gap-2 text-text-medium text-sm mb-3">
                                 <Activity size={16} className="text-text-medium" />
-                                Launch buyers
+                                Bundled wallets
                             </div>
                             <div className="text-3xl font-extrabold text-text-light mb-1">
-                                {report.launchSummary.launchBuyerCount}
+                                {bundledWalletCount}
                             </div>
                             <div className="text-xs text-text-medium">
-                                Earliest observed slot {report.launchSummary.earliestObservedSlot ?? 'N/A'}
+                                {bundleSummaryText}
                             </div>
                         </div>
 
@@ -641,7 +669,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                 </div>
                                 <h4 className="font-bold text-xl text-text-light mb-2">Interactive cluster ecosystem map</h4>
                                 <p className="text-sm text-text-medium max-w-3xl leading-relaxed">
-                                    Cluster cores, network-linked wallets, sniper entrants, and deployer-linked nodes are arranged into a visual investigation surface. Select a node or focus a cluster to inspect relationships in context.
+                                    Cluster cores, network-linked wallets, block 0-2 entrants, and deployer-linked nodes are arranged into a visual investigation surface. Select a node or focus a cluster to inspect relationships in context.
                                 </p>
                             </div>
                         </div>

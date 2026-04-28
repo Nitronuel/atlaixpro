@@ -47,16 +47,60 @@ const statusIcon = (status: string) => {
 };
 
 const sourceLabel = (job: WalletScanJob) => {
-    if (job.source === 'moralis-swaps') return 'Buy swap';
-    if (job.source === 'alchemy-transfers') return 'Transfer fallback';
+    if (job.discoverySource === 'early_buy_swap' || job.source === 'moralis-swaps') return 'Early buy';
+    if (job.discoverySource === 'transfer_recipient' || job.source === 'alchemy-transfers') return 'Early transfer';
     return 'Unknown';
 };
 
-const confidenceTone = (confidence?: WalletScanJob['confidence']) => (
+const confidenceTone = (confidence?: WalletScanJob['intelligenceConfidence'] | WalletScanJob['confidence']) => (
     confidence === 'high'
         ? 'border-primary-green/20 bg-primary-green/10 text-primary-green'
-        : 'border-primary-yellow/20 bg-primary-yellow/10 text-primary-yellow'
+        : confidence === 'medium'
+            ? 'border-primary-yellow/20 bg-primary-yellow/10 text-primary-yellow'
+            : 'border-border bg-card text-[#A6B4CF]'
 );
+
+const DECISION_LABEL: Record<string, string> = {
+    qualified: 'Qualified',
+    watchlist: 'Watchlist',
+    needs_review: 'Review',
+    rejected: 'Rejected'
+};
+
+const WALLET_TYPE_LABEL: Record<string, string> = {
+    early_accumulator: 'Early accumulator',
+    consistent_profitable_trader: 'Profitable trader',
+    high_conviction_holder: 'Conviction holder',
+    whale_capital_wallet: 'Whale capital',
+    needs_review: 'Needs review',
+    unknown: 'Unknown'
+};
+
+const decisionTone = (decision?: WalletScanJob['decision']) => {
+    if (decision === 'qualified') return 'border-primary-green/20 bg-primary-green/10 text-primary-green';
+    if (decision === 'watchlist') return 'border-primary-yellow/20 bg-primary-yellow/10 text-primary-yellow';
+    if (decision === 'rejected') return 'border-primary-red/20 bg-primary-red/10 text-primary-red';
+    return 'border-border bg-card text-[#A6B4CF]';
+};
+
+const formatCurrencyValue = (value?: number | null, fallback?: string) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+    }
+    return fallback || '-';
+};
+
+const formatPercentValue = (value?: number | null, fallback?: string) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+    }
+    return fallback || '-';
+};
+
+const formatPlainPercent = (value?: number | null, fallback?: string) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return `${value.toFixed(0)}%`;
+    return fallback || '-';
+};
 
 const StatTile: React.FC<{ label: string; value: string | number; icon: React.ReactNode }> = ({ label, value, icon }) => (
     <div className="rounded-2xl border border-border bg-card p-5">
@@ -301,16 +345,20 @@ export const SmartMoneyScanner: React.FC = () => {
                     </div>
 
                     <div className="overflow-x-auto">
-                        <table className="w-full min-w-[960px] border-separate border-spacing-y-2 text-left">
+                        <table className="w-full min-w-[1420px] border-separate border-spacing-y-2 text-left">
                             <thead>
                                 <tr className="text-xs uppercase tracking-[0.18em] text-text-dark">
                                     <th className="px-3 py-2">Wallet</th>
-                                    <th className="px-3 py-2">Status</th>
+                                    <th className="px-3 py-2">Decision</th>
+                                    <th className="px-3 py-2">Wallet type</th>
+                                    <th className="px-3 py-2">Confidence</th>
                                     <th className="px-3 py-2">Source token</th>
-                                    <th className="px-3 py-2">Buyer source</th>
+                                    <th className="px-3 py-2">Discovery source</th>
                                     <th className="px-3 py-2">Net worth</th>
-                                    <th className="px-3 py-2">Win</th>
+                                    <th className="px-3 py-2">Win rate</th>
                                     <th className="px-3 py-2">PnL</th>
+                                    <th className="px-3 py-2">Cap efficiency</th>
+                                    <th className="px-3 py-2">Avg buy</th>
                                     <th className="px-3 py-2">Score</th>
                                     <th className="px-3 py-2">Action</th>
                                 </tr>
@@ -323,7 +371,21 @@ export const SmartMoneyScanner: React.FC = () => {
                                             <div className="text-xs text-text-dark">{job.firstSeenAt ? new Date(job.firstSeenAt).toLocaleString() : 'Early transfer'}</div>
                                         </td>
                                         <td className="px-3 py-3">
-                                            <div className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-bold ${statusTone(job.status)}`}>
+                                            <div className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-bold ${decisionTone(job.decision)}`}>
+                                                {DECISION_LABEL[job.decision || 'needs_review'] || 'Review'}
+                                            </div>
+                                            <div className="mt-1 max-w-[220px] truncate text-xs text-text-dark" title={job.decisionSummary}>
+                                                {job.decisionSummary || STATUS_LABEL[job.status]}
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-3 text-text-medium">
+                                            {WALLET_TYPE_LABEL[job.walletType || 'unknown'] || 'Unknown'}
+                                        </td>
+                                        <td className="px-3 py-3">
+                                            <div className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-bold ${confidenceTone(job.intelligenceConfidence || job.confidence)}`}>
+                                                {(job.intelligenceConfidence || job.confidence || 'low').toUpperCase()}
+                                            </div>
+                                            <div className="mt-1 flex items-center gap-1.5 text-xs text-text-dark">
                                                 {statusIcon(job.status)}
                                                 {STATUS_LABEL[job.status]}
                                             </div>
@@ -337,13 +399,18 @@ export const SmartMoneyScanner: React.FC = () => {
                                                 {sourceLabel(job)}
                                             </div>
                                             <div className="mt-1 text-xs text-text-dark">
-                                                {job.exchange || (job.buyerUsdValue ? `$${job.buyerUsdValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '')}
+                                                {job.exchange || (job.firstBuyUsd || job.buyerUsdValue ? formatCurrencyValue(job.firstBuyUsd ?? job.buyerUsdValue) : '')}
                                             </div>
                                         </td>
-                                        <td className="px-3 py-3 font-semibold text-text-light">{job.netWorth || '-'}</td>
-                                        <td className="px-3 py-3 text-text-medium">{job.winRate || '-'}</td>
-                                        <td className="px-3 py-3 text-text-medium">{job.pnl || '-'}</td>
-                                        <td className="px-3 py-3 font-bold text-text-light">{job.score ?? '-'}</td>
+                                        <td className="px-3 py-3 font-semibold text-text-light">{formatCurrencyValue(job.netWorthUsd, job.netWorth)}</td>
+                                        <td className="px-3 py-3 text-text-medium">{formatPlainPercent(job.winRatePct, job.winRate)}</td>
+                                        <td className="px-3 py-3 text-text-medium">{formatPercentValue(job.pnlPct, job.pnl)}</td>
+                                        <td className="px-3 py-3 text-text-medium">{formatPercentValue(job.capitalEfficiency)}</td>
+                                        <td className="px-3 py-3 text-text-medium">{formatCurrencyValue(job.avgBuyUsd)}</td>
+                                        <td className="px-3 py-3">
+                                            <div className="font-bold text-text-light">{job.scoreRiskAdjusted ?? job.scoreTotal ?? job.score ?? '-'}</div>
+                                            <div className="text-xs text-text-dark">{job.tradesAnalyzed ?? 0} samples</div>
+                                        </td>
                                         <td className="rounded-r-xl px-3 py-3">
                                             <button
                                                 onClick={() => navigate(`/wallet/${job.wallet}`)}
@@ -356,7 +423,7 @@ export const SmartMoneyScanner: React.FC = () => {
                                     </tr>
                                 )) : (
                                     <tr>
-                                        <td colSpan={9} className="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-text-medium">
+                                        <td colSpan={13} className="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-text-medium">
                                             Early buyers will appear here after discovery.
                                         </td>
                                     </tr>

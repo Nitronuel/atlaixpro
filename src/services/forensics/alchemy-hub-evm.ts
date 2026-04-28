@@ -1,4 +1,5 @@
 import { APP_CONFIG } from '../../config';
+import { buildBundleIntelligence, calculateRetentionPct } from './bundle-intelligence';
 import type { AlchemyHubScanDepth } from './alchemy-hub-chains';
 import type {
     EvidenceTier,
@@ -22,6 +23,8 @@ const MAX_BALANCE_WALLETS = 440;
 const FUNDING_HISTORY_WALLETS = 140;
 const FUNDING_TRANSFER_LIMIT = '0x28';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const LAUNCH_COHORT_BLOCK_SPAN = 3;
+const LAUNCH_COHORT_LAST_OFFSET = LAUNCH_COHORT_BLOCK_SPAN - 1;
 const MAX_RISK_ELIGIBLE_SHARED_FUNDER_WALLETS = 4;
 const EVM_TOKEN0_SELECTOR = '0x0dfe1681';
 const EVM_TOKEN1_SELECTOR = '0xd21220a7';
@@ -170,6 +173,12 @@ function isLikelyEvmAddress(value: string) {
 
 function normalizeAddress(value: string) {
     return value.trim().toLowerCase();
+}
+
+function parseBlockNum(value?: string) {
+    if (!value) return null;
+    const parsed = Number.parseInt(value, value.startsWith('0x') ? 16 : 10);
+    return Number.isFinite(parsed) ? parsed : null;
 }
 
 function walletShort(address: string) {
@@ -780,14 +789,14 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
 
         const tier = strongestTier(evidenceTiers);
         const reason = directTransferEdges.length
-            ? 'This holder group is linked by recent ERC-20 transfer behavior on the selected EVM chain.'
+            ? 'These wallets have recently transferred this token between each other, suggesting coordinated holder activity.'
             : sharedFunders.length
-                ? 'This holder group shares one or more private-candidate native funding sources in recent Alchemy transfer history.'
-                : 'This holder group forms a bounded component inside the EVM holder-transfer graph.';
+                ? 'Multiple wallets appear to have been funded by the same private source wallet.'
+                : 'These wallets form a connected holder group based on transfer and funding relationships.';
 
         return {
             clusterId,
-            clusterName: `EVM Cluster ${index + 1}`,
+            clusterName: `Holder Cluster ${index + 1}`,
             evidenceTier: tier,
             userEvidenceLabel: tierLabel(tier),
             walletCount: wallets.length,
@@ -831,8 +840,8 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
             currentHoldingsTokens: amount.toString(),
             currentHoldingsPct: calculatePct(amount, metadata.totalSupplyRaw),
             flagReason: clusterId
-                ? 'Included in the bounded EVM Alchemy cluster map.'
-                : 'Visible as an independent holder outside the current EVM cluster threshold.'
+                ? 'This wallet is part of a connected holder cluster.'
+                : 'This wallet is a major holder but is not strongly linked to the detected clusters.'
         };
     });
 
@@ -880,7 +889,43 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         .sort((left, right) => left === right ? 0 : left > right ? -1 : 1);
     const top10Pct = topBalances.slice(0, 10).reduce((sum, balance) => sum + calculatePct(balance, metadata.totalSupplyRaw), 0);
     const top20Pct = topBalances.slice(0, 20).reduce((sum, balance) => sum + calculatePct(balance, metadata.totalSupplyRaw), 0);
-    const earliestTransfer = tokenTransfers[tokenTransfers.length - 1];
+    const transfersByBlock = tokenTransfers
+        .map((transfer) => ({ transfer, blockNumber: parseBlockNum(transfer.blockNum) }))
+        .filter((entry): entry is { transfer: AlchemyTransfer; blockNumber: number } => entry.blockNumber !== null)
+        .sort((left, right) => left.blockNumber - right.blockNumber);
+    const earliestTransfer = transfersByBlock[0]?.transfer;
+    const earliestBlock = transfersByBlock[0]?.blockNumber ?? null;
+    const launchWindowTransfers = earliestBlock === null
+        ? []
+        : transfersByBlock.filter((entry) =>
+            entry.blockNumber >= earliestBlock &&
+            entry.blockNumber <= earliestBlock + LAUNCH_COHORT_LAST_OFFSET
+        );
+    const launchWindowWallets = dedupe(launchWindowTransfers
+        .map((entry) => normalizeAddress(entry.transfer.to || ''))
+        .filter((wallet) => isLikelyEvmAddress(wallet) && wallet !== ZERO_ADDRESS));
+    const launchWindowWalletSet = new Set(launchWindowWallets);
+    const launchWindowRaw = launchWindowWallets.reduce((sum, wallet) => sum + (balancesByWallet.get(wallet) || 0n), 0n);
+    const launchWindowAcquiredRaw = launchWindowTransfers.reduce((sum, entry) => sum + parseRawTokenAmount(entry.transfer, metadata.decimals), 0n);
+    const blockZeroBundleClusterCount = walletClusters.filter((cluster) =>
+        cluster.wallets.filter((wallet) => launchWindowWalletSet.has(wallet)).length >= 2
+    ).length;
+    const evidenceByTier = {
+        tier1: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_1').length,
+        tier2: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_2').length,
+        tier3: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_3').length
+    };
+    const coverageLevel = trackedWallets.length > 0 ? 'full' : 'degraded_history';
+    const bundleIntelligence = buildBundleIntelligence({
+        walletsInvolved: launchWindowWallets.length,
+        supplyControlledPct: calculatePct(launchWindowRaw, metadata.totalSupplyRaw),
+        retentionPct: calculateRetentionPct(launchWindowAcquiredRaw, launchWindowRaw),
+        inferredBundleCount: 0,
+        insiderClusterCount: blockZeroBundleClusterCount,
+        tier1EvidenceCount: evidenceByTier.tier1,
+        tier2EvidenceCount: evidenceByTier.tier2,
+        coverageLevel
+    });
 
     return {
         tokenAddress: normalizedAddress,
@@ -891,21 +936,31 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         launchTimestamp: earliestTransfer?.metadata?.blockTimestamp || metadata.launchTimestamp,
         implementationMode: 'live',
         launchSummary: {
-            earliestObservedSlot: earliestTransfer?.blockNum ? Number.parseInt(earliestTransfer.blockNum, 16) : null,
-            launchBuyerCount: trackedWallets.length,
-            blockZeroWallets: [],
-            sniperWallets: [],
+            earliestObservedSlot: earliestBlock,
+            launchBuyerCount: launchWindowWallets.length,
+            blockZeroWallets: launchWindowWallets,
+            sniperWallets: launchWindowWallets,
             launchBands: {
-                block0Wallets: 0,
-                block15Wallets: 0,
+                block0Wallets: earliestBlock === null
+                    ? 0
+                    : dedupe(launchWindowTransfers
+                        .filter((entry) => entry.blockNumber === earliestBlock)
+                        .map((entry) => normalizeAddress(entry.transfer.to || ''))
+                        .filter((wallet) => isLikelyEvmAddress(wallet) && wallet !== ZERO_ADDRESS)).length,
+                block15Wallets: earliestBlock === null
+                    ? 0
+                    : dedupe(launchWindowTransfers
+                        .filter((entry) => entry.blockNumber > earliestBlock)
+                        .map((entry) => normalizeAddress(entry.transfer.to || ''))
+                        .filter((wallet) => isLikelyEvmAddress(wallet) && wallet !== ZERO_ADDRESS)).length,
                 block650Wallets: 0,
                 block51PlusWallets: 0
             }
         },
         supplyAttribution: {
             deployerLinkedPct: 0,
-            blockZeroPct: 0,
-            sniperPct: 0,
+            blockZeroPct: calculatePct(launchWindowRaw, metadata.totalSupplyRaw),
+            sniperPct: calculatePct(launchWindowRaw, metadata.totalSupplyRaw),
             clusteredPct: calculatePct(clusteredRaw, metadata.totalSupplyRaw),
             networkLinkedPct: 0,
             remainingPct: calculatePct(metadata.totalSupplyRaw > coordinatedRaw ? metadata.totalSupplyRaw - coordinatedRaw : 0n, metadata.totalSupplyRaw),
@@ -919,15 +974,12 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         },
         bundleInsights: {
             inferredBundleCount: 0,
-            blockZeroBundleClusterCount: 0,
+            blockZeroBundleClusterCount,
             maxTrackedHops: 1,
             trackedHopDepth: 1,
-            evidenceByTier: {
-                tier1: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_1').length,
-                tier2: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_2').length,
-                tier3: walletClusters.filter((cluster) => cluster.evidenceTier === 'TIER_3').length
-            }
+            evidenceByTier
         },
+        bundleIntelligence,
         scanStats: {
             walletsExpanded: trackedWallets.length,
             transactionsDecoded: tokenTransfers.length + [...fundingTransfersByWallet.values()].reduce((sum, transfers) => sum + transfers.length, 0),
@@ -935,7 +987,7 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
             usedHeliusHistory: false,
             usedWalletApi: false,
             historySource: 'signature_paging',
-            coverageLevel: trackedWallets.length > 0 ? 'full' : 'degraded_history'
+            coverageLevel
         },
         walletClusters,
         ecosystemGraph: {
@@ -946,17 +998,20 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         evidenceHighlights: [],
         notes: [
             options.holderSeeds?.length
-                ? `Safe Scan seeded the EVM scan with ${options.holderSeeds.length} Moralis top holders before running the Alchemy ${chain} lite cluster pass.`
-                : `Alchemy Hub used the ${chain} EVM engine in ${depth} mode for this token.`,
+                ? `Safe Scan seeded the EVM scan with ${options.holderSeeds.length} indexed top holders before running the ${chain} cluster pass.`
+                : `Safe Scan used the ${chain} EVM cluster engine in ${depth} mode for this token.`,
+            earliestBlock === null
+                ? 'The EVM transfer sample did not include a usable launch block, so block 0-2 bundle-wallet attribution was unavailable.'
+                : `Block 0-2 bundle-wallet attribution focused on transfers from block ${earliestBlock} through ${earliestBlock + LAUNCH_COHORT_LAST_OFFSET}.`,
             excludedConnectorCount
                 ? `Excluded ${excludedConnectorCount} EVM public connector${excludedConnectorCount === 1 ? '' : 's'} from clustering and graph links, including shared external funders, known routers, token contracts, or DEX pair/pool contracts.`
                 : 'No EVM public connector candidates were excluded in this run.',
             `It checked ${candidateWallets.length} balance candidates, expanded ${trackedWallets.length} holders, and traced funding for ${fundingWallets.length} wallets.`,
             options.seedOnly
-                ? 'Safe Scan limits EVM balance candidates to Moralis top-holder wallets, then uses Alchemy for live balances, token-transfer links, and native funding-source mapping.'
+                ? 'Safe Scan limits EVM balance candidates to indexed top-holder wallets, then verifies live balances, token-transfer links, and native funding-source mapping.'
                 : 'EVM clustering is built from bounded ERC-20 transfer history, current candidate balances, and native funding-source links.',
             options.holderSeeds?.length
-                ? 'Moralis improves holder coverage by selecting the top holders first; Alchemy verifies live balances and maps wallet relationships.'
+                ? 'Indexed holder coverage improves candidate selection before Safe Scan verifies live balances and wallet relationships.'
                 : 'Holder coverage is approximate because this path derives candidates from recent transfer history rather than a full holder-index export.'
         ]
     };

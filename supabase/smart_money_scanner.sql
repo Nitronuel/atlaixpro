@@ -50,6 +50,49 @@ create index if not exists smart_money_scan_wallets_job_idx on public.smart_mone
 
 create index if not exists smart_money_scan_wallets_wallet_idx on public.smart_money_scan_wallets (lower(wallet));
 
+alter table public.smart_money_scan_wallets
+    add column if not exists process_status text,
+    add column if not exists decision text,
+    add column if not exists wallet_type text,
+    add column if not exists intelligence_confidence text,
+    add column if not exists discovery_source text,
+    add column if not exists source_token_symbol text,
+    add column if not exists source_token_name text,
+    add column if not exists first_buy_usd numeric,
+    add column if not exists first_buy_amount_raw text,
+    add column if not exists first_seen_tx text,
+    add column if not exists net_worth_usd numeric,
+    add column if not exists realized_pnl_usd numeric,
+    add column if not exists unrealized_pnl_usd numeric,
+    add column if not exists total_pnl_usd numeric,
+    add column if not exists pnl_pct numeric,
+    add column if not exists win_rate_pct numeric,
+    add column if not exists capital_efficiency numeric,
+    add column if not exists avg_buy_usd numeric,
+    add column if not exists trades_analyzed integer,
+    add column if not exists winning_trades integer,
+    add column if not exists losing_trades integer,
+    add column if not exists tokens_traded integer,
+    add column if not exists days_active numeric,
+    add column if not exists last_active_at text,
+    add column if not exists score_total integer,
+    add column if not exists score_profitability integer,
+    add column if not exists score_consistency integer,
+    add column if not exists score_timing integer,
+    add column if not exists score_capital_efficiency integer,
+    add column if not exists score_risk_adjusted integer,
+    add column if not exists reason_codes text[],
+    add column if not exists risk_flags text[],
+    add column if not exists decision_summary text,
+    add column if not exists saved_to_tracker boolean,
+    add column if not exists action_taken text;
+
+create index if not exists smart_money_scan_wallets_decision_idx
+    on public.smart_money_scan_wallets (decision, score_risk_adjusted desc, updated_at_ms desc);
+
+create index if not exists smart_money_scan_wallets_export_idx
+    on public.smart_money_scan_wallets (token_job_id, decision, intelligence_confidence, score_risk_adjusted desc);
+
 alter table public.smart_money_scan_jobs enable row level security;
 alter table public.smart_money_scan_wallets enable row level security;
 

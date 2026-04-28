@@ -95,7 +95,7 @@ export type LaunchBuyer = BuyerEvent & {
     sourceWallets: string[];
     sourceTokenAccounts: string[];
     programs: string[];
-    launchBand: 'block_0' | 'block_1_5' | 'block_6_50' | 'block_51_plus';
+    launchBand: 'block_0' | 'block_1' | 'block_2' | 'block_3_plus';
 };
 
 export type ClusterEdge = {
@@ -220,6 +220,18 @@ export type ForensicGraphCluster = {
     tier: EvidenceTier;
 };
 
+export type BundleIntelligence = {
+    detected: boolean;
+    type: 'none' | 'operational' | 'suspicious' | 'exploitative';
+    riskLevel: 'low' | 'medium' | 'high';
+    confidence: 'low' | 'medium' | 'high';
+    walletsInvolved: number;
+    supplyControlledPct: number;
+    retentionPct: number | null;
+    exitPressure: 'low' | 'medium' | 'high' | 'unknown';
+    reasons: string[];
+};
+
 export type ForensicBundleReport = {
     tokenAddress: string;
     tokenName: string;
@@ -266,6 +278,7 @@ export type ForensicBundleReport = {
             tier3: number;
         };
     };
+    bundleIntelligence: BundleIntelligence;
     scanStats: {
         walletsExpanded: number;
         transactionsDecoded: number;
