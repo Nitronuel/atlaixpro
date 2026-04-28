@@ -103,6 +103,7 @@ const tierRiskLabel = (tier: string) => {
 
 const CLUSTER_PALETTE = ['#4CC9F0', '#8B5CF6', '#F59E0B', '#10B981', '#EC4899', '#F97316', '#22D3EE', '#A3E635'];
 const ALCHEMY_CLUSTER_PALETTE = ['#F97316', '#EC4899', '#8B5CF6', '#4CC9F0', '#10B981', '#F59E0B', '#22D3EE', '#A3E635'];
+const CLUSTER_WALLET_DETAIL_BATCH_SIZE = 8;
 
 const hashString = (value: string) => {
     let hash = 2166136261;
@@ -178,6 +179,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
 }) => {
     const tokenDecimals = report?.tokenDecimals ?? 0;
     const [expandedClusters, setExpandedClusters] = useState<Record<string, boolean>>({});
+    const [visibleClusterWalletRows, setVisibleClusterWalletRows] = useState<Record<string, number>>({});
     const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
     const [graphZoom, setGraphZoom] = useState(1.2);
     const [graphPan, setGraphPan] = useState({ x: 0, y: 0 });
@@ -192,9 +194,29 @@ export const ForensicBundleSection: React.FC<Props> = ({
     });
 
     const toggleCluster = (clusterId: string) => {
-        setExpandedClusters((current) => ({
+        setExpandedClusters((current) => {
+            const nextExpanded = !current[clusterId];
+            if (nextExpanded) {
+                setVisibleClusterWalletRows((rows) => ({
+                    ...rows,
+                    [clusterId]: rows[clusterId] || CLUSTER_WALLET_DETAIL_BATCH_SIZE
+                }));
+            }
+
+            return {
+                ...current,
+                [clusterId]: nextExpanded
+            };
+        });
+    };
+
+    const showMoreClusterWallets = (clusterId: string, walletCount: number) => {
+        setVisibleClusterWalletRows((current) => ({
             ...current,
-            [clusterId]: !current[clusterId]
+            [clusterId]: Math.min(
+                walletCount,
+                (current[clusterId] || CLUSTER_WALLET_DETAIL_BATCH_SIZE) + CLUSTER_WALLET_DETAIL_BATCH_SIZE
+            )
         }));
     };
 
@@ -288,8 +310,8 @@ export const ForensicBundleSection: React.FC<Props> = ({
 
         if (graphLayoutStyle === 'cluster-packed') {
             return {
-                title: 'Alchemy supply map',
-                description: 'A cleaner Alchemy-focused view of clustered holder supply, connected wallet flow, concentration, and remaining circulating float.',
+                title: 'Supply map',
+                description: '',
                 items: [
                     {
                         label: 'Cluster-held',
@@ -575,9 +597,11 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                     <Sparkles size={16} className="text-text-medium" />
                                     <h4 className="font-bold text-lg">{supplyAttributionConfig.title}</h4>
                                 </div>
-                                <p className="text-sm text-text-medium leading-relaxed max-w-3xl">
-                                    {supplyAttributionConfig.description}
-                                </p>
+                                {supplyAttributionConfig.description ? (
+                                    <p className="text-sm text-text-medium leading-relaxed max-w-3xl">
+                                        {supplyAttributionConfig.description}
+                                    </p>
+                                ) : null}
                             </div>
                             {graphLayoutStyle === 'cluster-packed' ? (
                                 <div className="grid min-w-[260px] grid-cols-2 gap-2 rounded-2xl border border-border bg-card/60 p-3 text-sm">
@@ -588,15 +612,6 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                     <div>
                                         <div className="text-[10px] uppercase tracking-wide text-text-medium">Wallets</div>
                                         <div className="text-text-light font-extrabold">{report.ecosystemGraph.nodes.length}</div>
-                                    </div>
-                                    <div className="col-span-2 h-2 overflow-hidden rounded-full bg-white/10">
-                                        <div
-                                            className="h-full rounded-full bg-primary-green"
-                                            style={{ width: `${clamp(report.supplyAttribution.combinedCoordinatedPct, 0, 100)}%` }}
-                                        />
-                                    </div>
-                                    <div className="col-span-2 text-xs text-text-medium">
-                                        {formatPct(report.supplyAttribution.combinedCoordinatedPct)} connected supply mapped by Alchemy.
                                     </div>
                                 </div>
                             ) : null}
@@ -940,6 +955,9 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                     </div>
                                     {report.walletClusters.map((cluster) => {
                                         const expanded = !!expandedClusters[cluster.clusterId];
+                                        const visibleWalletLimit = visibleClusterWalletRows[cluster.clusterId] || CLUSTER_WALLET_DETAIL_BATCH_SIZE;
+                                        const visibleWalletDetails = cluster.walletDetails.slice(0, visibleWalletLimit);
+                                        const remainingWalletCount = Math.max(0, cluster.walletDetails.length - visibleWalletDetails.length);
                                         return (
                                             <div key={cluster.clusterId} className="border-t border-border first:border-t-0">
                                                 <div
@@ -1051,7 +1069,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody>
-                                                                    {cluster.walletDetails.slice(0, 8).map((wallet) => (
+                                                                    {visibleWalletDetails.map((wallet) => (
                                                                         <tr key={wallet.walletAddress} className="border-b border-border last:border-0">
                                                                             <td className="py-2.5 pr-2 sm:pr-3 lg:pr-4 text-text-light font-mono text-[11px] sm:text-[12px] lg:text-[13px] whitespace-nowrap">{shortenAddress(wallet.walletAddress)}</td>
                                                                             <td className="py-2.5 px-2 sm:px-3 lg:px-4 text-text-light text-[11px] sm:text-[12px] lg:text-[13px] text-right whitespace-nowrap">{formatPct(wallet.currentHoldingsPct)}</td>
@@ -1062,6 +1080,27 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                                 </tbody>
                                                             </table>
                                                         </div>
+                                                        {remainingWalletCount > 0 ? (
+                                                            <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                                                <div className="text-xs text-text-medium">
+                                                                    Showing {visibleWalletDetails.length} of {cluster.walletDetails.length} wallets
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    className="inline-flex items-center justify-center rounded-lg border border-border bg-card px-4 py-2 text-xs font-bold text-primary-green transition-colors hover:border-primary-green/40 hover:bg-primary-green/10 hover:text-text-light"
+                                                                    onClick={(event) => {
+                                                                        event.stopPropagation();
+                                                                        showMoreClusterWallets(cluster.clusterId, cluster.walletDetails.length);
+                                                                    }}
+                                                                >
+                                                                    See more ({Math.min(CLUSTER_WALLET_DETAIL_BATCH_SIZE, remainingWalletCount)} more)
+                                                                </button>
+                                                            </div>
+                                                        ) : cluster.walletDetails.length > CLUSTER_WALLET_DETAIL_BATCH_SIZE ? (
+                                                            <div className="mt-4 border-t border-border pt-4 text-xs text-text-medium">
+                                                                All {cluster.walletDetails.length} wallets shown
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                 ) : null}
                                             </div>

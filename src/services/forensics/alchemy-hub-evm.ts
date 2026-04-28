@@ -22,6 +22,31 @@ const MAX_BALANCE_WALLETS = 440;
 const FUNDING_HISTORY_WALLETS = 140;
 const FUNDING_TRANSFER_LIMIT = '0x28';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const MAX_RISK_ELIGIBLE_SHARED_FUNDER_WALLETS = 4;
+const EVM_TOKEN0_SELECTOR = '0x0dfe1681';
+const EVM_TOKEN1_SELECTOR = '0xd21220a7';
+
+const KNOWN_EVM_PUBLIC_CONNECTORS: Partial<Record<EvmChain, Record<string, string>>> = {
+    eth: {
+        '0x7a250d5630b4cf539739df2c5dacb4c659f2488d': 'Uniswap V2 Router',
+        '0xe592427a0aece92de3edee1f18e0157c05861564': 'Uniswap V3 SwapRouter',
+        '0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b': 'Uniswap Universal Router',
+        '0x1111111254eeb25477b68fb85ed929f73a960582': '1inch Aggregation Router',
+        '0xdef1c0ded9bec7f1a1670819833240f027b25eff': '0x Exchange Proxy',
+        '0x9008d19f58aabd9ed0d60971565aa8510560ab41': 'CoW Protocol Settlement',
+        '0xdef171fe48cf0115b1d80b88dc8eab59176fee57': 'ParaSwap Augustus'
+    },
+    base: {
+        '0x2626664c2603336e57b271c5c0b26f421741e481': 'Uniswap V3 SwapRouter',
+        '0x6ff5693b99212da76ad316178a184ab56d299b43': 'Uniswap Universal Router',
+        '0x198ef79f1f515f02dfe9e3115ed9fc07183f02fc': '1inch Aggregation Router'
+    },
+    bsc: {
+        '0x10ed43c718714eb63d5aa57b78b54704e256024e': 'PancakeSwap V2 Router',
+        '0x13f4ea83d0bd40e75c8222255bc855a974568dd4': 'PancakeSwap V3 Router',
+        '0x1111111254eeb25477b68fb85ed929f73a960582': '1inch Aggregation Router'
+    }
+};
 
 type AlchemyHubEvmLimits = {
     transferPageLimit: number;
@@ -106,6 +131,13 @@ type TransferEdge = {
     count: number;
 };
 
+type PublicEvmConnectorDecision = {
+    address: string;
+    excluded: boolean;
+    category: 'known_public_infra' | 'token_contract' | 'dex_pool_or_pair';
+    reason: string;
+};
+
 type FundingEdge = {
     sourceWallet: string;
     targetWallet: string;
@@ -118,6 +150,14 @@ type SharedFunderEdge = {
     to: string;
     funder: string;
     strength: number;
+    decisionClass: 'risk_eligible' | 'high_degree_noisy';
+    riskEligible: boolean;
+    reason: string;
+};
+
+type SharedFunderEdgeResult = {
+    edges: SharedFunderEdge[];
+    excludedFunders: string[];
 };
 
 type GraphFundingLinkCandidate = Pick<ForensicGraphEdge, 'sourceWallet' | 'targetWallet' | 'relationshipType' | 'displayLabel' | 'strengthScore'> & {
@@ -154,6 +194,12 @@ function parseHexQuantity(value: string | null | undefined) {
     }
 }
 
+function parseAddressFromEthCall(result: string | null | undefined) {
+    const normalized = (result || '').toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(normalized)) return '';
+    return normalizeAddress(`0x${normalized.slice(-40)}`);
+}
+
 function parseRawTokenAmount(transfer: AlchemyTransfer, decimals: number) {
     const raw = parseHexQuantity(transfer.rawContract?.value);
     if (raw > 0n) return raw;
@@ -171,6 +217,22 @@ function toTokenNumber(rawAmount: bigint, decimals: number) {
     const divisor = 10 ** decimals;
     if (!Number.isFinite(divisor) || divisor <= 0) return Number(rawAmount);
     return Number(rawAmount) / divisor;
+}
+
+function classifyEvmSharedFunder(linkedWalletCount: number) {
+    if (linkedWalletCount > MAX_RISK_ELIGIBLE_SHARED_FUNDER_WALLETS) {
+        return {
+            decisionClass: 'high_degree_noisy' as const,
+            riskEligible: false,
+            reason: `High-degree native funder touching ${linkedWalletCount} tracked holders; kept as context only.`
+        };
+    }
+
+    return {
+        decisionClass: 'high_degree_noisy' as const,
+        riskEligible: false,
+        reason: 'Shared external native funders are excluded from lite-scan clustering until provider labels confirm they are private wallets.'
+    };
 }
 
 async function fetchJsonWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = RPC_TIMEOUT_MS) {
@@ -354,6 +416,54 @@ async function fetchBalances(chain: EvmChain, tokenAddress: string, wallets: str
     return new Map(entries);
 }
 
+async function classifyEvmPublicConnectors(chain: EvmChain, tokenAddress: string, addresses: string[]) {
+    const token = normalizeAddress(tokenAddress);
+    const knownConnectors = KNOWN_EVM_PUBLIC_CONNECTORS[chain] || {};
+    const uniqueAddresses = dedupe(addresses.map(normalizeAddress).filter(isLikelyEvmAddress));
+    const entries = await mapWithConcurrency(uniqueAddresses, 8, async (address) => {
+        if (address === token) {
+            return [address, {
+                address,
+                excluded: true,
+                category: 'token_contract',
+                reason: 'Token contract address excluded from connector-based clustering.'
+            } satisfies PublicEvmConnectorDecision] as const;
+        }
+
+        const knownLabel = knownConnectors[address];
+        if (knownLabel) {
+            return [address, {
+                address,
+                excluded: true,
+                category: 'known_public_infra',
+                reason: `${knownLabel} excluded as known public market infrastructure.`
+            } satisfies PublicEvmConnectorDecision] as const;
+        }
+
+        const code = await evmRpc<string>(chain, 'eth_getCode', [address, 'latest']).catch(() => '0x');
+        if (!code || code === '0x') return [address, null] as const;
+
+        const [token0Result, token1Result] = await Promise.all([
+            evmRpc<string>(chain, 'eth_call', [{ to: address, data: EVM_TOKEN0_SELECTOR }, 'latest']).catch(() => null),
+            evmRpc<string>(chain, 'eth_call', [{ to: address, data: EVM_TOKEN1_SELECTOR }, 'latest']).catch(() => null)
+        ]);
+        const token0 = parseAddressFromEthCall(token0Result);
+        const token1 = parseAddressFromEthCall(token1Result);
+        if (token0 && token1 && (token0 === token || token1 === token)) {
+            return [address, {
+                address,
+                excluded: true,
+                category: 'dex_pool_or_pair',
+                reason: 'DEX pair/pool contract excluded from token-transfer clustering.'
+            } satisfies PublicEvmConnectorDecision] as const;
+        }
+
+        return [address, null] as const;
+    });
+
+    return new Map(entries.filter((entry): entry is [string, PublicEvmConnectorDecision] => Boolean(entry[1])));
+}
+
 function buildTransferEdges(transfers: AlchemyTransfer[], decimals: number, trackedWallets: Set<string>) {
     const edges = new Map<string, TransferEdge>();
     transfers.forEach((transfer) => {
@@ -385,6 +495,23 @@ function buildTransferEdges(transfers: AlchemyTransfer[], decimals: number, trac
     return [...edges.values()];
 }
 
+function filterPublicEvmTransferEdges(
+    transferEdges: TransferEdge[],
+    publicConnectorDecisions: Map<string, PublicEvmConnectorDecision>
+) {
+    const excludedByAddress = new Map<string, PublicEvmConnectorDecision>();
+    const edges = transferEdges.filter((edge) => {
+        const sourceDecision = publicConnectorDecisions.get(edge.sourceWallet);
+        const targetDecision = publicConnectorDecisions.get(edge.targetWallet);
+        const decision = sourceDecision || targetDecision;
+        if (!decision?.excluded) return true;
+        excludedByAddress.set(decision.address, decision);
+        return false;
+    });
+
+    return { edges, excludedConnectors: [...excludedByAddress.values()] };
+}
+
 function buildFundingEdges(fundingTransfersByWallet: Map<string, AlchemyTransfer[]>, trackedWallets: Set<string>) {
     const edges = new Map<string, FundingEdge>();
     fundingTransfersByWallet.forEach((transfers, targetWallet) => {
@@ -414,7 +541,7 @@ function buildFundingEdges(fundingTransfersByWallet: Map<string, AlchemyTransfer
     return [...edges.values()].filter((edge) => trackedWallets.has(edge.targetWallet));
 }
 
-function buildSharedFunderEdges(fundingEdges: FundingEdge[]) {
+function buildSharedFunderEdges(fundingEdges: FundingEdge[]): SharedFunderEdgeResult {
     const funderToWallets = new Map<string, Set<string>>();
     fundingEdges.forEach((edge) => {
         const wallets = funderToWallets.get(edge.sourceWallet) || new Set<string>();
@@ -423,21 +550,28 @@ function buildSharedFunderEdges(fundingEdges: FundingEdge[]) {
     });
 
     const edges: SharedFunderEdge[] = [];
+    const excludedFunders: string[] = [];
     funderToWallets.forEach((wallets, funder) => {
         const members = [...wallets];
         if (members.length < 2) return;
+        const decision = classifyEvmSharedFunder(members.length);
+        if (!decision.riskEligible) {
+            excludedFunders.push(funder);
+            return;
+        }
         for (let index = 0; index < members.length; index += 1) {
             for (let inner = index + 1; inner < members.length; inner += 1) {
                 edges.push({
                     from: members[index],
                     to: members[inner],
                     funder,
-                    strength: Math.min(1, 0.42 + members.length * 0.08)
+                    strength: Math.min(1, 0.42 + members.length * 0.08),
+                    ...decision
                 });
             }
         }
     });
-    return edges;
+    return { edges, excludedFunders };
 }
 
 function buildComponents(wallets: string[], edges: Array<{ from: string; to: string }>) {
@@ -525,21 +659,24 @@ function selectBestGraphFundingLinks(args: {
     });
 
     args.sharedFunderEdges.forEach((edge) => {
+        const displayLabel = edge.riskEligible
+            ? `Shared private funder ${walletShort(edge.funder)}`
+            : `Context-only funder ${walletShort(edge.funder)}`;
         consider({
             sourceWallet: edge.funder,
             targetWallet: edge.from,
             relationshipType: 'funding',
-            displayLabel: `Shared funder ${walletShort(edge.funder)}`,
+            displayLabel,
             strengthScore: edge.strength,
-            priority: 2
+            priority: edge.riskEligible ? 2 : -1
         });
         consider({
             sourceWallet: edge.funder,
             targetWallet: edge.to,
             relationshipType: 'funding',
-            displayLabel: `Shared funder ${walletShort(edge.funder)}`,
+            displayLabel,
             strengthScore: edge.strength,
-            priority: 2
+            priority: edge.riskEligible ? 2 : -1
         });
     });
 
@@ -603,12 +740,18 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
     }));
     const fundingTransfersByWallet = new Map(fundingEntries.map((entry) => [entry.wallet, entry.transfers]));
 
-    const transferEdges = buildTransferEdges(tokenTransfers, metadata.decimals, trackedWalletSet);
+    const transferEdgeCandidates = buildTransferEdges(tokenTransfers, metadata.decimals, trackedWalletSet);
+    const transferConnectorCandidates = dedupe(transferEdgeCandidates.flatMap((edge) => [edge.sourceWallet, edge.targetWallet]));
+    const publicConnectorDecisions = await classifyEvmPublicConnectors(chain, normalizedAddress, transferConnectorCandidates);
+    const transferEdgeResult = filterPublicEvmTransferEdges(transferEdgeCandidates, publicConnectorDecisions);
+    const transferEdges = transferEdgeResult.edges;
     const fundingEdges = buildFundingEdges(fundingTransfersByWallet, trackedWalletSet);
-    const sharedFunderEdges = buildSharedFunderEdges(fundingEdges);
+    const sharedFunderResult = buildSharedFunderEdges(fundingEdges);
+    const sharedFunderEdges = sharedFunderResult.edges;
+    const excludedConnectorCount = sharedFunderResult.excludedFunders.length + transferEdgeResult.excludedConnectors.length;
     const componentEdges = [
         ...transferEdges.map((edge) => ({ from: edge.sourceWallet, to: edge.targetWallet })),
-        ...sharedFunderEdges.map((edge) => ({ from: edge.from, to: edge.to }))
+        ...sharedFunderEdges.filter((edge) => edge.riskEligible).map((edge) => ({ from: edge.from, to: edge.to }))
     ];
     const components = buildComponents(trackedWallets, componentEdges);
 
@@ -618,7 +761,7 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         wallets.forEach((wallet) => clusterIdByWallet.set(wallet, clusterId));
         const supplyRaw = wallets.reduce((sum, wallet) => sum + (balancesByWallet.get(wallet) || 0n), 0n);
         const directTransferEdges = transferEdges.filter((edge) => wallets.includes(edge.sourceWallet) && wallets.includes(edge.targetWallet));
-        const sharedFunders = sharedFunderEdges.filter((edge) => wallets.includes(edge.from) && wallets.includes(edge.to));
+        const sharedFunders = sharedFunderEdges.filter((edge) => edge.riskEligible && wallets.includes(edge.from) && wallets.includes(edge.to));
         const evidenceTiers: EvidenceTier[] = [];
         const corroboratingSignals: string[] = [];
 
@@ -631,7 +774,7 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         }
         if (sharedFunders.length) {
             evidenceTiers.push('TIER_2');
-            corroboratingSignals.push(`${dedupe(sharedFunders.map((edge) => edge.funder)).length} shared native funder${dedupe(sharedFunders.map((edge) => edge.funder)).length === 1 ? '' : 's'}`);
+            corroboratingSignals.push(`${dedupe(sharedFunders.map((edge) => edge.funder)).length} private-candidate shared native funder${dedupe(sharedFunders.map((edge) => edge.funder)).length === 1 ? '' : 's'}`);
         }
         if (!evidenceTiers.length) evidenceTiers.push('TIER_3');
 
@@ -639,7 +782,7 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         const reason = directTransferEdges.length
             ? 'This holder group is linked by recent ERC-20 transfer behavior on the selected EVM chain.'
             : sharedFunders.length
-                ? 'This holder group shares one or more native funding sources in recent Alchemy transfer history.'
+                ? 'This holder group shares one or more private-candidate native funding sources in recent Alchemy transfer history.'
                 : 'This holder group forms a bounded component inside the EVM holder-transfer graph.';
 
         return {
@@ -805,6 +948,9 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
             options.holderSeeds?.length
                 ? `Safe Scan seeded the EVM scan with ${options.holderSeeds.length} Moralis top holders before running the Alchemy ${chain} lite cluster pass.`
                 : `Alchemy Hub used the ${chain} EVM engine in ${depth} mode for this token.`,
+            excludedConnectorCount
+                ? `Excluded ${excludedConnectorCount} EVM public connector${excludedConnectorCount === 1 ? '' : 's'} from clustering and graph links, including shared external funders, known routers, token contracts, or DEX pair/pool contracts.`
+                : 'No EVM public connector candidates were excluded in this run.',
             `It checked ${candidateWallets.length} balance candidates, expanded ${trackedWallets.length} holders, and traced funding for ${fundingWallets.length} wallets.`,
             options.seedOnly
                 ? 'Safe Scan limits EVM balance candidates to Moralis top-holder wallets, then uses Alchemy for live balances, token-transfer links, and native funding-source mapping.'

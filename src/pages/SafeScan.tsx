@@ -329,20 +329,11 @@ export const SafeScan: React.FC = () => {
             <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0">
                     <div className="mb-3 flex flex-wrap items-center gap-3">
-                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
-                            Safe Scan
-                        </div>
                         <div className="rounded-full border border-primary-green/20 bg-primary-green/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-primary-green">
                             {report.tokenSymbol}
                         </div>
                         <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
                             {chainLabel}
-                        </div>
-                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
-                            Moralis top 300
-                        </div>
-                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
-                            Lite scan
                         </div>
                     </div>
                     <div className="mb-2 flex min-w-0 flex-wrap items-center gap-4">
