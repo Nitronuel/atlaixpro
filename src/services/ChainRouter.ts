@@ -76,11 +76,41 @@ const cacheManager = new SmartCache();
 /**
  * Universal fetcher that routes all requests to the Moralis Data API.
  */
+const fetchWalletBalancesWithFallback = async (chain: string, address: string): Promise<WalletBalance[]> => {
+    const isEVM = chain.toLowerCase() !== 'solana';
+
+    try {
+        const moralisBalances = await MoralisService.getWalletBalances(address, chain);
+        if (moralisBalances.length || !isEVM) return moralisBalances;
+    } catch (error) {
+        console.warn(`[ChainRouter] Moralis wallet balances failed for ${chain}, trying Alchemy fallback`, error);
+    }
+
+    if (!isEVM) return [];
+
+    const alchemyBalances = await AlchemyService.getWalletBalances(address, chain);
+    if (alchemyBalances.length) {
+        console.info(`[ChainRouter] Using Alchemy wallet balance fallback for ${chain}.`);
+    }
+    return alchemyBalances.map((balance: any) => ({
+        token_address: balance.token_address,
+        symbol: balance.symbol,
+        name: balance.name,
+        logo: balance.logo,
+        decimals: Number(balance.decimals ?? 18),
+        balance: String(balance.balance || '0'),
+        possible_spam: Boolean(balance.possible_spam),
+        verified_contract: balance.verified_contract ?? true,
+        usd_value: balance.usd_value,
+        price_usd: balance.price_usd
+    }));
+};
+
 const fetchFromMoralis = async (chain: string, address: string): Promise<PortfolioData> => {
 
     // 1. Fetch Real Balances
     // ALWAYS use Moralis as the Source of Truth for Balances (Universal Chain Support)
-        const balances = await MoralisService.getWalletBalances(address, chain);
+        const balances = await fetchWalletBalancesWithFallback(chain, address);
     const isEVM = chain.toLowerCase() !== 'solana';
 
     // 2. Identify tokens missing prices (Moralis sometimes doesn't have pricing for new pairs)

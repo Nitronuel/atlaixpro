@@ -58,13 +58,8 @@ export const AlchemyService = {
             // Response format: 
             // result: { address: { currency: "USD", error: null, value: "123.45" }, ... }
 
-            if (data.result && data.result.address) {
-                // The structure is actually data.result.data usually, let's handle the specific Alchemy format
-                // Official Doc format: result: { data: [ { address, price, currency, error } ] } 
-                // OR map based. Let's handle the array format which is common for bulk.
-
-                // Correction: alchemy_getTokenPrices returns data.result.data array
-                const items = data.result.data || [];
+            if (data.result) {
+                const items = Array.isArray(data.result.data) ? data.result.data : [];
 
                 items.forEach((item: any) => {
                     if (item.prices && item.prices.length > 0) {
@@ -109,6 +104,13 @@ export const AlchemyService = {
         }
 
         const assets: any[] = [];
+        const wrappedNativeByChain: Record<string, string> = {
+            ethereum: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+            base: '0x4200000000000000000000000000000000000006',
+            polygon: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
+            arbitrum: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+            optimism: '0x4200000000000000000000000000000000000006'
+        };
 
         try {
             // 1. Get Native Balance
@@ -124,8 +126,8 @@ export const AlchemyService = {
 
             const nativeData = await nativeRes.json();
             if (nativeData.result && nativeData.result !== '0x0') {
-                const balWei = parseInt(nativeData.result, 16);
-                if (balWei > 0) {
+                const balWei = BigInt(nativeData.result);
+                if (balWei > 0n) {
                     // Determine Native Symbol
                     let symbol = 'ETH';
                     let name = 'Ethereum';
@@ -137,6 +139,15 @@ export const AlchemyService = {
                     else if (chain.toLowerCase() === 'arbitrum') { symbol = 'ETH'; name = 'Arbitrum'; logo = 'https://cryptologos.cc/logos/arbitrum-arb-logo.png'; }
                     else if (chain.toLowerCase() === 'optimism') { symbol = 'ETH'; name = 'Optimism'; logo = 'https://cryptologos.cc/logos/optimism-ethereum-op-logo.png'; }
 
+                    const nativePriceMap = await AlchemyService.getBulkPrices(
+                        wrappedNativeByChain[chain.toLowerCase()] ? [wrappedNativeByChain[chain.toLowerCase()]] : [],
+                        chain
+                    );
+                    const nativePrice = wrappedNativeByChain[chain.toLowerCase()]
+                        ? nativePriceMap[wrappedNativeByChain[chain.toLowerCase()].toLowerCase()] || 0
+                        : 0;
+                    const nativeBalance = Number(balWei) / 1e18;
+
                     assets.push({
                         token_address: '0x0000000000000000000000000000000000000000',
                         symbol,
@@ -145,7 +156,9 @@ export const AlchemyService = {
                         decimals: 18,
                         balance: balWei.toString(),
                         possible_spam: false,
-                        verified_contract: true
+                        verified_contract: true,
+                        usd_value: nativePrice ? nativeBalance * nativePrice : undefined,
+                        price_usd: nativePrice || undefined
                     });
                 }
             }
@@ -227,7 +240,7 @@ export const AlchemyService = {
             const tokenAssets = processedTokens.map((t: any) => {
                 // If metadata missing, DON'T drop. Show unknown.
                 const decimals = t.metadata?.decimals || 18;
-                const balRaw = parseInt(t.tokenBalance, 16);
+                const balRaw = BigInt(t.tokenBalance);
                 const symbol = t.metadata?.symbol || 'UNK';
                 const name = t.metadata?.name || 'Unknown Token';
 
