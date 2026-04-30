@@ -1,4 +1,4 @@
-// Atlaix: Reusable interface component for Atlaix product workflows.
+// Reusable interface component for Atlaix product workflows.
 import React, { useState } from 'react';
 import { Copy, Globe, ExternalLink, Scan, Zap, Wallet, Bell, Radar } from 'lucide-react';
 import { EnrichedTokenData } from '../../types';

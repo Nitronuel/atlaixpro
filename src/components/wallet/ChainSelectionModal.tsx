@@ -1,4 +1,4 @@
-// Atlaix: Reusable interface component for Atlaix product workflows.
+// Reusable interface component for Atlaix product workflows.
 import React, { useState } from 'react';
 import { X, Search } from 'lucide-react';
 import { SupportedChainOption, SUPPORTED_WALLET_CHAINS } from '../../utils/chains';

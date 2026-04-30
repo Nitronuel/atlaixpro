@@ -1,4 +1,4 @@
-// Atlaix: Reusable interface component for Atlaix product workflows.
+// Reusable interface component for Atlaix product workflows.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Activity,

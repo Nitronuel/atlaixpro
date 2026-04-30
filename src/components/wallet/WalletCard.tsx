@@ -1,4 +1,4 @@
-// Atlaix: Reusable interface component for Atlaix product workflows.
+// Reusable interface component for Atlaix product workflows.
 import React from 'react';
 import { Zap, Wallet as WalletIcon, AlertTriangle, X, Trash2, CheckCircle } from 'lucide-react';
 import { WalletData, WalletCategory } from '../../types';

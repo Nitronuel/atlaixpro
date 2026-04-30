@@ -1,4 +1,4 @@
-// Atlaix: Reusable interface component for Atlaix product workflows.
+// Reusable interface component for Atlaix product workflows.
 import React from 'react';
 import { RealActivity } from '../../services/ChainActivityService';
 import { EnrichedTokenData } from '../../types';
