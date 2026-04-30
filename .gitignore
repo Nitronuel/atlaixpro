@@ -1,4 +1,4 @@
-# Logs
+# Runtime logs and package manager diagnostics
 logs
 *.log
 npm-debug.log*
@@ -7,17 +7,22 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Build outputs and dependency folders
 node_modules
 dist
 dist-ssr
+
+# Local scanner caches and queues
 data/forensics-cache/
 data/forensics-queue/
+
+# Local-only environment files
 *.local
 .env
 .env.test
 .env.production
 
-# Editor directories and files
+# Editor and operating system files
 .vscode/*
 !.vscode/extensions.json
 .idea
