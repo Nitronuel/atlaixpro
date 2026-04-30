@@ -1,3 +1,4 @@
+// Atlaix: Vite environment type declarations for the frontend runtime.
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {

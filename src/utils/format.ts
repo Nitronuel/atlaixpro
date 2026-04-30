@@ -1,3 +1,4 @@
+// Atlaix: Shared utility helpers for Atlaix application behavior.
 export const formatCompactNumber = (num: number | undefined | null, prefix: string = '', decimals: number = 1): string => {
     if (num === undefined || num === null || isNaN(num)) return 'N/A';
     if (num === 0) return `${prefix}0`;

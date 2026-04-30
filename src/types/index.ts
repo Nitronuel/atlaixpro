@@ -1,3 +1,4 @@
+// Atlaix: Shared TypeScript contracts for market, wallet, token, and Alpha Gauntlet data.
 export type ViewState =
     | 'auth'
     | 'overview'

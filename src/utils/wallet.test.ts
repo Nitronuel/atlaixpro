@@ -1,3 +1,4 @@
+// Atlaix: Regression coverage for shared utility behavior.
 import { describe, expect, it } from 'vitest';
 import {
     detectWalletAddressType,

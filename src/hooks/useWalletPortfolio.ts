@@ -1,3 +1,4 @@
+// Atlaix: Wallet portfolio loading hook shared by wallet intelligence views.
 import { useState, useEffect, useRef } from 'react';
 import { ChainRouter, PortfolioData } from '../services/ChainRouter';
 import { detectWalletAddressType } from '../utils/wallet';
