@@ -1,3 +1,5 @@
+<!-- Frontend source architecture guide. -->
+
 # Application Source
 
 This folder contains the Atlaix React application, shared TypeScript types, intelligence services, page-level routes, reusable components, tests, and utility helpers.
