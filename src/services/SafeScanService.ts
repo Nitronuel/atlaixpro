@@ -1,4 +1,4 @@
-// Atlaix: Intelligence service module for Atlaix data workflows.
+// Intelligence service module for Atlaix data workflows.
 import type { ForensicBundleReport } from './ForensicBundleService';
 import { APP_CONFIG } from '../config';
 import { getAlchemyHubChain, type AlchemyHubChain } from './forensics/alchemy-hub-chains';

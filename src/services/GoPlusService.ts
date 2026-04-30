@@ -1,4 +1,4 @@
-// Atlaix: Intelligence service module for Atlaix data workflows.
+// Intelligence service module for Atlaix data workflows.
 import { DatabaseService } from './DatabaseService';
 import { FactCheckService } from './FactCheckService';
 import { UncxService } from './UncxService';

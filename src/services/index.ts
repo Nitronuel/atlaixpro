@@ -1,4 +1,4 @@
-// Atlaix: Service barrel exports for Atlaix intelligence modules.
+// Service barrel exports for Atlaix intelligence modules.
 // Barrel file for services
 export { AlchemyService } from './AlchemyService';
 export { AlphaGauntletService } from './AlphaGauntletService';

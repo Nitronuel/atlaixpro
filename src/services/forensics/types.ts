@@ -1,4 +1,4 @@
-// Atlaix: Forensic analysis helper for SafeScan intelligence workflows.
+// Forensic analysis helper for SafeScan intelligence workflows.
 export type EvidenceTier = 'TIER_1' | 'TIER_2' | 'TIER_3';
 
 export type ParsedInstruction = {

@@ -1,4 +1,4 @@
-// Atlaix: Intelligence service module for Atlaix data workflows.
+// Intelligence service module for Atlaix data workflows.
 export const UncxService = {
     // UNCX Subgraph URLs
     // Hosted Service URLs (Proxied via The Graph Gateway if needed, or direct decentralized query)

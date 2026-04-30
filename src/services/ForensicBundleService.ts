@@ -1,4 +1,4 @@
-// Atlaix: Intelligence service module for Atlaix data workflows.
+// Intelligence service module for Atlaix data workflows.
 import { extractJitoTipTransfers, FORENSIC_MAX_TRACKED_HOPS, inferJitoLaunchSignals } from './forensics/engine';
 import type { ForensicBundleReport } from './forensics/types';
 export type {

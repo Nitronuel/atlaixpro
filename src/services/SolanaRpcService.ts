@@ -1,4 +1,4 @@
-// Atlaix: Intelligence service module for Atlaix data workflows.
+// Intelligence service module for Atlaix data workflows.
 
 import { APP_CONFIG } from '../config';
 import { SolanaProvider } from './SolanaProvider';

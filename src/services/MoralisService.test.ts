@@ -1,4 +1,4 @@
-// Atlaix: Regression coverage for intelligence service behavior.
+// Regression coverage for intelligence service behavior.
 import { describe, expect, it } from 'vitest';
 import { normalizeWalletBalancePayload } from './MoralisService';
 

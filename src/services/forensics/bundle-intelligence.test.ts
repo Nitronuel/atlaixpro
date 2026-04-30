@@ -1,4 +1,4 @@
-// Atlaix: Regression coverage for forensic intelligence behavior.
+// Regression coverage for forensic intelligence behavior.
 import { describe, expect, it } from 'vitest';
 import { buildBundleIntelligence, calculateRetentionPct, classifyExitPressure } from './bundle-intelligence';
 

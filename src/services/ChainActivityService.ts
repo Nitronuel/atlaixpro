@@ -1,4 +1,4 @@
-// Atlaix: Intelligence service module for Atlaix data workflows.
+// Intelligence service module for Atlaix data workflows.
 
 import { SolanaProvider } from './SolanaProvider';
 import { fetchAlchemyRpc } from './ProviderGateway';

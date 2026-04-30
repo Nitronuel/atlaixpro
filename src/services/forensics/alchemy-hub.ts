@@ -1,4 +1,4 @@
-// Atlaix: Forensic analysis helper for SafeScan intelligence workflows.
+// Forensic analysis helper for SafeScan intelligence workflows.
 import { APP_CONFIG } from '../../config';
 import { buildBundleIntelligence } from './bundle-intelligence';
 import type { AlchemyHubScanDepth } from './alchemy-hub-chains';
