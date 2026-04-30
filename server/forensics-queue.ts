@@ -1,3 +1,4 @@
+// Atlaix: Local queue management for asynchronous forensic scan jobs.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ForensicBundleReport } from '../src/services/forensics/types';

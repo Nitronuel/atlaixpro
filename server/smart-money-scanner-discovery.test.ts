@@ -1,3 +1,4 @@
+// Atlaix: Regression coverage for Smart Money scanner discovery behavior.
 import { describe, expect, it, vi } from 'vitest';
 import {
     discoverMoralisEvmEarlyBuyers,
