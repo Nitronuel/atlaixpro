@@ -1,4 +1,4 @@
-// Atlaix: Regression coverage for Smart Money scanner discovery behavior.
+// Forensic backend workflow for local intelligence services.
 import { describe, expect, it, vi } from 'vitest';
 import {
     discoverMoralisEvmEarlyBuyers,

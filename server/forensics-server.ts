@@ -1,4 +1,4 @@
-// Atlaix: Local API server for forensic analysis and provider gateway routes.
+// Forensic backend workflow for local intelligence services.
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';

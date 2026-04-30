@@ -1,4 +1,4 @@
-// Atlaix: Smart Money scanner discovery workflow for qualified wallet candidates.
+// Forensic backend workflow for local intelligence services.
 export type SmartScannerChain = 'solana' | 'eth' | 'base' | 'bsc' | 'polygon' | 'arbitrum' | 'optimism';
 
 export type SmartScannerBuyer = {
