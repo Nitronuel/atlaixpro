@@ -1,3 +1,4 @@
+// Atlaix: Forensic analysis helper for SafeScan intelligence workflows.
 import type { BundleIntelligence } from './types';
 
 export function calculateRetentionPct(acquiredRaw: bigint, currentRaw: bigint) {

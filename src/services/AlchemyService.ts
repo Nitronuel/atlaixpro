@@ -1,3 +1,4 @@
+// Atlaix: Intelligence service module for Atlaix data workflows.
 
 import { MoralisService } from './MoralisService';
 import { fetchAlchemyRpc, getBackendAlchemyKey } from './ProviderGateway';

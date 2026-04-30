@@ -1,3 +1,4 @@
+// Atlaix: Intelligence service module for Atlaix data workflows.
 
 export interface RugCheckReport {
     tokenProgram: string;

@@ -1,3 +1,4 @@
+// Atlaix: Regression coverage for intelligence service behavior.
 import { describe, expect, it } from 'vitest';
 import { extractJitoTipTransfers, FORENSIC_MAX_TRACKED_HOPS, inferJitoLaunchSignals } from './ForensicBundleService';
 

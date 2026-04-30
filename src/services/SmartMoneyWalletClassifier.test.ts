@@ -1,3 +1,4 @@
+// Atlaix: Regression coverage for intelligence service behavior.
 import { describe, expect, it } from 'vitest';
 import { classifySmartMoneyWallet, mapDiscoverySource, parseCurrencyLike, parsePercentLike } from './SmartMoneyWalletClassifier';
 

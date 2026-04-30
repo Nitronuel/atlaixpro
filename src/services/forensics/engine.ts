@@ -1,3 +1,4 @@
+// Atlaix: Forensic analysis helper for SafeScan intelligence workflows.
 import { APP_CONFIG } from '../../config';
 import { SolanaProvider } from '../SolanaProvider';
 import { buildBundleIntelligence, calculateRetentionPct } from './bundle-intelligence';

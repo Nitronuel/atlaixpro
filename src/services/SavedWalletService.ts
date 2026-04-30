@@ -1,3 +1,4 @@
+// Atlaix: Intelligence service module for Atlaix data workflows.
 import { SavedWallet, WalletCategory } from '../types';
 import { WalletStats } from '../hooks/useWalletPortfolio';
 import { SmartMoneyQualificationService } from './SmartMoneyQualificationService';

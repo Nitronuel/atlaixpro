@@ -1,3 +1,4 @@
+// Atlaix: Intelligence service module for Atlaix data workflows.
 import type { SmartMoneyQualification } from '../types';
 
 export type SmartMoneyProcessStatus = 'queued' | 'scanning' | 'completed' | 'failed' | 'already_tracked';

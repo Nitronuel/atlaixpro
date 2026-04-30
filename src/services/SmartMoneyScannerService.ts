@@ -1,3 +1,4 @@
+// Atlaix: Intelligence service module for Atlaix data workflows.
 import { ChainRouter, type ChainType } from './ChainRouter';
 import { SavedWalletService } from './SavedWalletService';
 import { SmartMoneyQualificationService } from './SmartMoneyQualificationService';

@@ -1,3 +1,4 @@
+// Atlaix: Intelligence service module for Atlaix data workflows.
 import { MarketCoin, SavedWallet } from '../types';
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from '../config';
