@@ -1,4 +1,4 @@
-# Runtime logs and package manager diagnostics
+# Runtime logs and package manager diagnostics for local development
 logs
 *.log
 npm-debug.log*

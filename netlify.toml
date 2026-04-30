@@ -2,14 +2,14 @@
   command = "npm run build"
   publish = "dist"
 
-# Proxy production API requests to the Atlaix backend gateway.
+# Production API gateway routing for deployed Atlaix builds.
 [[redirects]]
   from = "/api/*"
   to = "https://atlaixpro-production.up.railway.app/api/:splat"
   status = 200
   force = true
 
-# Support React Router by serving the app shell for all browser routes.
+# React Router fallback for browser-managed application routes.
 [[redirects]]
   from = "/*"
   to = "/index.html"

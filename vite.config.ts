@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   const heliusKey = env.HELIUS_API_KEY || '';
   return {
-    // Keep large intelligence modules split into readable production chunks.
+    // Production chunking for large intelligence and visualization modules.
     build: {
       rollupOptions: {
         output: {
@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      // Local development proxies for external providers and the forensic backend.
+      // Development proxies for provider APIs and local forensic services.
       proxy: {
         '/api/dexscreener': {
           target: 'https://api.dexscreener.com',

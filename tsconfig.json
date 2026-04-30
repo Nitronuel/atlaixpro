@@ -1,5 +1,5 @@
 {
-  "_comment": "TypeScript compiler configuration for the Atlaix React/Vite application.",
+  "_comment": "Compiler settings for the Atlaix React and Vite application.",
   "compilerOptions": {
     "target": "ES2022",
     "experimentalDecorators": true,
