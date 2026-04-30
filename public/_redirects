@@ -1,2 +1,5 @@
+# Route platform API calls to the production backend gateway.
 /api/* https://atlaixpro-production.up.railway.app/api/:splat 200
+
+# Serve the React application for all client-side routes.
 /* /index.html 200
