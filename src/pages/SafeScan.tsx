@@ -1,3 +1,4 @@
+// Atlaix: Route-level product screen for the Atlaix application.
 import React, { useState } from 'react';
 import { CheckCircle2, Copy, Loader2, ShieldCheck } from 'lucide-react';
 import { ForensicBundleSection } from '../components/safe-scan/ForensicBundleSection';

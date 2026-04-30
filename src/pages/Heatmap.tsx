@@ -1,3 +1,4 @@
+// Atlaix: Route-level product screen for the Atlaix application.
 import React from 'react';
 import { Activity } from 'lucide-react';
 

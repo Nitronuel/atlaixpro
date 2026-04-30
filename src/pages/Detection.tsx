@@ -1,3 +1,4 @@
+// Atlaix: Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Zap, ShieldAlert, Trash2, Rocket, Wallet, ChevronDown, TrendingUp, Radar, FolderKanban, Calendar as CalendarIcon, AlertTriangle } from 'lucide-react';
 import { CustomCalendar } from '../components/ui/CustomCalendar';

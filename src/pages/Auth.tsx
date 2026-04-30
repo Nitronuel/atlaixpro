@@ -1,3 +1,4 @@
+// Atlaix: Route-level product screen for the Atlaix application.
 import React, { useState } from 'react';
 
 interface AuthScreenProps {

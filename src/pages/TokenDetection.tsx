@@ -1,3 +1,4 @@
+// Atlaix: Route-level product screen for the Atlaix application.
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Check, TrendingUp, AlertTriangle, Activity, Zap, Search, Wallet, Bell, Box, Flame, Copy, Shield } from 'lucide-react';

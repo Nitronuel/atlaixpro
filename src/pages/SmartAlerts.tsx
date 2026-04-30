@@ -1,3 +1,4 @@
+// Atlaix: Route-level product screen for the Atlaix application.
 import React, { useState } from 'react';
 import {
     Bell, Zap, Activity, TrendingUp, ShieldCheck, Plus, X,
