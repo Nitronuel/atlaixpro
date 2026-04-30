@@ -1,3 +1,5 @@
+<!-- Static asset guide for browser-served deployment files. -->
+
 # Public Assets
 
 This folder contains static files served directly by the deployed web application.
