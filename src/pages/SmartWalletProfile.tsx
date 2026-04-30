@@ -1,4 +1,4 @@
-// Atlaix: Route-level product screen for the Atlaix application.
+// Route-level product screen for the Atlaix application.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {

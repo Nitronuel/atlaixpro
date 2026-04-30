@@ -1,4 +1,4 @@
-// Atlaix: Route-level product screen for the Atlaix application.
+// Route-level product screen for the Atlaix application.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, ChevronDown, Zap, ArrowLeft, Globe, Clock, Plus, CheckCircle, X } from 'lucide-react';
 import { SavedWalletService } from '../services/SavedWalletService';

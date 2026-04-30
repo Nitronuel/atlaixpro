@@ -1,4 +1,4 @@
-// Atlaix: Route-level product screen for the Atlaix application.
+// Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect } from 'react';
 
 declare var ApexCharts: any;

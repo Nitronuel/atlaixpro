@@ -1,4 +1,4 @@
-// Atlaix: Route-level product screen for the Atlaix application.
+// Route-level product screen for the Atlaix application.
 import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, CheckCircle, Clock3, Loader2, Play, Plus, RefreshCw, Search, Trash2, Wallet, XCircle, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';

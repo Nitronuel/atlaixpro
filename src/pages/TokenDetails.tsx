@@ -1,4 +1,4 @@
-// Atlaix: Route-level product screen for the Atlaix application.
+// Route-level product screen for the Atlaix application.
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, RefreshCw, Zap } from 'lucide-react';
 import { DatabaseService } from '../services/DatabaseService';
