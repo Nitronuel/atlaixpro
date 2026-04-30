@@ -1,4 +1,4 @@
-<!-- Atlaix: SafeScan roadmap notes for upcoming forensic intelligence improvements. -->
+<!-- SafeScan roadmap notes for upcoming forensic intelligence improvements. -->
 
 # Safe Scan Next-Wave Plan
 

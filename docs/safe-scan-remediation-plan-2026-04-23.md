@@ -1,4 +1,4 @@
-<!-- Atlaix: SafeScan remediation plan for risk scoring and forensic reliability. -->
+<!-- SafeScan remediation plan for risk scoring and forensic reliability. -->
 
 # Safe Scan Remediation Plan
 
