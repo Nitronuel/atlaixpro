@@ -1,3 +1,5 @@
+<!-- Project overview and repository guide for the Atlaix platform. -->
+
 # Atlaix Intelligence Platform
 
 Atlaix is an AI-assisted crypto intelligence platform for discovering, qualifying, and investigating high-signal market activity. The product combines live market data, on-chain activity, wallet intelligence, liquidity analysis, and risk signals into structured feeds that help users decide which tokens deserve attention.
