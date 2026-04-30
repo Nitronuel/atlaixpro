@@ -1,108 +1,170 @@
-Atlaix Intelligence Platform
+# Atlaix Intelligence Platform
 
+Atlaix is an AI-assisted crypto intelligence platform for discovering, qualifying, and investigating high-signal market activity. The product combines live market data, on-chain activity, wallet intelligence, liquidity analysis, and risk signals into structured feeds that help users decide which tokens deserve attention.
 
-About Atlaix
+The platform is currently in functional MVP development. The priority is to make the core intelligence surfaces reliable, explainable, and useful before expanding into deeper AI synthesis and narrative correlation.
 
-Atlaix is an AI-powered intelligence platform built to interpret crypto market behavior in real time. Our system is engineered to solve the problem of signal vs. noise. We continuously analyze on-chain activity, wallet cohorts, liquidity dynamics, and social narratives, synthesizing these signals into structured, verifiable market intelligence.
+## Core Modules
 
-This repository contains the source code for the Atlaix platform.
+### Alpha Gauntlet
 
-Project Status: Functional MVP
+Alpha Gauntlet v1 is the market activity qualification layer for the platform. It filters tokens by market structure, detects meaningful activity triggers, classifies the event, and assigns an Alpha score.
 
-The Atlaix platform is currently in a functional MVP stage, with a clear and immediate roadmap to launching our Closed Beta.
+Current v1 outputs power:
 
-The objective of this MVP stage is to finalize the core data engines and build out the foundational modules. This is a heads-down development phase focused on engineering excellence.
+- Overview Alpha Feed for the strongest qualified events.
+- Detection Engine Feed for broader qualified events.
+- Token detail timelines for event-level context.
 
-Current Engineering Focus & Goals for Closed Beta Launch:
+Alpha Gauntlet v1 focuses on market and on-chain activity only. Smart Money scoring, narrative scoring, advanced SafeScan correlation, and AI synthesis are planned as later scoring layers.
 
+### Detection Engine
 
-Solidify the Core Engines: Harden and optimize our proprietary Detection Engine, Smart Money Engine, and The Gauntlet.
+The Detection Engine helps users investigate qualified token events. It surfaces Alpha Gauntlet events with supporting context such as event type, severity, triggers, score, volume pressure, liquidity behavior, and chain filters.
 
-Build Out V1 Modules: Complete the initial, functional versions of our six core modules.
+### Smart Money Scanner
 
-Prepare AI Architecture: Lay the foundational groundwork for the AI Synthesis Layer integration.
+The Smart Money Scanner identifies and evaluates wallet activity patterns. It is designed as a deeper intelligence layer that tracks wallet cohorts, trading behavior, wallet quality, capital movement, and portfolio-level signals.
 
-Achieve System Stability: Ensure the end-to-end data pipeline is stable, reliable, and ready for our first beta testers.
+### SafeScan
 
-Completing these objectives will mark the end of the MVP phase and the official start of our Closed Beta.
+SafeScan provides token risk and forensic analysis. It focuses on holder structure, bundle behavior, liquidity risk, contract/security indicators, and graph-style relationship analysis.
 
-Architecture & Tech Stack
+### Token Intelligence
 
-The Atlaix platform is engineered on a modern, scalable, and decoupled architecture. We leverage best-in-class managed services to ensure reliability and focus our engineering efforts on our proprietary intelligence logic.
+Token detail pages combine price charts, token metadata, market structure, transaction activity, safety indicators, and Alpha Gauntlet timeline events into a single investigation view.
 
-Platform Architecture:
+### Smart Alerts
 
-Frontend & Serverless API: Netlify
+Smart Alerts are planned alerting workflows for monitored tokens, wallets, market events, and risk conditions.
 
-Core Database & Auth: Supabase (PostgreSQL)
+## Repository Structure
 
-Long-Running Workers: Render (Background Worker service)
+| Path | Description |
+| --- | --- |
+| `src/` | Main React and TypeScript application source. |
+| `src/pages/` | Route-level screens such as Overview, Detection, SafeScan, Smart Money, wallet tracking, and token details. |
+| `src/components/` | Reusable UI and feature components used across pages. |
+| `src/components/layout/` | Application shell, navigation, and layout structure. |
+| `src/components/safe-scan/` | SafeScan visual and forensic graph components. |
+| `src/components/token/` | Token chart, overview cards, sidebar, and transaction display components. |
+| `src/components/wallet/` | Wallet tracking cards, modals, chain selection, and holdings UI. |
+| `src/services/` | Business logic, provider clients, scoring engines, scanners, and data adapters. |
+| `src/services/AlphaGauntletService.ts` | Alpha Gauntlet v1 market qualification, trigger detection, classification, and scoring engine. |
+| `src/services/DatabaseService.ts` | Market data discovery, Supabase persistence, DexScreener reads, and token detail helpers. |
+| `src/services/SafeScanService.ts` | SafeScan orchestration and token risk analysis service. |
+| `src/services/SmartMoneyScannerService.ts` | Smart Money scanning workflow and wallet candidate evaluation. |
+| `src/services/forensics/` | Lower-level forensic intelligence helpers for bundle and holder analysis. |
+| `src/hooks/` | Shared React hooks, including wallet portfolio loading. |
+| `src/types/` | Shared TypeScript types for market data, wallets, Alpha Gauntlet events, and enriched token data. |
+| `src/utils/` | Formatting, chain metadata, wallet helpers, and shared utilities. |
+| `server/` | Local Node/TypeScript backend utilities for forensic scans and scanner discovery workflows. |
+| `supabase/` | SQL schema files for Smart Money scanner storage and wallet intelligence tables. |
+| `docs/` | Planning notes, provider comparisons, SafeScan remediation notes, and architecture references. |
+| `public/` | Static deployment assets and redirect rules. |
+| `index.html` | Vite HTML entry point. |
+| `vite.config.ts` | Vite configuration, local proxies, chunking, and build setup. |
+| `netlify.toml` | Netlify routing and deployment configuration. |
+| `package.json` | Scripts, runtime dependencies, dev dependencies, and project metadata. |
+| `.env.example` | Template for required local environment variables. |
 
-Job Queue: CloudAMQP (RabbitMQ)
+## Tech Stack
 
-Caching Layer: Redis Cloud
+- TypeScript
+- React
+- Vite
+- Supabase
+- Node.js / TSX local worker runtime
+- Vitest and Testing Library
+- DexScreener, Moralis, Alchemy, Helius, GoPlus, RugCheck, and supporting provider APIs
 
-On-Chain Data Provider: Moralis
+## Local Development
 
-Off-Chain Data Provider: Twitter/X API
+Install dependencies:
 
-Current Local Runtime Note:
+```bash
+npm install
+```
 
-The repository currently runs as a Vite frontend with a local Node forensic worker for Safe Scan. Some infrastructure listed above reflects the intended production target architecture, not every component that is already wired into the local development runtime.
+Create a local environment file:
 
-Core Technologies:
+```bash
+cp .env.example .env
+```
 
-Language: TypeScript
+Add the required provider keys and public Supabase browser config values.
 
-Frontend: React (built with Vite)
+Run the full local development stack:
 
-Backend: Node.js (for background workers and serverless functions)
+```bash
+npm run dev
+```
 
-Styling: CSS Modules
+Run only the Vite frontend:
 
+```bash
+npm run dev:web
+```
 
-##  Installation & Setup
+Run only the local forensic backend:
 
-To run this project locally, follow these steps:
+```bash
+npm run dev:forensics
+```
 
-1.  Clone the repository:
-    
-    git clone https://github.com/Atlaix/Atlaix-platform.git
-    cd Atlaix-platform
-    
+Build for production:
 
-2.  Install dependencies:
-    
-       npm install
-    
+```bash
+npm run build
+```
 
-3.  Environment Configuration:
-    Create a .env.local file in the root directory and add your API keys:
-    
-    MORALIS_API_KEY=your_moralis_key
-    ALCHEMY_API_KEY=your_alchemy_key
-    HELIUS_API_KEY=your_helius_key
-    GOPLUS_KEY=your_goplus_app_key
-    GOPLUS_SECRET=your_goplus_app_secret
-    VITE_SUPABASE_URL=your_supabase_project_url
-    VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-    
-    >  Note: Ask the team lead for the required keys if you don't have them. Provider keys are backend-only; only public browser configuration should use the `VITE_` prefix.
+Run tests:
 
-4.  Run the development server:
-    
-    npm run dev
-    
+```bash
+npm test
+```
 
-##  Contribution Guidelines
+## Environment Variables
 
-All code contributions must be made through Pull Requests (PRs) from a feature branch to the develop branch:
+Use `.env.example` as the source of truth for required local values. Browser-exposed values must use the `VITE_` prefix. Secret provider keys should stay server-side whenever possible.
 
-1.  Branch: Always create a new branch for your feature (git checkout -b feature/my-new-feature).
-2.  Commit: Write clear, descriptive commit messages.
-3. Push your branch and open a PR for review.
-4. All PRs require at least one approval from another team member before being merged.
+Common local values include:
 
-##  License
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_MORALIS_KEY`
+- `VITE_ALCHEMY_KEY`
+- `VITE_HELIUS_KEY`
+- `VITE_GOPLUS_KEY`
+- `VITE_GOPLUS_SECRET`
 
-This project is proprietary and confidential. Unauthorized copying of files via any medium is strictly prohibited.
+## Development Standards
+
+- Use clear, professional commit messages.
+- Keep feature work scoped to the relevant module.
+- Prefer typed service logic over ad hoc UI-only calculations.
+- Validate meaningful changes with `npm run build` and targeted tests when available.
+- Do not commit real secrets or local log output.
+- Keep README and documentation current when major modules or workflows change.
+
+## Suggested GitHub About Text
+
+Repository description:
+
+```text
+AI-powered crypto intelligence platform for token detection, market activity scoring, wallet intelligence, and risk analysis.
+```
+
+Suggested topics:
+
+```text
+crypto, defi, token-analysis, wallet-intelligence, risk-scoring, react, vite, supabase, typescript
+```
+
+## Status
+
+Atlaix is in active MVP development. The current focus is strengthening Alpha Gauntlet v1, Detection Engine workflows, SafeScan analysis, and Smart Money scanner reliability.
+
+## License
+
+This project is proprietary and confidential. Unauthorized copying, distribution, or use of this repository is prohibited.
