@@ -557,7 +557,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                         </div>
                     ) : sortedData.length === 0 ? (
                         <div className="w-full h-[400px] flex items-center justify-center flex-col gap-2 text-center px-4">
-                            <div className="text-sm font-bold text-text-light">No 80+ Alpha Gauntlet events yet</div>
+                            <div className="text-sm font-bold text-text-light">No qualified Alpha Gauntlet events yet</div>
                             <div className="text-xs text-text-medium max-w-md">
                                 Tokens must pass market structure, activity triggers, classification, and scoring before reaching Overview.
                             </div>

@@ -1,7 +1,7 @@
 // Intelligence service module for Atlaix data workflows.
 import { AlphaGauntletEvent, AlphaGauntletEventType, AlphaGauntletTrigger, MarketCoin } from '../types';
 
-const OVERVIEW_THRESHOLD = 80;
+const OVERVIEW_THRESHOLD = 70;
 const DETECTION_THRESHOLD = 65;
 
 const parseMetric = (value: string | number | undefined): number => {
@@ -35,6 +35,21 @@ const getAgeHours = (coin: MarketCoin) => {
 };
 
 const hasBothSides = (buys: number, sells: number) => buys > 0 && sells > 0;
+
+const hasHealthyLiquidityStructure = (marketCap: number, liquidity: number, volume24h: number) => {
+    if (marketCap <= 0) return false;
+
+    const lpToMarketCapRatio = liquidity / marketCap;
+    if (lpToMarketCapRatio >= 0.1) return true;
+
+    // DexScreener often gives FDV instead of circulating market cap. For larger,
+    // active tokens, a strict 10% LP/FDV rule hides otherwise valid events.
+    if (marketCap >= 25000000) return lpToMarketCapRatio >= 0.025 && liquidity >= 750000 && volume24h >= 500000;
+    if (marketCap >= 10000000) return lpToMarketCapRatio >= 0.04 && liquidity >= 500000 && volume24h >= 500000;
+    if (marketCap >= 3000000) return lpToMarketCapRatio >= 0.06 && liquidity >= 250000 && volume24h >= 350000;
+
+    return false;
+};
 
 const classifyEvent = (
     triggers: AlphaGauntletTrigger[],
@@ -83,7 +98,7 @@ export const AlphaGauntletService = {
             holderProxy >= 500 &&
             transactions24h >= 500 &&
             ageHours >= 3 &&
-            lpToMarketCapRatio >= 0.1 &&
+            hasHealthyLiquidityStructure(marketCap, liquidity, volume24h) &&
             hasBothSides(buys, sells);
 
         if (!marketEligible) return null;
@@ -92,16 +107,16 @@ export const AlphaGauntletService = {
         const volumeToLiquidity = liquidity > 0 ? volume24h / liquidity : 0;
         const volumeToMarketCap = marketCap > 0 ? volume24h / marketCap : 0;
 
-        if (volumeToLiquidity >= 1.5 || volumeToMarketCap >= 0.35) triggers.push('Volume Spike');
+        if (volumeToLiquidity >= 1.2 || volumeToMarketCap >= 0.2 || volume24h >= 1000000) triggers.push('Volume Spike');
         if (transactions24h >= 2000 || transactions24h / Math.max(holderProxy, 1) >= 2) triggers.push('Transaction Spike');
-        if (buySellRatio >= 1.45 && netFlow > 0) triggers.push('Strong Buy Pressure');
-        if (buySellRatio <= 0.7 && netFlow < 0) triggers.push('Strong Sell Pressure');
-        if (lpToMarketCapRatio >= 0.35 && volumeToLiquidity >= 0.75) triggers.push('Liquidity Added');
-        if (lpToMarketCapRatio <= 0.12 && volume24h >= 500000) triggers.push('Liquidity Removed');
+        if ((buySellRatio >= 1.25 && netFlow > 0) || (buySellRatio >= 1.5 && volume24h >= 500000)) triggers.push('Strong Buy Pressure');
+        if ((buySellRatio <= 0.8 && netFlow < 0) || (buySellRatio <= 0.67 && volume24h >= 500000)) triggers.push('Strong Sell Pressure');
+        if (lpToMarketCapRatio >= 0.25 && volumeToLiquidity >= 0.6) triggers.push('Liquidity Added');
+        if (lpToMarketCapRatio <= 0.08 && volume24h >= 500000) triggers.push('Liquidity Removed');
         if (holderProxy >= 2500 && transactions24h >= 2500) triggers.push('Holder Growth Spike');
-        if (priceChange24h <= -18 || priceChange1h <= -10) triggers.push('Price Dump');
-        if (priceChange1h >= 8 && priceChange24h > -10 && volumeToLiquidity >= 0.7) triggers.push('Price Recovery');
-        if (absNetFlow >= 50000 || absNetFlow >= volume24h * 0.12) triggers.push('Abnormal Large Trades');
+        if (priceChange24h <= -12 || priceChange1h <= -8) triggers.push('Price Dump');
+        if ((priceChange1h >= 5 || priceChange24h >= 12) && priceChange24h > -10 && volumeToLiquidity >= 0.5) triggers.push('Price Recovery');
+        if (absNetFlow >= 35000 || absNetFlow >= volume24h * 0.08) triggers.push('Abnormal Large Trades');
 
         if (triggers.length === 0) return null;
 
