@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Zap, ShieldAlert, Trash2, Rocket, Wallet, ChevronDown, TrendingUp, Radar, FolderKanban, Calendar as CalendarIcon, AlertTriangle } from 'lucide-react';
 import { CustomCalendar } from '../components/ui/CustomCalendar';
+import { AlphaGauntletEvent } from '../types';
+import { AlphaGauntletService } from '../services/AlphaGauntletService';
+import { DatabaseService } from '../services/DatabaseService';
 
 declare var ApexCharts: any;
 
@@ -14,6 +17,8 @@ export const Detection: React.FC = () => {
     const [feedChain, setFeedChain] = useState('All Chains');
     const [eventType, setEventType] = useState('All Events');
     const [severity, setSeverity] = useState('All Severity');
+    const [gauntletEvents, setGauntletEvents] = useState<AlphaGauntletEvent[]>([]);
+    const [isLoadingEvents, setIsLoadingEvents] = useState(true);
 
     const [showDateRangeModal, setShowDateRangeModal] = useState(false);
     const [dateRange, setDateRange] = useState<{ from: Date | null, to: Date | null }>({ from: null, to: null });
@@ -83,8 +88,8 @@ export const Detection: React.FC = () => {
             const options = {
                 series: [
                     { name: 'Market Risk', data: [30, 35, 40, 38, 45, 50, 55, 52, 48, 50, 55, 60] },
-                    { name: 'Smart Money Flow', data: [20, 25, 30, 45, 60, 55, 65, 70, 80, 85, 82, 88] },
-                    { name: 'Volume', data: [45, 48, 52, 50, 55, 58, 62, 70, 75, 78, 80, 85] }
+                    { name: 'Qualified Events', data: [20, 25, 30, 45, 60, 55, 65, 70, 80, 85, 82, 88] },
+                    { name: 'Volume Pressure', data: [45, 48, 52, 50, 55, 58, 62, 70, 75, 78, 80, 85] }
                 ],
                 chart: { type: 'area', height: 320, background: 'transparent', toolbar: { show: false }, zoom: { enabled: false } },
                 colors: ['#EB5757', '#2F80ED', '#F2C94C'],
@@ -104,6 +109,32 @@ export const Detection: React.FC = () => {
         return () => { if (chartInstance.current) { chartInstance.current.destroy(); chartInstance.current = null; } };
     }, []);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadGauntletEvents = async (force = false) => {
+            try {
+                if (!cancelled && gauntletEvents.length === 0) setIsLoadingEvents(true);
+                const response = await DatabaseService.getMarketData(force, false);
+                if (!cancelled) {
+                    setGauntletEvents(AlphaGauntletService.getDetectionEvents(response.data));
+                }
+            } catch (error) {
+                console.error('Alpha Gauntlet feed error', error);
+            } finally {
+                if (!cancelled) setIsLoadingEvents(false);
+            }
+        };
+
+        loadGauntletEvents();
+        const interval = setInterval(() => loadGauntletEvents(false), 15000);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, []);
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (query.trim()) {
@@ -114,15 +145,46 @@ export const Detection: React.FC = () => {
         }
     };
 
-    const detectionEvents = [
-        { type: 'Whale Buy Detected', icon: <FolderKanban size={18} />, time: '2m ago', desc: 'Major accumulation in a single transaction block.', token: '$PEPE', amt: '837 ETH', color: 'primary-red' },
-        { type: 'Smart Money Accumulation', icon: <Zap size={18} />, time: '12m ago', desc: '9 high win-rate wallets entered positions.', token: '$BRETT', amt: 'Multi-sig', color: 'primary-yellow' },
-        { type: 'Sniper Bot Swarm', icon: <Search size={18} />, time: '15s ago', desc: 'High frequency automated buys detected at launch.', token: '$MOG', amt: 'N/A', color: 'primary-red' },
-        { type: 'Liquidity Removal', icon: <Trash2 size={18} />, time: '5m ago', desc: 'Developer wallet removed significant LP.', token: '$SCAM', amt: '30 SOL', color: 'primary-red' },
-        { type: 'New Token Launch', icon: <Rocket size={18} />, time: '1m ago', desc: 'Contract deployed and verified on-chain.', token: '$NEW', amt: 'Launch', color: 'primary-green' },
-    ];
+    const formatCompactCurrency = (value: number) => {
+        if (Math.abs(value) >= 1000000000) return `$${(value / 1000000000).toFixed(1)}B`;
+        if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+        if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`;
+        return `$${value.toFixed(0)}`;
+    };
 
-    const eventOptions = ['All Events', 'New Token Launch', 'Whale Buy Detected', 'Liquidity Removal', 'Smart Money Accumulation', 'Sniper Bot Swarm'];
+    const getTimeAgo = (timestamp: number) => {
+        const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+        if (seconds < 60) return `${seconds}s ago`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        return `${hours}h ago`;
+    };
+
+    const getEventIcon = (event: AlphaGauntletEvent) => {
+        if (event.eventType === 'Liquidity Event') return <Trash2 size={18} />;
+        if (event.eventType === 'Market Stress') return <ShieldAlert size={18} />;
+        if (event.eventType === 'Recovery') return <Rocket size={18} />;
+        if (event.eventType === 'Accumulation') return <Zap size={18} />;
+        if (event.eventType === 'Distribution') return <FolderKanban size={18} />;
+        return <Search size={18} />;
+    };
+
+    const getSeverityClasses = (event: AlphaGauntletEvent) => {
+        if (event.severity === 'High') return { bar: 'bg-primary-red', text: 'text-primary-red' };
+        if (event.severity === 'Medium') return { bar: 'bg-primary-yellow', text: 'text-primary-yellow' };
+        return { bar: 'bg-primary-green', text: 'text-primary-green' };
+    };
+
+    const filteredEvents = gauntletEvents.filter(event => {
+        const chainMatches = feedChain === 'All Chains' ||
+            (feedChain === 'BNB Chain' ? event.token.chain === 'bsc' : event.token.chain.toLowerCase() === feedChain.toLowerCase());
+        const eventMatches = eventType === 'All Events' || event.eventType === eventType;
+        const severityMatches = severity === 'All Severity' || event.severity === severity;
+        return chainMatches && eventMatches && severityMatches;
+    });
+
+    const eventOptions = ['All Events', 'Accumulation', 'Distribution', 'Market Stress', 'Recovery', 'Liquidity Event', 'Unusual Activity'];
     const severityOptions = ['All Severity', 'High', 'Medium', 'Low'];
 
     return (
@@ -131,7 +193,7 @@ export const Detection: React.FC = () => {
                 <div>
                     <h2 className="text-xl md:text-2xl font-bold text-text-light">Detect Specific Token Anomalies</h2>
                     <p className="text-text-medium text-sm md:text-base leading-relaxed mt-1">
-                        Enter a contract address to scan for real-time whale movements, smart money signals, and critical risk alerts for a specific asset.
+                        Enter a contract address to inspect market structure, activity triggers, liquidity pressure, and qualified Alpha Gauntlet events.
                     </p>
                 </div>
                 <form onSubmit={handleSubmit} className="flex gap-3 mt-2 w-full">
@@ -173,9 +235,9 @@ export const Detection: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
                         {[
                             { icon: <ShieldAlert size={20} className="text-primary-green" />, label: 'Create Smart Alert', highlight: true },
-                            { icon: <Wallet size={20} className="text-text-medium group-hover:text-text-light" />, label: 'Track Wallet', highlight: false },
-                            { icon: <Radar size={20} className="text-text-medium group-hover:text-text-light" />, label: 'Run SafeScan', highlight: false },
-                            { icon: <TrendingUp size={20} className="text-text-medium group-hover:text-text-light" />, label: 'View Top Gainers', highlight: false },
+                            { icon: <Radar size={20} className="text-text-medium group-hover:text-text-light" />, label: 'Run Risk Check', highlight: false },
+                            { icon: <TrendingUp size={20} className="text-text-medium group-hover:text-text-light" />, label: 'View Volume Spikes', highlight: false },
+                            { icon: <Wallet size={20} className="text-text-medium group-hover:text-text-light" />, label: 'Open Token Timeline', highlight: false },
                         ].map((action, i) => (
                             <button key={i} className={`flex items-center gap-3 p-4 bg-transparent border border-border ${action.highlight ? 'hover:border-primary-green' : 'hover:border-text-light'} rounded-xl transition-all group text-left`}>
                                 {action.icon}
@@ -239,28 +301,52 @@ export const Detection: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 relative z-10 w-full">
-                {detectionEvents.map((event, idx) => (
-                    <div key={idx} className="bg-card border border-border rounded-xl flex overflow-hidden group hover:border-text-medium transition-colors shadow-md h-full">
-                        <div className={`w-1.5 shrink-0 bg-${event.color}`}></div>
+                {isLoadingEvents && gauntletEvents.length === 0 ? (
+                    <div className="col-span-full bg-card border border-border rounded-xl p-8 text-center">
+                        <div className="w-8 h-8 border-2 border-primary-green border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                        <div className="text-sm font-bold text-text-light">Running Alpha Gauntlet qualification...</div>
+                    </div>
+                ) : filteredEvents.length === 0 ? (
+                    <div className="col-span-full bg-card border border-border rounded-xl p-8 text-center">
+                        <div className="text-sm font-bold text-text-light">No qualified detection events match these filters</div>
+                        <div className="text-xs text-text-medium mt-1">Detection shows 65+ Alpha Gauntlet events after market and trigger gates.</div>
+                    </div>
+                ) : filteredEvents.map((event) => {
+                    const severityClasses = getSeverityClasses(event);
+                    return (
+                    <div
+                        key={`${event.token.address || event.token.ticker}-${event.eventType}`}
+                        className="bg-card border border-border rounded-xl flex overflow-hidden group hover:border-text-medium transition-colors shadow-md h-full cursor-pointer"
+                        onClick={() => navigate(`/token/${event.token.address || event.token.ticker}`)}
+                    >
+                        <div className={`w-1.5 shrink-0 ${severityClasses.bar}`}></div>
                         <div className="flex-1 p-5 flex flex-col justify-between gap-3">
                             <div>
                                 <div className="flex justify-between items-start mb-2">
-                                    <div className={`flex items-center gap-2 font-bold text-xs text-${event.color} uppercase tracking-wide`}>
-                                        {event.icon} {event.type.split(' ').slice(0, 2).join(' ')}
+                                    <div className={`flex items-center gap-2 font-bold text-xs ${severityClasses.text} uppercase tracking-wide`}>
+                                        {getEventIcon(event)} {event.eventType}
                                     </div>
-                                    <span className="text-[10px] text-text-dark font-mono whitespace-nowrap">{event.time}</span>
+                                    <span className="text-[10px] text-text-dark font-mono whitespace-nowrap">{getTimeAgo(event.detectedAt)}</span>
                                 </div>
                                 <p className="text-sm text-text-light font-medium leading-snug line-clamp-2">
-                                    {event.desc}
+                                    {event.summary}
                                 </p>
+                                <div className="flex flex-wrap gap-1.5 mt-3">
+                                    {event.triggers.slice(0, 3).map(trigger => (
+                                        <span key={trigger} className="text-[9px] text-text-medium bg-card-hover border border-border rounded px-1.5 py-0.5">
+                                            {trigger}
+                                        </span>
+                                    ))}
+                                </div>
                             </div>
                             <div className="flex justify-between items-center pt-3 border-t border-border/50 mt-auto">
-                                <span className="text-text-light font-bold text-sm bg-card-hover px-2 py-0.5 rounded border border-border">{event.token}</span>
-                                <span className="text-text-light font-bold text-sm">{event.amt}</span>
+                                <span className="text-text-light font-bold text-sm bg-card-hover px-2 py-0.5 rounded border border-border">${event.token.ticker}</span>
+                                <span className="text-text-light font-bold text-sm">{event.score} / {formatCompactCurrency(event.metrics.volume24h)}</span>
                             </div>
                         </div>
                     </div>
-                ))}
+                    );
+                })}
             </div>
 
             <div className="flex justify-center mt-4">

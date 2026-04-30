@@ -85,6 +85,57 @@ export interface MarketCoin {
     activeWallets24h?: number;
 }
 
+export type AlphaGauntletEventType =
+    | 'Accumulation'
+    | 'Distribution'
+    | 'Market Stress'
+    | 'Recovery'
+    | 'Liquidity Event'
+    | 'Unusual Activity';
+
+export type AlphaGauntletTrigger =
+    | 'Volume Spike'
+    | 'Transaction Spike'
+    | 'Strong Buy Pressure'
+    | 'Strong Sell Pressure'
+    | 'Liquidity Added'
+    | 'Liquidity Removed'
+    | 'Holder Growth Spike'
+    | 'Price Dump'
+    | 'Price Recovery'
+    | 'Abnormal Large Trades';
+
+export interface AlphaGauntletScores {
+    marketStructure: number;
+    liquidityHealth: number;
+    activity: number;
+    eventStrength: number;
+    total: number;
+}
+
+export interface AlphaGauntletEvent {
+    token: MarketCoin;
+    eventType: AlphaGauntletEventType;
+    triggers: AlphaGauntletTrigger[];
+    score: number;
+    scores: AlphaGauntletScores;
+    severity: 'High' | 'Medium' | 'Low';
+    summary: string;
+    detectedAt: number;
+    metrics: {
+        marketCap: number;
+        liquidity: number;
+        volume24h: number;
+        holders: number;
+        transactions24h: number;
+        ageHours: number;
+        lpToMarketCapRatio: number;
+        buySellRatio: number;
+        priceChange24h: number;
+        netFlow: number;
+    };
+}
+
 export interface Post {
     id: number;
     user: string;

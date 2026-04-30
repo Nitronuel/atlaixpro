@@ -1,5 +1,6 @@
 // Barrel file for services
 export { AlchemyService } from './AlchemyService';
+export { AlphaGauntletService } from './AlphaGauntletService';
 export { ChainRouter } from './ChainRouter';
 export { DatabaseService } from './DatabaseService';
 export { FactCheckService } from './FactCheckService';
