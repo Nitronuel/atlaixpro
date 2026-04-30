@@ -1,4 +1,4 @@
-// Atlaix: Shared utility helpers for Atlaix application behavior.
+// Shared utility helpers for Atlaix application behavior.
 import { ChainType } from '../services/ChainRouter';
 
 const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;

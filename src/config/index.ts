@@ -1,4 +1,4 @@
-// Atlaix: Centralized browser configuration for provider keys and endpoints.
+// Centralized browser configuration for provider keys and endpoints.
 const env = ((typeof import.meta !== 'undefined' && (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env) || {}) as Record<string, string | undefined>;
 const processEnv = (typeof process !== 'undefined' ? process.env : {}) as Record<string, string | undefined>;
 const isBrowser = typeof window !== 'undefined';

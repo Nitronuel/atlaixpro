@@ -1,4 +1,4 @@
-// Atlaix: React root bootstrap for the Atlaix browser application.
+// React root bootstrap for the Atlaix browser application.
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';

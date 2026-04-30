@@ -1,4 +1,4 @@
-// Atlaix: Regression coverage for shared utility behavior.
+// Regression coverage for shared utility behavior.
 import { describe, expect, it } from 'vitest';
 import { PROFILE_CHAIN_OPTIONS, normalizeWalletChain } from './chains';
 

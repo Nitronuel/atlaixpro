@@ -1,4 +1,4 @@
-// Atlaix: Shared utility helpers for Atlaix application behavior.
+// Shared utility helpers for Atlaix application behavior.
 import { ChainType } from '../services/ChainRouter';
 
 export interface SupportedChainOption {
