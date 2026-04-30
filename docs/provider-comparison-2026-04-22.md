@@ -1,3 +1,5 @@
+<!-- Atlaix: Provider comparison notes for Atlaix data infrastructure decisions. -->
+
 # Helius vs Alchemy for Atlaix
 
 Date: April 22, 2026

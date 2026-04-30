@@ -1,3 +1,5 @@
+<!-- Atlaix: SafeScan remediation plan for risk scoring and forensic reliability. -->
+
 # Safe Scan Remediation Plan
 
 Date: 2026-04-23
