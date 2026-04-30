@@ -1,3 +1,6 @@
+-- Curated Smart Money wallet registry.
+-- This table stores wallet labels, performance metadata, and scanner-derived classifications.
+
 create table if not exists public.smart_money_wallets (
     wallet_address text primary key,
     name text not null,
