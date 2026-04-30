@@ -72,6 +72,7 @@ alter table public.smart_money_scan_wallets
     add column if not exists win_rate_pct numeric,
     add column if not exists capital_efficiency numeric,
     add column if not exists avg_buy_usd numeric,
+    add column if not exists avg_holding_time_days numeric,
     add column if not exists trades_analyzed integer,
     add column if not exists winning_trades integer,
     add column if not exists losing_trades integer,

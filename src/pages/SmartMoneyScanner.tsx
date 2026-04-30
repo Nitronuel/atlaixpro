@@ -32,6 +32,8 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const shorten = (value: string) => value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
+const isLikelySolanaAddress = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value.trim());
+const isLikelyEvmAddress = (value: string) => /^0x[a-fA-F0-9]{40}$/.test(value.trim());
 
 const statusTone = (status: string) => {
     if (status === 'qualified' || status === 'completed') return 'border-primary-green/20 bg-primary-green/10 text-primary-green';
@@ -157,8 +159,22 @@ export const SmartMoneyScanner: React.FC = () => {
     const createJob = async () => {
         setError(null);
         try {
-            const job = await SmartMoneyScannerService.createTokenJob(tokenAddress, chain, limit);
+            const trimmedAddress = tokenAddress.trim();
+            if (trimmedAddress.startsWith('0x') && !isLikelyEvmAddress(trimmedAddress)) {
+                setError('Enter a valid 0x token contract address for EVM networks.');
+                return;
+            }
+            if (!trimmedAddress.startsWith('0x') && !isLikelySolanaAddress(trimmedAddress)) {
+                setError('Enter a valid Solana token address, or switch to an EVM network for 0x contracts.');
+                return;
+            }
+
+            const inferredChain = trimmedAddress.startsWith('0x')
+                ? (chain === 'solana' ? 'eth' : chain)
+                : 'solana';
+            const job = await SmartMoneyScannerService.createTokenJob(trimmedAddress, inferredChain, limit);
             setTokenAddress('');
+            setChain(inferredChain);
             setActiveJobId(job.id);
             await SmartMoneyScannerService.discoverEarlyBuyers(job.id);
         } catch (nextError) {
@@ -247,6 +263,8 @@ export const SmartMoneyScanner: React.FC = () => {
                             setTokenAddress(value);
                             if (value.trim().startsWith('0x') && chain === 'solana') {
                                 setChain('eth');
+                            } else if (value.trim() && !value.trim().startsWith('0x') && chain !== 'solana' && isLikelySolanaAddress(value)) {
+                                setChain('solana');
                             }
                         }}
                         placeholder="Paste token contract address"

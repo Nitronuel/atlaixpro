@@ -14,12 +14,20 @@ const supabase = hasSupabaseConfig
     })
     : null;
 let supabaseAvailable = hasSupabaseConfig;
+let smartMoneyWalletTableAvailable = hasSupabaseConfig;
 let hasWarnedAboutSupabase = false;
+let hasWarnedAboutSmartMoneyTable = false;
 let lastStalePurgeAt = 0;
 
 const warnSupabaseOnce = (message: string) => {
     if (hasWarnedAboutSupabase) return;
     hasWarnedAboutSupabase = true;
+    console.warn(message);
+};
+
+const warnSmartMoneyTableOnce = (message: string) => {
+    if (hasWarnedAboutSmartMoneyTable) return;
+    hasWarnedAboutSmartMoneyTable = true;
     console.warn(message);
 };
 
@@ -942,7 +950,7 @@ export const DatabaseService = {
 
     upsertSmartMoneyWallet: async (wallet: SavedWallet) => {
         try {
-            if (!supabase || !supabaseAvailable) return;
+            if (!supabase || !supabaseAvailable || !smartMoneyWalletTableAvailable) return;
             if (!wallet.qualification?.qualified) return;
 
             const payload = {
@@ -963,21 +971,23 @@ export const DatabaseService = {
                 .upsert(payload, { onConflict: 'wallet_address' });
 
             if (error) {
-                warnSupabaseOnce(`Supabase Smart Money Sync Warning: ${error.message}`);
-                if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
-                    supabaseAvailable = false;
+                warnSmartMoneyTableOnce(`Supabase Smart Money Sync Warning: ${error.message}`);
+                if (/schema cache|does not exist|not find the table|PGRST|404/i.test(error.message)) {
+                    smartMoneyWalletTableAvailable = false;
+                } else if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
+                    smartMoneyWalletTableAvailable = false;
                 }
             }
         } catch (e) {
             if (e instanceof Error && /fetch failed|failed to fetch|network/i.test(e.message)) {
-                supabaseAvailable = false;
+                smartMoneyWalletTableAvailable = false;
             }
         }
     },
 
     fetchSmartMoneyWallets: async (): Promise<SavedWallet[]> => {
         try {
-            if (!supabase || !supabaseAvailable) return [];
+            if (!supabase || !supabaseAvailable || !smartMoneyWalletTableAvailable) return [];
 
             const { data, error } = await supabase
                 .from(SMART_MONEY_TABLE)
@@ -988,9 +998,11 @@ export const DatabaseService = {
 
             if (error || !data) {
                 if (error) {
-                    warnSupabaseOnce(`Supabase Smart Money Read Warning: ${error.message}`);
-                    if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
-                        supabaseAvailable = false;
+                    warnSmartMoneyTableOnce(`Supabase Smart Money Read Warning: ${error.message}`);
+                    if (/schema cache|does not exist|not find the table|PGRST|404/i.test(error.message)) {
+                        smartMoneyWalletTableAvailable = false;
+                    } else if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
+                        smartMoneyWalletTableAvailable = false;
                     }
                 }
                 return [];
@@ -999,7 +1011,7 @@ export const DatabaseService = {
             return data.map(mapSmartMoneyRowToWallet);
         } catch (e) {
             if (e instanceof Error && /fetch failed|failed to fetch|network/i.test(e.message)) {
-                supabaseAvailable = false;
+                smartMoneyWalletTableAvailable = false;
             }
             return [];
         }

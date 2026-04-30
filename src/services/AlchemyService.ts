@@ -7,85 +7,15 @@ const ALCHEMY_KEY = typeof window !== 'undefined' ? 'backend' : getBackendAlchem
 
 export const AlchemyService = {
     /**
-     * Bulk fetch prices for token addresses via Alchemy.
-     * Alchemy Token API supports fetching prices by address for specific chains.
+     * Bulk token price fallback.
+     *
+     * Alchemy's older JSON-RPC `alchemy_getTokenPrices` method is not available
+     * on the core RPC endpoints this app uses. Returning an empty map lets the
+     * caller continue to DexScreener/Moralis without noisy 400s in the console.
      */
-    getBulkPrices: async (tokenAddresses: string[], chain: string): Promise<Record<string, number>> => {
+    getBulkPrices: async (tokenAddresses: string[], _chain: string): Promise<Record<string, number>> => {
         if (!tokenAddresses.length || !ALCHEMY_KEY) return {};
-
-        // Map internal chain names to Alchemy network names
-        let network = 'eth-mainnet';
-        switch (chain.toLowerCase()) {
-            case 'ethereum': network = 'eth-mainnet'; break;
-            case 'polygon': network = 'polygon-mainnet'; break;
-            case 'arbitrum': network = 'arb-mainnet'; break;
-            case 'optimism': network = 'opt-mainnet'; break;
-            case 'base': network = 'base-mainnet'; break;
-            case 'solana': return {}; // Alchemy Token API structure differs for Solana, skipping for MVP
-            case 'bsc': return {}; // Alchemy doesn't fully support BSC Token API widely yet
-            default: network = 'eth-mainnet';
-        }
-
-        // Deduplicate addresses
-        const uniqueAddresses = [...new Set(tokenAddresses)];
-        const priceMap: Record<string, number> = {};
-
-        try {
-            // Alchemy supports batch requests via JSON-RPC
-            // method: "alchemy_getTokenPrices"
-
-            const response = await fetchAlchemyRpc(
-                network,
-                {
-                    id: 1,
-                    jsonrpc: "2.0",
-                    method: "alchemy_getTokenPrices",
-                    params: [
-                        {
-                            addresses: uniqueAddresses.map(a => ({ address: a }))
-                        }
-                    ]
-                }
-            );
-
-            if (!response.ok) {
-                const text = await response.text();
-                console.error(`[AlchemyService] Error ${response.status}: ${text}`);
-                return {};
-            }
-
-            const data = await response.json();
-
-            // Response format: 
-            // result: { address: { currency: "USD", error: null, value: "123.45" }, ... }
-
-            if (data.result && data.result.address) {
-                // The structure is actually data.result.data usually, let's handle the specific Alchemy format
-                // Official Doc format: result: { data: [ { address, price, currency, error } ] } 
-                // OR map based. Let's handle the array format which is common for bulk.
-
-                // Correction: alchemy_getTokenPrices returns data.result.data array
-                const items = data.result.data || [];
-
-                items.forEach((item: any) => {
-                    if (item.prices && item.prices.length > 0) {
-                        const usdPrice = item.prices.find((p: any) => p.currency === 'usd');
-                        if (usdPrice && usdPrice.value) {
-                            const val = parseFloat(usdPrice.value);
-                            if (!isNaN(val)) {
-                                priceMap[item.address.toLowerCase()] = val;
-                            }
-                        }
-                    }
-                });
-            }
-
-            return priceMap;
-
-        } catch (error) {
-            console.error("Alchemy Price Fetch Error", error);
-            return {};
-        }
+        return {};
     },
 
     /**

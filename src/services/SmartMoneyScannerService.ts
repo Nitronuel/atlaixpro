@@ -378,8 +378,6 @@ async function deleteCompletedFromSupabase(tokenJobIds: string[]) {
 }
 
 function scannerChainToPortfolioChain(chain: SmartMoneyScannerChain): ChainType {
-    if (chain !== 'solana') return 'All Chains';
-
     const map: Record<SmartMoneyScannerChain, ChainType> = {
         solana: 'Solana',
         eth: 'Ethereum',
