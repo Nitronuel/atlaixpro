@@ -1,7 +1,8 @@
 {
-  "name": "atlaix-estate",
+  "name": "atlaix-platform",
   "private": true,
   "version": "0.0.0",
+  "description": "AI-powered crypto intelligence platform for token detection, market activity scoring, wallet intelligence, and risk analysis.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n FORENSICS,APP -c cyan,green \"npm:dev:forensics\" \"npm:dev:web\"",
