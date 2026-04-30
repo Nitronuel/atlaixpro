@@ -1,4 +1,4 @@
--- Curated Smart Money wallet registry.
+-- Smart Money wallet registry schema.
 -- This table stores wallet labels, performance metadata, and scanner-derived classifications.
 
 create table if not exists public.smart_money_wallets (

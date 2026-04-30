@@ -1,3 +1,5 @@
+<!-- Supabase schema guide for intelligence storage. -->
+
 # Supabase Schemas
 
 This folder contains SQL schemas used by the Atlaix intelligence database.

@@ -1,4 +1,4 @@
--- Smart Money scanner job and wallet result tables.
+-- Smart Money scanner persistence tables.
 -- These tables persist scanner progress, qualification counts, and wallet-level evidence.
 
 create table if not exists public.smart_money_scan_jobs (
