@@ -1,3 +1,4 @@
+// Atlaix: Reusable interface component for Atlaix product workflows.
 import React, { useState } from 'react';
 import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { PortfolioData } from '../../services/ChainRouter';

@@ -1,3 +1,4 @@
+// Atlaix: Reusable interface component for Atlaix product workflows.
 import React, { useState } from 'react';
 
 interface CustomCalendarProps {

@@ -1,3 +1,4 @@
+// Atlaix: Reusable interface component for Atlaix product workflows.
 import React, { useState, useEffect, useRef } from 'react';
 
 interface DualRangeSliderProps {

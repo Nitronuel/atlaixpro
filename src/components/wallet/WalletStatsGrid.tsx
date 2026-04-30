@@ -1,3 +1,4 @@
+// Atlaix: Reusable interface component for Atlaix product workflows.
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { WalletStats } from '../../hooks/useWalletPortfolio';
