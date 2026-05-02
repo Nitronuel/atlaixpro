@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Search, Filter, ChevronDown,
-    Wallet, Activity, Layers, Play
+    Wallet, Activity, Layers
 } from 'lucide-react';
 import { SavedWalletService } from '../services/SavedWalletService';
 import { DatabaseService } from '../services/DatabaseService';
@@ -289,13 +289,6 @@ export const SmartMoney: React.FC = () => {
                     <button className="flex items-center gap-2 bg-[#1C1F22] hover:bg-[#222529] border border-[#2A2E33] px-3 py-2 rounded-lg text-[#EAECEF] text-sm font-medium transition-colors shrink-0">
                         <Filter size={16} />
                         <span className="hidden md:inline">Filters</span>
-                    </button>
-                    <button
-                        onClick={() => navigate('/smart-money-scanner')}
-                        className="flex items-center gap-2 bg-primary-green hover:bg-primary-green-darker px-4 py-2 rounded-lg text-main text-sm font-black transition-colors shrink-0"
-                    >
-                        <Play size={16} />
-                        <span>Scan</span>
                     </button>
                 </div>
             </div>

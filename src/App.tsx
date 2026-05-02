@@ -14,7 +14,6 @@ const WalletTracking = lazy(async () => ({ default: (await import('./pages/Walle
 const SafeScan = lazy(async () => ({ default: (await import('./pages/SafeScan')).SafeScan }));
 const SmartAlerts = lazy(async () => ({ default: (await import('./pages/SmartAlerts')).SmartAlerts }));
 const SmartMoney = lazy(async () => ({ default: (await import('./pages/SmartMoney')).SmartMoney }));
-const SmartMoneyScanner = lazy(async () => ({ default: (await import('./pages/SmartMoneyScanner')).SmartMoneyScanner }));
 const SmartWalletProfile = lazy(async () => ({ default: (await import('./pages/SmartWalletProfile')).SmartWalletProfile }));
 const TokenSmartMoney = lazy(async () => ({ default: (await import('./pages/TokenSmartMoney')).TokenSmartMoney }));
 
@@ -79,7 +78,6 @@ function AppContent() {
                             'safe-scan': '/safe-scan',
                             'settings': '/settings',
                             'smart-money': '/smart-money',
-                            'smart-money-scanner': '/smart-money-scanner',
                             'smart-alerts': '/smart-alerts'
                         };
                         if (routes[view]) navigate(routes[view]);
@@ -107,7 +105,6 @@ function AppContent() {
                             <Route path="/alchemy-hub" element={<Navigate to="/safe-scan" replace />} />
 
                             <Route path="/smart-money" element={<SmartMoney />} />
-                            <Route path="/smart-money-scanner" element={<SmartMoneyScanner />} />
                             <Route path="/smart-money/:address" element={<SmartWalletProfile />} />
                             <Route path="/token-smart-money/:address" element={<TokenSmartMoney />} />
                             <Route path="/smart-alerts" element={<SmartAlerts />} />

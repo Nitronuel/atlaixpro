@@ -74,7 +74,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     if (path.includes('/ai-assistant')) return 'AI Assistant';
     if (path.includes('/wallet')) return 'Wallet Tracker';
     if (path.includes('/wallet')) return 'Wallet Tracker';
-    if (path.includes('/smart-money-scanner')) return 'Smart Money Scanner';
     if (path.includes('/smart-money/')) return 'Smart Wallet Profile Page';
     if (path.includes('/smart-money')) return 'Smart Money Engine';
     if (path.includes('/safe-scan')) return 'Safe Scan';
@@ -92,7 +91,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     if (path.includes('/detection')) return 'Identify anomalies, drift, or suspicious patterns';
     if (path.includes('/ai-assistant')) return 'Interact with Atlaix Intelligence';
     if (path.includes('/safe-scan')) return 'Security analysis and risk scoring for tokens';
-    if (path.includes('/smart-money-scanner')) return 'Automate early-buyer wallet discovery and qualification';
     if (path.includes('/wallet')) return 'Monitor wallet activity, performance and patterns';
     if (path.includes('/smart-alerts')) return 'Create AI-powered market alerts';
     return '';
