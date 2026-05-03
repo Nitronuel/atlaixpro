@@ -1,5 +1,5 @@
 // Intelligence service module for Atlaix data workflows.
-import { MarketCoin, SavedWallet } from '../types';
+import { AlphaGauntletEvent, MarketCoin, SavedWallet } from '../types';
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from '../config';
 
@@ -15,8 +15,10 @@ const supabase = hasSupabaseConfig
     : null;
 let supabaseAvailable = hasSupabaseConfig;
 let smartMoneyWalletTableAvailable = hasSupabaseConfig;
+let detectionEventsTableAvailable = hasSupabaseConfig;
 let hasWarnedAboutSupabase = false;
 let hasWarnedAboutSmartMoneyTable = false;
+let hasWarnedAboutDetectionEventsTable = false;
 let lastStalePurgeAt = 0;
 
 const warnSupabaseOnce = (message: string) => {
@@ -31,10 +33,17 @@ const warnSmartMoneyTableOnce = (message: string) => {
     console.warn(message);
 };
 
+const warnDetectionEventsTableOnce = (message: string) => {
+    if (hasWarnedAboutDetectionEventsTable) return;
+    hasWarnedAboutDetectionEventsTable = true;
+    console.warn(message);
+};
+
 const DEXSCREENER_SEARCH_URL = '/api/dexscreener/latest/dex/search';
 const DEXSCREENER_PAIRS_URL = '/api/dexscreener/latest/dex/pairs';
 const DEXSCREENER_TOKENS_URL = '/api/dexscreener/latest/dex/tokens';
 const SMART_MONEY_TABLE = 'smart_money_wallets';
+const DETECTION_EVENTS_TABLE = 'detection_engine_events';
 
 // --- REQUIREMENTS ---
 // Broaden discovery intake, then rank for quality before surfacing to the feed.
@@ -945,6 +954,107 @@ export const DatabaseService = {
         } catch (e) {
             supabaseAvailable = false;
             return [];
+        }
+    },
+
+    fetchDetectionEvents: async (): Promise<AlphaGauntletEvent[]> => {
+        try {
+            if (!supabase || !supabaseAvailable || !detectionEventsTableAvailable) return [];
+
+            const cutoffIso = getStaleCutoffIso();
+            const { data, error } = await supabase
+                .from(DETECTION_EVENTS_TABLE)
+                .select('raw_event, score, updated_at')
+                .gte('updated_at', cutoffIso)
+                .order('score', { ascending: false })
+                .order('updated_at', { ascending: false })
+                .limit(200);
+
+            if (error || !data) {
+                if (error) {
+                    warnDetectionEventsTableOnce(`Supabase Detection Events Read Warning: ${error.message}`);
+                    if (/schema cache|does not exist|not find the table|PGRST|404/i.test(error.message)) {
+                        detectionEventsTableAvailable = false;
+                    } else if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
+                        supabaseAvailable = false;
+                    }
+                }
+                return [];
+            }
+
+            return data
+                .map((row: any) => row.raw_event as AlphaGauntletEvent)
+                .filter((event: AlphaGauntletEvent | null | undefined): event is AlphaGauntletEvent => Boolean(event?.token && event.eventType));
+        } catch (e) {
+            if (e instanceof Error && /fetch failed|failed to fetch|network/i.test(e.message)) {
+                supabaseAvailable = false;
+            }
+            return [];
+        }
+    },
+
+    syncDetectionEvents: async (events: AlphaGauntletEvent[]) => {
+        try {
+            if (!events.length || !supabase || !supabaseAvailable || !detectionEventsTableAvailable) return;
+
+            const dedupedPayload = new Map<string, {
+                event_key: string;
+                token_address: string | null;
+                ticker: string;
+                name: string;
+                chain: string;
+                event_type: string;
+                severity: string;
+                score: number;
+                detected_at: string;
+                updated_at: string;
+                raw_event: AlphaGauntletEvent;
+            }>();
+
+            events.slice(0, 200).forEach((event) => {
+                const tokenKey = event.token.address || event.token.ticker;
+                if (!tokenKey) return;
+
+                const eventKey = [
+                    event.token.chain.toLowerCase(),
+                    tokenKey.toLowerCase(),
+                    event.eventType.toLowerCase()
+                ].join(':');
+
+                dedupedPayload.set(eventKey, {
+                    event_key: eventKey,
+                    token_address: event.token.address || null,
+                    ticker: event.token.ticker,
+                    name: event.token.name,
+                    chain: event.token.chain,
+                    event_type: event.eventType,
+                    severity: event.severity,
+                    score: event.score,
+                    detected_at: new Date(event.detectedAt).toISOString(),
+                    updated_at: new Date().toISOString(),
+                    raw_event: event
+                });
+            });
+
+            const payload = [...dedupedPayload.values()];
+            if (!payload.length) return;
+
+            const { error } = await supabase
+                .from(DETECTION_EVENTS_TABLE)
+                .upsert(payload, { onConflict: 'event_key' });
+
+            if (error) {
+                warnDetectionEventsTableOnce(`Supabase Detection Events Sync Warning: ${error.message}`);
+                if (/schema cache|does not exist|not find the table|PGRST|404/i.test(error.message)) {
+                    detectionEventsTableAvailable = false;
+                } else if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
+                    supabaseAvailable = false;
+                }
+            }
+        } catch (e) {
+            if (e instanceof Error && /fetch failed|failed to fetch|network/i.test(e.message)) {
+                supabaseAvailable = false;
+            }
         }
     },
 

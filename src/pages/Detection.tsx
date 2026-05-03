@@ -136,13 +136,37 @@ export const Detection: React.FC = () => {
 
     useEffect(() => {
         let cancelled = false;
+        let hasDisplayedEvents = false;
+
+        const applyEvents = (nextEvents: AlphaGauntletEvent[]) => {
+            if (cancelled || nextEvents.length === 0) return false;
+            hasDisplayedEvents = true;
+            setEvents(nextEvents);
+            return true;
+        };
+
+        const hydrateStoredEvents = async () => {
+            try {
+                const storedEvents = await DatabaseService.fetchDetectionEvents();
+                applyEvents(storedEvents);
+            } catch (error) {
+                console.error('Global detection cache hydration error', error);
+            }
+        };
 
         const loadEvents = async (force = false) => {
             try {
-                if (!cancelled && events.length === 0) setLoading(true);
+                if (!cancelled && !hasDisplayedEvents) setLoading(true);
                 const response = await DatabaseService.getMarketData(force, false);
+                const qualifiedEvents = AlphaGauntletService.getDetectionEvents(response.data);
+
                 if (!cancelled) {
-                    setEvents(AlphaGauntletService.getDetectionEvents(response.data));
+                    if (qualifiedEvents.length > 0) {
+                        applyEvents(qualifiedEvents);
+                        DatabaseService.syncDetectionEvents(qualifiedEvents);
+                    } else if (!hasDisplayedEvents) {
+                        await hydrateStoredEvents();
+                    }
                 }
             } catch (error) {
                 console.error('Global detection feed error', error);
@@ -151,7 +175,7 @@ export const Detection: React.FC = () => {
             }
         };
 
-        loadEvents();
+        hydrateStoredEvents().finally(() => loadEvents());
         const interval = setInterval(() => loadEvents(false), 15000);
 
         return () => {
@@ -159,6 +183,27 @@ export const Detection: React.FC = () => {
             clearInterval(interval);
         };
     }, []);
+
+    const refreshEvents = async () => {
+        try {
+            setLoading(true);
+            const response = await DatabaseService.getMarketData(true, false);
+            const qualifiedEvents = AlphaGauntletService.getDetectionEvents(response.data);
+
+            if (qualifiedEvents.length > 0) {
+                setEvents(qualifiedEvents);
+                DatabaseService.syncDetectionEvents(qualifiedEvents);
+                return;
+            }
+
+            const storedEvents = await DatabaseService.fetchDetectionEvents();
+            setEvents(storedEvents);
+        } catch (error) {
+            console.error('Global detection refresh error', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const qualifiedEvents = useMemo(() => {
         return events.filter((event) => {
@@ -209,12 +254,7 @@ export const Detection: React.FC = () => {
                 <div className="flex items-center justify-between gap-4">
                     <h2 className="text-2xl md:text-3xl font-bold text-text-light">Paste A Contract Address To Run A Token Scan</h2>
                     <button
-                        onClick={() => {
-                            setLoading(true);
-                            DatabaseService.getMarketData(true, false)
-                                .then((response) => setEvents(AlphaGauntletService.getDetectionEvents(response.data)))
-                                .finally(() => setLoading(false));
-                        }}
+                        onClick={refreshEvents}
                         className="w-fit flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-bold text-text-light hover:border-primary-green/50 hover:text-primary-green transition-colors"
                     >
                         <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
