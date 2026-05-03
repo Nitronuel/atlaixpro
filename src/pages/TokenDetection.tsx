@@ -338,6 +338,7 @@ const ONE_HOUR_MS = 60 * 60 * 1000;
 const TWO_HOURS_MS = 2 * ONE_HOUR_MS;
 const ONE_DAY_MS = 24 * ONE_HOUR_MS;
 const RECENT_ACTIVITY_TIMEOUT_MS = 18_000;
+const TIMELINE_PAGE_SIZE = 9;
 
 const withTimeout = async <T,>(task: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
     let timeoutId: number | undefined;
@@ -368,6 +369,7 @@ export const TokenDetection: React.FC = () => {
 
     const [token, setToken] = useState<TokenSnapshot | null>(null);
     const [activity, setActivity] = useState<ImpactfulActivity[]>([]);
+    const [visibleActivityCount, setVisibleActivityCount] = useState(TIMELINE_PAGE_SIZE);
     const [loading, setLoading] = useState(true);
     const [activityLoading, setActivityLoading] = useState(false);
     const [watchStatus, setWatchStatus] = useState('');
@@ -392,6 +394,7 @@ export const TokenDetection: React.FC = () => {
         setActivityLoading(true);
         setError('');
         setActivity([]);
+        setVisibleActivityCount(TIMELINE_PAGE_SIZE);
 
         try {
             if (!tokenQuery) {
@@ -533,6 +536,8 @@ export const TokenDetection: React.FC = () => {
         { label: 'Pools', value: (token?.poolCount || 0).toLocaleString() },
         { label: 'Age', value: getAge(token?.pairCreatedAt) }
     ];
+    const visibleActivity = activity.slice(0, visibleActivityCount);
+    const hasMoreActivity = visibleActivityCount < activity.length;
 
     return (
         <div className="space-y-6 pb-10">
@@ -671,33 +676,43 @@ export const TokenDetection: React.FC = () => {
                 </div>
                 {watchStatus && <div className="mb-3 text-xs font-bold uppercase tracking-wide text-primary-green">{watchStatus}</div>}
                 {activity.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                        {activity.map((event, index) => (
-                            <div key={`${event.id}-${index}`} className="bg-card border border-border rounded-xl flex overflow-hidden group hover:border-text-medium transition-colors shadow-md h-full">
-                                <div className={`w-1.5 shrink-0 ${severityStyles(event.severity).bar}`}></div>
-                                <div className="flex-1 p-5 flex flex-col justify-between gap-3">
-                                    <div>
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="flex items-center gap-2 font-bold text-xs text-text-light uppercase tracking-wide">
-                                                <Activity size={16} /> {event.title}
+                    <>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                            {visibleActivity.map((event, index) => (
+                                <div key={`${event.id}-${index}`} className="bg-card border border-border rounded-xl flex overflow-hidden group hover:border-text-medium transition-colors shadow-md h-full">
+                                    <div className={`w-1.5 shrink-0 ${severityStyles(event.severity).bar}`}></div>
+                                    <div className="flex-1 p-5 flex flex-col justify-between gap-3">
+                                        <div>
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div className="flex items-center gap-2 font-bold text-xs text-text-light uppercase tracking-wide">
+                                                    <Activity size={16} /> {event.title}
+                                                </div>
+                                                <span className="text-[10px] text-text-dark font-mono whitespace-nowrap">{getTimeAgo(event.detectedAt)}</span>
                                             </div>
-                                            <span className="text-[10px] text-text-dark font-mono whitespace-nowrap">{getTimeAgo(event.detectedAt)}</span>
+                                            <p className="text-sm text-text-light font-medium leading-snug line-clamp-2">{event.description}</p>
                                         </div>
-                                        <p className="text-sm text-text-light font-medium leading-snug line-clamp-2">{event.description}</p>
-                                    </div>
-                                    <div className="flex justify-between items-center pt-3 border-t border-border/50 mt-auto gap-3">
-                                        <span className="text-text-medium font-mono text-xs truncate">{shortAddress(event.wallet)}</span>
-                                        <div className="flex items-center gap-2">
-                                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${severityStyles(event.severity).label}`}>
-                                                {event.source === 'recent-scan' ? 'Recent' : event.severity}
-                                            </span>
-                                            <span className="text-text-light font-bold text-sm whitespace-nowrap">{formatCurrency(event.usdValue)}</span>
+                                        <div className="flex justify-between items-center pt-3 border-t border-border/50 mt-auto gap-3">
+                                            <span className="text-text-medium font-bold text-xs truncate">{token?.symbol || tokenQuery}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${severityStyles(event.severity).label}`}>
+                                                    {event.source === 'recent-scan' ? 'Recent' : event.severity}
+                                                </span>
+                                                <span className="text-text-light font-bold text-sm whitespace-nowrap">{formatCurrency(event.usdValue)}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                        {hasMoreActivity && (
+                            <button
+                                onClick={() => setVisibleActivityCount((current) => Math.min(current + TIMELINE_PAGE_SIZE, activity.length))}
+                                className="mt-4 w-full rounded-lg border border-dashed border-border bg-card py-3 text-xs font-bold uppercase tracking-wide text-text-medium hover:border-primary-green/50 hover:text-primary-green transition-colors"
+                            >
+                                See More
+                            </button>
+                        )}
+                    </>
                 ) : (
                     <div className="bg-card border border-border rounded-xl p-6 text-text-medium">
                         {activityLoading
