@@ -15,6 +15,7 @@ dist-ssr
 # Local scanner caches and queues
 data/forensics-cache/
 data/forensics-queue/
+data/token-activity/
 
 # Local-only environment files
 *.local

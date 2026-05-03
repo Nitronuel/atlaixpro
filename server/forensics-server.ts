@@ -11,6 +11,7 @@ import {
     isLikelySolanaAddress,
     isSmartScannerChain
 } from './smart-money-scanner-discovery';
+import { ImpactfulTokenActivityStore } from './impactful-token-activity';
 
 const PORT = Number(process.env.PORT || process.env.FORENSICS_PORT || 3101);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -374,6 +375,91 @@ const server = createServer(async (request, response) => {
             json(response, 500, { error: error instanceof Error ? error.message : 'Solana Alchemy proxy failed.' });
             return;
         }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/token-activity/watch') {
+        try {
+            const watch = await ImpactfulTokenActivityStore.watchToken(await readJsonBody(request));
+            json(response, 200, {
+                watch,
+                stats: ImpactfulTokenActivityStore.getWatchStats()
+            });
+            return;
+        } catch (error) {
+            json(response, 400, {
+                error: error instanceof Error ? error.message : 'Could not watch token activity.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/token-activity/alchemy-webhook') {
+        try {
+            const result = ImpactfulTokenActivityStore.ingestAlchemyWebhook(await readJsonBody(request));
+            json(response, 200, result);
+            return;
+        } catch (error) {
+            json(response, 400, {
+                error: error instanceof Error ? error.message : 'Could not ingest Alchemy webhook.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/token-activity/cache') {
+        try {
+            const body = await readJsonBody(request) as { chain?: string; tokenAddress?: string; activities?: any[] };
+            const chain = String(body.chain || '').toLowerCase();
+            const tokenAddress = normalizeAddress(body.tokenAddress || '');
+
+            if (!chain || !tokenAddress || !Array.isArray(body.activities)) {
+                json(response, 400, { error: 'chain, tokenAddress, and activities are required.' });
+                return;
+            }
+
+            const activities = ImpactfulTokenActivityStore.cacheActivities(chain, tokenAddress, body.activities);
+            json(response, 200, {
+                activities,
+                stats: ImpactfulTokenActivityStore.getWatchStats()
+            });
+            return;
+        } catch (error) {
+            json(response, 400, {
+                error: error instanceof Error ? error.message : 'Could not cache token activity.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/token-activity/create-alchemy-webhook') {
+        try {
+            const body = await readJsonBody(request) as { chain?: string; webhookUrl?: string; name?: string; addresses?: string[] };
+            const result = await ImpactfulTokenActivityStore.createAlchemyWebhook({
+                chain: String(body.chain || ''),
+                webhookUrl: String(body.webhookUrl || ''),
+                name: body.name,
+                addresses: Array.isArray(body.addresses) ? body.addresses : []
+            });
+            json(response, 200, result);
+            return;
+        } catch (error) {
+            json(response, 400, {
+                error: error instanceof Error ? error.message : 'Could not create Alchemy webhook.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'GET' && requestUrl.pathname.startsWith('/api/token-activity/')) {
+        const parts = requestUrl.pathname.split('/').filter(Boolean);
+        const chain = parts[2] || '';
+        const tokenAddress = parts[3] || '';
+
+        json(response, 200, {
+            activities: ImpactfulTokenActivityStore.getActivities(chain, tokenAddress),
+            stats: ImpactfulTokenActivityStore.getWatchStats()
+        });
+        return;
     }
 
     if (method === 'POST' && requestUrl.pathname === '/api/forensics/jobs') {

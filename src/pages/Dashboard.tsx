@@ -3,7 +3,6 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw } from 'lucide-react';
 import { MarketCoin } from '../types';
 import { DatabaseService } from '../services/DatabaseService';
-import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { useNavigate } from 'react-router-dom';
 
 interface DashboardProps {
@@ -169,14 +168,6 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
     const getChange = (coin: MarketCoin) => coin.h24;
 
-    const alphaEvents = useMemo(() => AlphaGauntletService.getOverviewEvents(marketData), [marketData]);
-    const alphaEventMap = useMemo(() => {
-        const events = new Map<string, typeof alphaEvents[number]>();
-        alphaEvents.forEach(event => events.set(event.token.address || event.token.ticker, event));
-        return events;
-    }, [alphaEvents]);
-    const overviewTokens = useMemo(() => alphaEvents.map(event => event.token), [alphaEvents]);
-
     // Sorting Handler - Implements Tri-State (Desc -> Asc -> Neutral)
     const handleSort = (key: string, specificDirection?: 'asc' | 'desc') => {
         if (specificDirection) {
@@ -197,7 +188,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     };
 
     const sortedData = useMemo(() => {
-        let data = [...overviewTokens];
+        let data = [...marketData];
         if (!sortConfig) return data; // Neutral state returns data as-is (Hot Score sorted from service)
 
         return data.sort((a, b) => {
@@ -215,7 +206,6 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 if (key === 'dexBuys') return parseCurrency(item.dexBuys);
                 if (key === 'dexSells') return parseCurrency(item.dexSells);
                 if (key === 'netFlow') return parseCurrency(item.netFlow);
-                if (key === 'alphaScore') return alphaEventMap.get(item.address || item.ticker)?.score || 0;
                 return 0;
             };
 
@@ -227,7 +217,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             }
             return direction === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
         });
-    }, [overviewTokens, sortConfig, alphaEventMap]);
+    }, [marketData, sortConfig]);
 
     // AI Market Pulse Logic
     const formatCompactCurrency = (num: number) => {
@@ -322,9 +312,9 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const handlePrevPage = () => { if (currentPage > 1) setCurrentPage(p => p - 1); };
 
     const maxAbsFlow = useMemo(() => {
-        if (overviewTokens.length === 0) return 0;
-        return Math.max(...overviewTokens.map(c => Math.abs(parseCurrency(c.netFlow))));
-    }, [overviewTokens]);
+        if (marketData.length === 0) return 0;
+        return Math.max(...marketData.map(c => Math.abs(parseCurrency(c.netFlow))));
+    }, [marketData]);
 
     // Color logic for change percentage
     const getPercentColor = (val: string) => {
@@ -540,7 +530,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                         </div>
                         <div className="flex flex-col items-end">
                             <div className="text-xs text-text-medium font-mono">
-                                Showing {paginatedData.length} of {sortedData.length} qualified
+                                Showing {paginatedData.length} of {sortedData.length}
                             </div>
                             <div className="text-[10px] text-text-dark mt-0.5">
                                 Last sync: {lastUpdated.toLocaleTimeString()}
@@ -553,22 +543,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     {isLoading && marketData.length === 0 ? (
                         <div className="w-full h-[400px] flex items-center justify-center flex-col gap-3">
                             <div className="w-8 h-8 border-2 border-primary-green border-t-transparent rounded-full animate-spin"></div>
-                            <div className="text-sm font-bold text-text-medium">Running Alpha Gauntlet...</div>
-                        </div>
-                    ) : sortedData.length === 0 ? (
-                        <div className="w-full h-[400px] flex items-center justify-center flex-col gap-2 text-center px-4">
-                            <div className="text-sm font-bold text-text-light">No qualified Alpha Gauntlet events yet</div>
-                            <div className="text-xs text-text-medium max-w-md">
-                                Tokens must pass market structure, activity triggers, classification, and scoring before reaching Overview.
-                            </div>
+                            <div className="text-sm font-bold text-text-medium">Scanning for Alpha Signals...</div>
                         </div>
                     ) : (
                         <table className="data-table">
                             <thead>
                                 <tr>
                                     <SortHeader label="Chain Token" sortKey="ticker" minWidth="150px" />
-                                    <SortHeader label="Alpha Score" sortKey="alphaScore" minWidth="105px" />
-                                    <SortHeader label="Event" sortKey="ticker" minWidth="130px" />
                                     <SortHeader label="Price" sortKey="price" minWidth="100px" />
                                     <SortHeader label="Chg 24h" sortKey="change" minWidth="90px" />
                                     <SortHeader label="MCap" sortKey="cap" minWidth="100px" />
@@ -581,7 +562,6 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                             </thead>
                             <tbody>
                                 {paginatedData.map((coin) => {
-                                    const alphaEvent = alphaEventMap.get(coin.address || coin.ticker);
                                     const changeVal = getChange(coin);
                                     const flowVal = parseCurrency(coin.netFlow);
                                     const absFlow = Math.abs(flowVal);
@@ -609,17 +589,6 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                                 </div>
                                             </td>
 
-                                            <td className="font-mono text-xs text-primary-green font-bold text-left">
-                                                {alphaEvent?.score || 0}
-                                            </td>
-                                            <td className="text-left">
-                                                <div className="flex flex-col gap-1 min-w-[120px]">
-                                                    <span className="text-xs font-bold text-text-light">{alphaEvent?.eventType || 'Qualified'}</span>
-                                                    <span className="text-[9px] text-text-dark truncate max-w-[120px]" title={alphaEvent?.triggers.join(', ')}>
-                                                        {alphaEvent?.triggers[0] || coin.signal}
-                                                    </span>
-                                                </div>
-                                            </td>
                                             <td className="font-mono text-xs text-text-light font-medium text-left">{coin.price}</td>
                                             <td className={`font-bold text-xs text-left ${getPercentColor(changeVal)}`}>{changeVal}</td>
                                             <td className="font-medium text-xs text-text-light text-left">{coin.cap}</td>

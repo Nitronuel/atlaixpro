@@ -85,6 +85,10 @@ export default defineConfig(({ mode }) => {
         '/api/smart-money-scanner': {
           target: 'http://127.0.0.1:3101',
           changeOrigin: true
+        },
+        '/api/token-activity': {
+          target: 'http://127.0.0.1:3101',
+          changeOrigin: true
         }
       }
     },
