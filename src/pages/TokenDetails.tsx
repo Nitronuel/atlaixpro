@@ -68,6 +68,47 @@ const getDexscreenerChartUrl = (chainId?: string, pairAddress?: string, compact 
     return `https://dexscreener.com/${chainId}/${pairAddress}?${params.toString()}`;
 };
 
+const buildDexAggregateActivity = (args: {
+    pairAddress?: string;
+    priceUsd: number;
+    buyVolume: number;
+    sellVolume: number;
+}): RealActivity[] => {
+    const { pairAddress, priceUsd, buyVolume, sellVolume } = args;
+    const poolWallet = pairAddress || 'DEX Pool';
+    const rows: RealActivity[] = [];
+
+    if (buyVolume >= 100) {
+        rows.push({
+            type: 'Buy',
+            val: priceUsd > 0 ? (buyVolume / priceUsd).toFixed(2) : '-',
+            desc: 'aggregate DEX buys',
+            time: '24h',
+            color: 'text-primary-green',
+            usd: `$${buyVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+            hash: `${poolWallet}:aggregate-buy`,
+            wallet: poolWallet,
+            tag: 'Buy'
+        });
+    }
+
+    if (sellVolume >= 100) {
+        rows.push({
+            type: 'Sell',
+            val: priceUsd > 0 ? (sellVolume / priceUsd).toFixed(2) : '-',
+            desc: 'aggregate DEX sells',
+            time: '24h',
+            color: 'text-primary-red',
+            usd: `$${sellVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+            hash: `${poolWallet}:aggregate-sell`,
+            wallet: poolWallet,
+            tag: 'Sell'
+        });
+    }
+
+    return rows;
+};
+
 export const TokenDetails: React.FC = () => {
     const { address } = useParams<{ address: string }>();
     const navigate = useNavigate();
@@ -79,6 +120,7 @@ export const TokenDetails: React.FC = () => {
     const [chartExpanded, setChartExpanded] = useState(false);
     const [visibleWalletRows, setVisibleWalletRows] = useState(8);
     const [compactChartLoaded, setCompactChartLoaded] = useState(false);
+    const [activityRefreshing, setActivityRefreshing] = useState(false);
 
     const onBack = () => {
         navigate(-1);
@@ -177,14 +219,42 @@ export const TokenDetails: React.FC = () => {
     const buyVolume = totalTxns > 0 ? volume24h * (buys / totalTxns) : volume24h / 2;
     const sellVolume = totalTxns > 0 ? volume24h * (sells / totalTxns) : volume24h / 2;
     const netVolume = buyVolume - sellVolume;
-    const highSignalEvents = activityFeed.filter(item => ['Burn', 'Whale', 'Add Liq', 'Remove Liq'].includes(item.tag || item.type));
-    const visibleHighSignalEvents = highSignalEvents.length ? highSignalEvents : activityFeed.slice(0, 6);
-    const walletEvents = activityFeed.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
+    const fallbackActivity = useMemo(() => buildDexAggregateActivity({
+        pairAddress: enrichedData?.pairAddress,
+        priceUsd: priceNumber,
+        buyVolume,
+        sellVolume
+    }), [buyVolume, enrichedData?.pairAddress, priceNumber, sellVolume]);
+    const displayedActivity = activityFeed.length ? activityFeed : fallbackActivity;
+    const highSignalEvents = displayedActivity.filter(item => ['Burn', 'Whale', 'Add Liq', 'Remove Liq'].includes(item.tag || item.type));
+    const visibleHighSignalEvents = highSignalEvents.length ? highSignalEvents : displayedActivity.slice(0, 6);
+    const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
     const copyAddress = () => {
         if (!enrichedData?.baseToken.address) return;
         navigator.clipboard.writeText(enrichedData.baseToken.address);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
+    };
+
+    const refreshActivity = async () => {
+        if (!enrichedData?.baseToken.address) return;
+        setActivityRefreshing(true);
+
+        try {
+            const latestActivity = await ChainActivityService.getTokenActivity(
+                enrichedData.baseToken.address,
+                enrichedData.chainId,
+                priceNumber,
+                enrichedData.pairAddress
+            );
+            setActivityFeed(latestActivity);
+            setVisibleWalletRows(8);
+            setIsRealData(true);
+        } catch (error) {
+            console.error('Failed to refresh token activity', error);
+        } finally {
+            setActivityRefreshing(false);
+        }
     };
 
     if (loading && !enrichedData) {
@@ -358,9 +428,19 @@ export const TokenDetails: React.FC = () => {
                 <div className="rounded-lg border border-border bg-card p-5">
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <h3 className="text-base font-bold text-text-light">On-Chain Activity</h3>
-                        <button className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
-                            All Events <ChevronDown size={14} />
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={refreshActivity}
+                                disabled={activityRefreshing}
+                                className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-main text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Refresh activity"
+                            >
+                                <RefreshCw size={14} className={activityRefreshing ? 'animate-spin' : ''} />
+                            </button>
+                            <button className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
+                                All Events <ChevronDown size={14} />
+                            </button>
+                        </div>
                     </div>
                     <div className="relative flex flex-col gap-1">
                         {visibleHighSignalEvents.length === 0 ? (
@@ -399,6 +479,14 @@ export const TokenDetails: React.FC = () => {
                     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h3 className="text-base font-bold text-text-light">Wallet Interactions</h3>
                         <div className="flex gap-2">
+                            <button
+                                onClick={refreshActivity}
+                                disabled={activityRefreshing}
+                                className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-main text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Refresh activity"
+                            >
+                                <RefreshCw size={14} className={activityRefreshing ? 'animate-spin' : ''} />
+                            </button>
                             <button className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
                                 All Actions <ChevronDown size={14} />
                             </button>

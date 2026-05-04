@@ -2,6 +2,7 @@
 
 import { SolanaProvider } from './SolanaProvider';
 import { fetchAlchemyRpc } from './ProviderGateway';
+import { MoralisService } from './MoralisService';
 
 // Define the Activity Interface
 export interface RealActivity {
@@ -27,6 +28,9 @@ const mapChainToAlchemyNetwork = (chain: string) => {
     }
 };
 
+const ALCHEMY_SUPPORTED_CHAINS = new Set(['ethereum', 'base', 'arbitrum', 'polygon', 'optimism']);
+const MIN_ACTIVITY_USD = 100;
+
 const getTimeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
     if (seconds < 60) return `${seconds}s ago`;
@@ -42,7 +46,7 @@ export const ChainActivityService = {
      */
     getTokenActivity: async (tokenAddress: string, chain: string, priceUsd: number, pairAddress?: string): Promise<RealActivity[]> => {
         if (chain.toLowerCase() === 'solana') {
-            return ChainActivityService.getSolanaActivity(tokenAddress, priceUsd);
+            return ChainActivityService.getSolanaActivity(tokenAddress, priceUsd, pairAddress);
         } else {
             return ChainActivityService.getEVMActivity(tokenAddress, chain, priceUsd, pairAddress);
         }
@@ -52,8 +56,11 @@ export const ChainActivityService = {
      * EVM Implementation using Alchemy Enhanced API
      */
     getEVMActivity: async (tokenAddress: string, chain: string, priceUsd: number, pairAddress?: string): Promise<RealActivity[]> => {
+        const normalizedChain = chain.toLowerCase();
         const network = mapChainToAlchemyNetwork(chain);
-        if (chain.toLowerCase() === 'bsc') return [];
+        if (!ALCHEMY_SUPPORTED_CHAINS.has(normalizedChain)) {
+            return MoralisService.getTokenActivity(tokenAddress, chain, pairAddress || '', priceUsd);
+        }
 
         // Normalize Pair Address for comparison
         const pairAddr = pairAddress ? pairAddress.toLowerCase() : '';
@@ -80,7 +87,9 @@ export const ChainActivityService = {
                 }
             );
 
-            if (!response.ok) return [];
+            if (!response.ok) {
+                return MoralisService.getTokenActivity(tokenAddress, chain, pairAddress || '', priceUsd);
+            }
             const data = await response.json();
             const transfers = data.result?.transfers || [];
 
@@ -93,6 +102,7 @@ export const ChainActivityService = {
             for (const tx of transfers) {
                 const val = parseFloat(tx.value);
                 const usdValue = val * priceUsd;
+                if (usdValue < MIN_ACTIVITY_USD) continue;
                 const to = (tx.to || '').toLowerCase();
                 const from = (tx.from || '').toLowerCase();
                 const timestamp = new Date(tx.metadata.blockTimestamp).getTime();
@@ -164,21 +174,30 @@ export const ChainActivityService = {
                 });
             }
 
-            return activities;
+            if (activities.length > 0) return activities;
+            return MoralisService.getTokenActivity(tokenAddress, chain, pairAddress || '', priceUsd);
 
         } catch (e) {
             console.error("[ChainActivity] EVM Fetch Error", e);
-            return [];
+            return MoralisService.getTokenActivity(tokenAddress, chain, pairAddress || '', priceUsd);
         }
     },
 
     /**
      * Solana implementation using normalized Alchemy-backed RPC history.
      */
-    getSolanaActivity: async (mint: string, priceUsd: number): Promise<RealActivity[]> => {
+    getSolanaActivity: async (mint: string, priceUsd: number, pairAddress?: string): Promise<RealActivity[]> => {
         try {
-            const transactions = await SolanaProvider.getParsedAddressTransactions(mint);
-            if (!Array.isArray(transactions)) return [];
+            const sources = [mint, ...(pairAddress ? [pairAddress] : [])];
+            const settledTransactions = await Promise.allSettled(
+                sources.map((address) => SolanaProvider.getParsedAddressTransactions(address))
+            );
+            const transactions = settledTransactions.flatMap((result) =>
+                result.status === 'fulfilled' ? result.value : []
+            );
+            if (!Array.isArray(transactions)) {
+                return MoralisService.getTokenActivity(mint, 'solana', '', priceUsd);
+            }
 
             const activities: RealActivity[] = [];
 
@@ -194,6 +213,7 @@ export const ChainActivityService = {
                     const transfer = (tx.tokenTransfers || []).find((t: any) => t.mint === mint);
                     const amount = transfer ? transfer.tokenAmount : 0;
                     const usdValue = amount * priceUsd;
+                    if (usdValue < MIN_ACTIVITY_USD) continue;
 
                     activities.push({
                         type: 'Burn',
@@ -215,6 +235,7 @@ export const ChainActivityService = {
                     if (transfer) {
                         const amount = transfer.tokenAmount;
                         const usdValue = amount * priceUsd;
+                        if (usdValue < MIN_ACTIVITY_USD) continue;
 
                         const user = tx.feePayer;
                         const isOut = transfer.fromUserAccount === user;
@@ -243,6 +264,7 @@ export const ChainActivityService = {
                     for (const t of transfers) {
                         const amount = t.tokenAmount;
                         const usdValue = amount * priceUsd;
+                        if (usdValue < MIN_ACTIVITY_USD) continue;
 
                         if (usdValue >= 500000) {
                             activities.push({
@@ -274,11 +296,12 @@ export const ChainActivityService = {
                 }
             }
 
-            return activities;
+            if (activities.length > 0) return activities;
+            return MoralisService.getTokenActivity(mint, 'solana', '', priceUsd);
 
         } catch (e) {
             console.error("[ChainActivity] Solana Fetch Error", e);
-            return [];
+            return MoralisService.getTokenActivity(mint, 'solana', '', priceUsd);
         }
     }
 };

@@ -6,6 +6,7 @@ import { fetchProvider } from './ProviderGateway';
 
 // API Key from Config
 const MORALIS_API_KEY = APP_CONFIG.moralisKey;
+const MIN_ACTIVITY_USD = 100;
 
 interface MoralisTransfer {
     transaction_hash: string;
@@ -15,6 +16,11 @@ interface MoralisTransfer {
     from_address: string;
     value: string; // Raw value
     decimals?: number;
+    token_decimals?: number | string;
+    token_amount?: string | number;
+    amount?: string | number;
+    to_owner?: string;
+    from_owner?: string;
 }
 
 export interface RealActivity {
@@ -161,11 +167,19 @@ export const MoralisService = {
 
             return transfers.map((tx) => {
                 // --- Advanced Filtering Logic ---
-                const to = (tx.to_address || '').toLowerCase();
-                const from = (tx.from_address || '').toLowerCase();
-                const decimals = tx.decimals ? Number(tx.decimals) : 18;
-                const rawVal = parseFloat(tx.value) / Math.pow(10, decimals);
+                const to = (tx.to_address || tx.to_owner || '').toLowerCase();
+                const from = (tx.from_address || tx.from_owner || '').toLowerCase();
+                const decimals = tx.decimals !== undefined
+                    ? Number(tx.decimals)
+                    : tx.token_decimals !== undefined
+                        ? Number(tx.token_decimals)
+                        : isSolana ? 0 : 18;
+                const directAmount = tx.token_amount ?? tx.amount;
+                const rawVal = directAmount !== undefined
+                    ? Number(directAmount)
+                    : parseFloat(tx.value || '0') / Math.pow(10, decimals || 0);
                 const usdVal = rawVal * tokenPrice;
+                if (usdVal < MIN_ACTIVITY_USD) return null;
                 const isBuy = pairAddress && from === pairAddress.toLowerCase();
                 const isSell = pairAddress && to === pairAddress.toLowerCase();
 
@@ -217,12 +231,21 @@ export const MoralisService = {
                     }
                 }
 
-                // 3. Liquidity Events (Mock/Heuristic for now as Moralis doesn't give "Add Liq" event directly without logs)
-                // Real detection requires parsing log topics. 
-                // For this implementation, we will filter out standard small Buys/Sells and only return null
-                // effectively hiding them from this specific "On Chain Activity" view.
+                const type: RealActivity['type'] = isBuy ? 'Buy' : isSell ? 'Sell' : 'Transfer';
+                const desc = isBuy ? 'bought on DEX' : isSell ? 'sold on DEX' : 'transferred';
+                const color = isBuy ? 'text-primary-green' : isSell ? 'text-primary-red' : 'text-primary-blue';
 
-                return null; // Top-level filter: if not one of the above, exclude it.
+                return {
+                    type,
+                    val: rawVal < 0.01 ? '< 0.01' : rawVal.toFixed(2),
+                    desc,
+                    time: getTimeAgo(tx.block_timestamp),
+                    color,
+                    usd: `$${usdVal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+                    hash: tx.transaction_hash,
+                    wallet: isBuy ? to : from,
+                    tag: type
+                };
             }).filter(Boolean) as RealActivity[]; // Remove nulls
 
         } catch (error) {
