@@ -16,6 +16,7 @@ type GlobalTokenEvent = {
     description: string;
     usdValue: number;
     detectedAt: number;
+    sentiment: 'bullish' | 'bearish' | 'neutral';
 };
 
 const CATEGORY_CONFIG: Array<{
@@ -103,10 +104,16 @@ const severityClass = (severity: AlphaGauntletEvent['severity']) => {
     return 'text-primary-green border-primary-green/30 bg-primary-green/10';
 };
 
-const severityAccentClass = (severity: AlphaGauntletEvent['severity']) => {
-    if (severity === 'High') return 'bg-primary-red';
-    if (severity === 'Medium') return 'bg-primary-yellow';
-    return 'bg-primary-green';
+const eventSentimentAccentClass = (sentiment: GlobalTokenEvent['sentiment']) => {
+    if (sentiment === 'bullish') return 'bg-primary-green';
+    if (sentiment === 'bearish') return 'bg-primary-red';
+    return 'bg-primary-yellow';
+};
+
+const eventSentimentLabelClass = (sentiment: GlobalTokenEvent['sentiment']) => {
+    if (sentiment === 'bullish') return 'text-primary-green border-primary-green/30 bg-primary-green/10';
+    if (sentiment === 'bearish') return 'text-primary-red border-primary-red/30 bg-primary-red/10';
+    return 'text-primary-yellow border-primary-yellow/30 bg-primary-yellow/10';
 };
 
 const formatCompactUsd = (value: number) => {
@@ -135,7 +142,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
             title: 'Qualified Buy Pressure',
             description: `${tokenLabel} is showing stronger buy-side pressure across the latest 24h market flow.`,
             usdValue: Math.max(event.metrics.buyVolume24h || 0, valueBasis),
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: 'bullish'
         });
     }
 
@@ -146,7 +154,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
             title: 'Qualified Sell Pressure',
             description: `${tokenLabel} has elevated sell-side pressure relative to current market activity.`,
             usdValue: Math.max(event.metrics.sellVolume24h || 0, valueBasis),
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: 'bearish'
         });
     }
 
@@ -157,7 +166,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
             title: 'Recovery Momentum',
             description: `${tokenLabel} is rebounding with ${event.metrics.priceChange24h >= 0 ? '+' : ''}${event.metrics.priceChange24h.toFixed(2)}% 24h price momentum.`,
             usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: 'bullish'
         });
     }
 
@@ -168,7 +178,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
             title: 'Major Dump Event',
             description: `${tokenLabel} moved ${event.metrics.priceChange24h.toFixed(2)}% over 24h with elevated activity.`,
             usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: 'bearish'
         });
     } else if (event.metrics.priceChange24h >= 12) {
         events.push({
@@ -177,7 +188,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
             title: 'Major Pump Event',
             description: `${tokenLabel} moved +${event.metrics.priceChange24h.toFixed(2)}% over 24h with meaningful volume.`,
             usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: 'bullish'
         });
     }
 
@@ -188,39 +200,64 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
             title: 'Major Volume Event',
             description: `${tokenLabel} produced ${formatCompactUsd(event.metrics.volume24h)} in 24h market volume.`,
             usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: 'neutral'
         });
     }
 
-    if (event.triggers.includes('Liquidity Added') || event.triggers.includes('Liquidity Removed')) {
+    if (event.triggers.includes('Liquidity Added')) {
         events.push({
-            id: `${getDetectionEventKey(event)}:liquidity`,
+            id: `${getDetectionEventKey(event)}:liquidity-added`,
             source: event,
-            title: event.triggers.includes('Liquidity Removed') ? 'Liquidity Risk Event' : 'Liquidity Event',
-            description: `${tokenLabel} has a notable liquidity structure change with ${formatCompactUsd(event.metrics.liquidity)} active liquidity.`,
+            title: 'Liquidity Added',
+            description: `${tokenLabel} shows constructive liquidity expansion with ${formatCompactUsd(event.metrics.liquidity)} active liquidity.`,
             usdValue: event.metrics.liquidity,
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: 'bullish'
+        });
+    }
+
+    if (event.triggers.includes('Liquidity Removed')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:liquidity-removed`,
+            source: event,
+            title: 'Liquidity Removed',
+            description: `${tokenLabel} shows a liquidity reduction risk with ${formatCompactUsd(event.metrics.liquidity)} active liquidity remaining.`,
+            usdValue: event.metrics.liquidity,
+            detectedAt: event.detectedAt,
+            sentiment: 'bearish'
         });
     }
 
     if (event.triggers.includes('Abnormal Large Trades')) {
+        const positiveFlow = event.metrics.netFlow > 0;
+        const negativeFlow = event.metrics.netFlow < 0;
         events.push({
             id: `${getDetectionEventKey(event)}:large-trades`,
             source: event,
-            title: 'Abnormal Large Trades',
-            description: `${tokenLabel} has abnormal net flow of ${formatCompactUsd(Math.abs(event.metrics.netFlow))}.`,
+            title: positiveFlow ? 'Abnormal Large Inflow' : negativeFlow ? 'Abnormal Large Outflow' : 'Abnormal Large Trades',
+            description: `${tokenLabel} has ${positiveFlow ? 'positive' : negativeFlow ? 'negative' : 'unusual'} net flow of ${formatCompactUsd(Math.abs(event.metrics.netFlow))}.`,
             usdValue: Math.abs(event.metrics.netFlow),
-            detectedAt: event.detectedAt
+            detectedAt: event.detectedAt,
+            sentiment: positiveFlow ? 'bullish' : negativeFlow ? 'bearish' : 'neutral'
         });
     }
+
+    const fallbackSentiment =
+        event.eventType === 'Accumulation' || event.eventType === 'Recovery'
+            ? 'bullish'
+            : event.eventType === 'Distribution' || event.eventType === 'Market Stress'
+                ? 'bearish'
+                : 'neutral';
 
     return events.length ? events : [{
         id: `${getDetectionEventKey(event)}:activity`,
         source: event,
-        title: `${event.eventType} Signal`,
+        title: fallbackSentiment === 'neutral' ? 'Activity Signal' : `${event.eventType} Signal`,
         description: `${tokenLabel} remains active in global detection with a ${event.score} Alpha score.`,
         usdValue: valueBasis,
-        detectedAt: event.detectedAt
+        detectedAt: event.detectedAt,
+        sentiment: fallbackSentiment
     }];
 };
 
@@ -483,17 +520,6 @@ export const Detection: React.FC = () => {
     return (
         <div className="flex flex-col gap-6 animate-fade-in pb-8">
             <section className="flex flex-col gap-5">
-                <div className="flex items-center justify-between gap-4">
-                    <h2 className="text-2xl md:text-3xl font-bold text-text-light">Paste A Contract Address To Run A Token Scan</h2>
-                    <button
-                        onClick={refreshEvents}
-                        className="w-fit flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-bold text-text-light hover:border-primary-green/50 hover:text-primary-green transition-colors"
-                    >
-                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                        Refresh
-                    </button>
-                </div>
-
                 <div className="flex flex-col lg:flex-row gap-3 rounded-xl border border-border bg-card p-4">
                     <form onSubmit={handleTokenSearch} className="flex flex-1 gap-3 min-w-0">
                     <div className="relative flex-1 min-w-0">
@@ -526,6 +552,16 @@ export const Detection: React.FC = () => {
                         </label>
                     </div>
                 </div>
+
+                <div className="flex justify-end">
+                    <button
+                        onClick={refreshEvents}
+                        className="w-fit flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-bold text-text-light hover:border-primary-green/50 hover:text-primary-green transition-colors"
+                    >
+                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                        Refresh
+                    </button>
+                </div>
             </section>
 
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
@@ -554,16 +590,16 @@ export const Detection: React.FC = () => {
                                     <table className="w-full table-fixed text-left">
                                         <colgroup>
                                             <col />
-                                            <col className="w-[76px]" />
-                                            <col className="w-[112px]" />
-                                            <col className="w-[92px]" />
+                                            <col className="w-[54px] sm:w-[76px]" />
+                                            <col className="w-[78px] sm:w-[112px]" />
+                                            <col className="w-[68px] sm:w-[92px]" />
                                         </colgroup>
                                         <thead className="bg-[#111315] text-[11px] uppercase tracking-wide text-text-medium">
                                             <tr>
-                                                <th className="px-4 py-3 font-bold">Token</th>
-                                                <th className="px-4 py-3 font-bold">Score</th>
-                                                <th className="px-4 py-3 font-bold">Severity</th>
-                                                <th className="px-4 py-3 font-bold text-right">Detected</th>
+                                                <th className="px-3 py-3 font-bold sm:px-4">Token</th>
+                                                <th className="px-2 py-3 font-bold sm:px-4">Score</th>
+                                                <th className="px-2 py-3 font-bold sm:px-4">Severity</th>
+                                                <th className="px-2 py-3 font-bold text-right sm:px-4">Detected</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border/70">
@@ -573,29 +609,29 @@ export const Detection: React.FC = () => {
                                                     onClick={() => navigate(`/detection/token/${encodeURIComponent(event.token.address || event.token.ticker)}?source=detection&severity=${encodeURIComponent(event.severity)}&eventType=${encodeURIComponent(event.eventType)}&score=${encodeURIComponent(String(event.score))}&detectedAt=${encodeURIComponent(String(event.detectedAt))}`)}
                                                     className="cursor-pointer hover:bg-[#1C1F22] transition-colors"
                                                 >
-                                                    <td className="px-4 py-4 min-w-0">
-                                                        <div className="flex items-center gap-3 min-w-0">
+                                                    <td className="px-3 py-4 min-w-0 sm:px-4">
+                                                        <div className="flex items-center gap-2 min-w-0 sm:gap-3">
                                                             <img
                                                                 src={event.token.img}
                                                                 alt={event.token.ticker}
-                                                                className="h-8 w-8 shrink-0 rounded-full border border-border bg-[#111315] object-cover"
+                                                                className="h-7 w-7 shrink-0 rounded-full border border-border bg-[#111315] object-cover sm:h-8 sm:w-8"
                                                                 onError={(imageEvent) => { imageEvent.currentTarget.style.display = 'none'; }}
                                                             />
-                                                            <div className="min-w-0 max-w-[150px]">
-                                                                <div className="truncate font-bold text-text-light" title={event.token.ticker}>{event.token.ticker}</div>
-                                                                <div className="truncate text-xs text-text-medium" title={event.token.name}>{event.token.name}</div>
+                                                            <div className="min-w-0 max-w-[120px] sm:max-w-[170px]">
+                                                                <div className="truncate text-sm font-bold text-text-light sm:text-base" title={event.token.ticker}>{event.token.ticker}</div>
+                                                                <div className="truncate text-[11px] text-text-medium sm:text-xs" title={event.token.name}>{event.token.name}</div>
                                                             </div>
                                                         </div>
                                                     </td>
-                                                    <td className="px-4 py-4">
-                                                        <span className="font-mono text-sm font-bold text-primary-green">{event.score}</span>
+                                                    <td className="px-2 py-4 sm:px-4">
+                                                        <span className="font-mono text-xs font-bold text-primary-green sm:text-sm">{event.score}</span>
                                                     </td>
-                                                    <td className="px-4 py-4">
-                                                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${severityClass(event.severity)}`}>
+                                                    <td className="px-2 py-4 sm:px-4">
+                                                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold sm:px-2.5 sm:py-1 sm:text-xs ${severityClass(event.severity)}`}>
                                                             {event.severity}
                                                         </span>
                                                     </td>
-                                                    <td className="px-4 py-4 text-right text-xs font-mono text-text-medium">{getTimeAgo(event.detectedAt)}</td>
+                                                    <td className="px-2 py-4 text-right text-[11px] font-mono text-text-medium sm:px-4 sm:text-xs">{getTimeAgo(event.detectedAt)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -628,9 +664,6 @@ export const Detection: React.FC = () => {
                                 <h3 className="text-lg font-bold text-text-light">Global Events</h3>
                                 <p className="mt-1 text-sm text-text-medium">Latest activity across detected tokens.</p>
                             </div>
-                            <span className="rounded-full border border-primary-green/30 bg-primary-green/10 px-2.5 py-1 text-xs font-bold text-primary-green">
-                                {recentGlobalEvents.length}
-                            </span>
                         </div>
                     </div>
                     <div className="max-h-[720px] overflow-y-auto p-2.5">
@@ -651,7 +684,7 @@ export const Detection: React.FC = () => {
                                         onClick={() => navigate(`/detection/token/${encodeURIComponent(event.token.address || event.token.ticker)}?source=detection&severity=${encodeURIComponent(event.severity)}&eventType=${encodeURIComponent(event.eventType)}&score=${encodeURIComponent(String(event.score))}&detectedAt=${encodeURIComponent(String(event.detectedAt))}`)}
                                         className="group flex w-full overflow-hidden rounded-xl border border-border bg-[#1C1F22] text-left shadow-sm transition-colors hover:border-text-medium"
                                     >
-                                        <div className={`w-1.5 shrink-0 ${severityAccentClass(event.severity)}`}></div>
+                                        <div className={`w-1.5 shrink-0 ${eventSentimentAccentClass(globalEvent.sentiment)}`}></div>
                                         <div className="flex min-h-[128px] flex-1 flex-col justify-between p-3.5">
                                             <div>
                                                 <div className="flex items-start justify-between gap-3">
@@ -679,8 +712,8 @@ export const Detection: React.FC = () => {
                                                     </span>
                                                 </div>
                                                 <div className="flex shrink-0 items-center gap-2">
-                                                    <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${severityClass(event.severity)}`}>
-                                                        {event.severity}
+                                                    <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${eventSentimentLabelClass(globalEvent.sentiment)}`}>
+                                                        {globalEvent.sentiment}
                                                     </span>
                                                     <span className="font-mono text-[11px] font-black text-text-light">
                                                         {formatCompactUsd(globalEvent.usdValue)}

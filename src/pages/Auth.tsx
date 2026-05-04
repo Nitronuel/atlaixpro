@@ -21,9 +21,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, onSkip }) => {
 
             <div className="flex items-center gap-3 text-3xl font-bold mb-2">
                 <img 
-                    src="./logo.png" 
+                    src="/logo.png" 
                     alt="Atlaix Logo" 
-                    className="w-12 h-12 object-contain" 
+                    className="w-12 h-12 rounded-xl object-contain" 
                     onError={(e) => (e.currentTarget.style.display = 'none')}
                 />
                 Atlaix

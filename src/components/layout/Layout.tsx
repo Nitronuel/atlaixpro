@@ -117,9 +117,9 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
         <div className="px-3 py-4">
           <div className="flex items-center gap-3 text-2xl font-bold text-text-light pl-2">
             <img
-              src="./logo.png"
+              src="/logo.png"
               alt="Atlaix Logo"
-              className="w-9 h-9 object-contain"
+              className="w-9 h-9 rounded-lg object-contain"
               onError={(e) => (e.currentTarget.style.display = 'none')}
             />
             Atlaix

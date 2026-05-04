@@ -799,13 +799,10 @@ export const TokenDetection: React.FC = () => {
                                             <p className="text-sm text-text-light font-medium leading-snug line-clamp-2">{event.description}</p>
                                         </div>
                                         <div className="flex justify-between items-center pt-3 border-t border-border/50 mt-auto gap-3">
-                                            <span className="text-text-medium font-bold text-xs truncate">{token?.symbol || tokenQuery}</span>
-                                            <div className="flex items-center gap-2">
-                                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${severityStyles(event.severity).label}`}>
-                                                    {event.source === 'recent-scan' ? 'Recent' : event.severity}
-                                                </span>
-                                                <span className="text-text-light font-bold text-sm whitespace-nowrap">{formatCurrency(event.usdValue)}</span>
-                                            </div>
+                                            <span className="min-w-0 truncate text-xs font-bold text-text-medium" title={token?.name || tokenQuery}>
+                                                {token?.name || tokenQuery}
+                                            </span>
+                                            <span className="shrink-0 text-text-light font-bold text-sm whitespace-nowrap">{formatCurrency(event.usdValue)}</span>
                                         </div>
                                     </div>
                                 </div>
