@@ -170,17 +170,25 @@ const severityStyles = (severity: ImpactfulActivity['severity']) => {
 };
 
 const mergeActivities = (incoming: ImpactfulActivity[], existing: ImpactfulActivity[] = []) => {
-    const seen = new Set<string>();
+    const activityMap = new Map<string, ImpactfulActivity>();
 
-    return [...incoming, ...existing]
-        .filter((event) => {
-            const key = event.txHash || event.id;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        })
+    [...existing, ...incoming].forEach((event) => {
+        const key = event.txHash || event.id;
+        const previous = activityMap.get(key);
+
+        activityMap.set(key, previous
+            ? { ...previous, ...event, detectedAt: Math.min(previous.detectedAt, event.detectedAt) }
+            : event
+        );
+    });
+
+    return [...activityMap.values()]
         .sort((a, b) => b.detectedAt - a.detectedAt)
         .slice(0, 9);
+};
+
+const getCachedDetectedAt = (activities: ImpactfulActivity[], txHash: string, fallback: number) => {
+    return activities.find((activity) => activity.txHash === txHash || activity.id === txHash)?.detectedAt || fallback;
 };
 
 const buildDetectionContextActivities = (
@@ -190,9 +198,11 @@ const buildDetectionContextActivities = (
         severity?: string | null;
         score?: string | null;
         detectedAt?: string | null;
+        cachedActivity?: ImpactfulActivity[];
     }
 ): ImpactfulActivity[] => {
     const detectedAt = Number(input.detectedAt || 0) || Date.now();
+    const cachedActivity = input.cachedActivity || [];
     const severity = input.severity === 'High' || input.severity === 'Medium' ? input.severity : 'Signal';
     const score = Number(input.score || 0);
     const activities: ImpactfulActivity[] = [];
@@ -213,7 +223,7 @@ const buildDetectionContextActivities = (
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
             txHash: `timeline-pair-created-${resolved.address}`,
-            detectedAt: resolved.pairCreatedAt,
+            detectedAt: getCachedDetectedAt(cachedActivity, `timeline-pair-created-${resolved.address}`, resolved.pairCreatedAt),
             source: 'recent-scan'
         });
     }
@@ -229,12 +239,13 @@ const buildDetectionContextActivities = (
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
             txHash: `timeline-liquidity-established-${resolved.address}`,
-            detectedAt: pairCreatedAt,
+            detectedAt: getCachedDetectedAt(cachedActivity, `timeline-liquidity-established-${resolved.address}`, pairCreatedAt),
             source: 'recent-scan'
         });
     }
 
     if (input.eventType) {
+        const txHash = `detection-${resolved.address}`;
         activities.push({
             id: `detection-${resolved.address}-${input.eventType}-${detectedAt}`,
             type: input.eventType,
@@ -244,15 +255,16 @@ const buildDetectionContextActivities = (
             usdValue: valueBasis,
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
-            txHash: `detection-${resolved.address}`,
-            detectedAt,
+            txHash,
+            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
             source: 'recent-scan'
         });
     }
 
     if (resolved.volume24h >= 5_000 && buyRatio >= 0.62) {
+        const txHash = `derived-buy-pressure-${resolved.address}`;
         activities.push({
-            id: `derived-buy-pressure-${resolved.address}`,
+            id: txHash,
             type: 'Whale Buy',
             severity: buyRatio >= 0.75 ? 'High' : 'Signal',
             title: 'Qualified Buy Pressure',
@@ -260,15 +272,16 @@ const buildDetectionContextActivities = (
             usdValue: resolved.volume24h * buyRatio,
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
-            txHash: `derived-buy-pressure-${resolved.address}`,
-            detectedAt,
+            txHash,
+            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
             source: 'recent-scan'
         });
     }
 
     if (resolved.volume24h >= 5_000 && sellRatio >= 0.62) {
+        const txHash = `derived-sell-pressure-${resolved.address}`;
         activities.push({
-            id: `derived-sell-pressure-${resolved.address}`,
+            id: txHash,
             type: 'Whale Sell',
             severity: sellRatio >= 0.75 ? 'Critical' : 'High',
             title: 'Qualified Sell Pressure',
@@ -276,16 +289,17 @@ const buildDetectionContextActivities = (
             usdValue: resolved.volume24h * sellRatio,
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
-            txHash: `derived-sell-pressure-${resolved.address}`,
-            detectedAt,
+            txHash,
+            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
             source: 'recent-scan'
         });
     }
 
     if (Math.abs(resolved.priceChange24h) >= 10) {
         const positive = resolved.priceChange24h > 0;
+        const txHash = `derived-price-move-${resolved.address}`;
         activities.push({
-            id: `derived-price-move-${resolved.address}`,
+            id: txHash,
             type: positive ? 'Whale Buy' : 'Whale Sell',
             severity: Math.abs(resolved.priceChange24h) >= 25 ? 'High' : 'Signal',
             title: positive ? 'Major Pump Event' : 'Major Dump Event',
@@ -293,15 +307,16 @@ const buildDetectionContextActivities = (
             usdValue: resolved.volume24h,
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
-            txHash: `derived-price-move-${resolved.address}`,
-            detectedAt,
+            txHash,
+            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
             source: 'recent-scan'
         });
     }
 
     if (resolved.volume24h >= 25_000) {
+        const txHash = `derived-volume-spike-${resolved.address}`;
         activities.push({
-            id: `derived-volume-spike-${resolved.address}`,
+            id: txHash,
             type: 'Whale Transfer',
             severity: resolved.volume24h >= 250_000 ? 'High' : 'Signal',
             title: 'Major Volume Event',
@@ -309,15 +324,16 @@ const buildDetectionContextActivities = (
             usdValue: resolved.volume24h,
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
-            txHash: `derived-volume-spike-${resolved.address}`,
-            detectedAt,
+            txHash,
+            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
             source: 'recent-scan'
         });
     }
 
     if (resolved.liquidity > 0 && resolved.volume24h / resolved.liquidity >= 2) {
+        const txHash = `derived-liquidity-turnover-${resolved.address}`;
         activities.push({
-            id: `derived-liquidity-turnover-${resolved.address}`,
+            id: txHash,
             type: 'Liquidity Added',
             severity: resolved.volume24h / resolved.liquidity >= 5 ? 'High' : 'Signal',
             title: 'High Liquidity Turnover',
@@ -325,8 +341,8 @@ const buildDetectionContextActivities = (
             usdValue: resolved.volume24h,
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
-            txHash: `derived-liquidity-turnover-${resolved.address}`,
-            detectedAt,
+            txHash,
+            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
             source: 'recent-scan'
         });
     }
@@ -428,19 +444,18 @@ export const TokenDetection: React.FC = () => {
 
             if (resolved.address) {
                 const priceUsd = parsePrice(resolved.price);
+                const cachedActivity = await ImpactfulActivityService.getWebhookActivities(resolved.chain, resolved.address);
                 const derivedActivity = buildDetectionContextActivities(resolved, {
                     eventType: detectionEventType,
                     severity: detectionSeverity,
                     score: detectionScore,
-                    detectedAt: detectionDetectedAt
+                    detectedAt: detectionDetectedAt,
+                    cachedActivity
                 });
 
-                setActivity((current) => mergeActivities(derivedActivity, current));
+                setActivity((current) => mergeActivities(derivedActivity, mergeActivities(cachedActivity, current)));
 
                 try {
-                    const cachedActivity = await ImpactfulActivityService.getWebhookActivities(resolved.chain, resolved.address);
-                    setActivity((current) => mergeActivities(cachedActivity, current));
-
                     await registerWatch(
                         resolved,
                         initialWatchTtlMs,

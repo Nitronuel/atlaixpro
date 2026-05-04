@@ -369,14 +369,19 @@ const extractCandidates = (payload: any): ActivityCandidate[] => {
 const storeActivities = (chain: string, tokenAddress: string, incoming: ImpactfulTokenActivity[]) => {
     const key = tokenKey(chain, tokenAddress);
     const existing = tokenActivities.get(key) || [];
-    const seen = new Set<string>();
-    const merged = [...incoming, ...existing]
-        .filter((event) => {
-            const eventKey = event.id || event.txHash;
-            if (seen.has(eventKey)) return false;
-            seen.add(eventKey);
-            return true;
-        })
+    const activityMap = new Map<string, ImpactfulTokenActivity>();
+
+    [...existing, ...incoming].forEach((event) => {
+        const eventKey = event.id || event.txHash;
+        const previous = activityMap.get(eventKey);
+
+        activityMap.set(eventKey, previous
+            ? { ...previous, ...event, detectedAt: Math.min(previous.detectedAt, event.detectedAt) }
+            : event
+        );
+    });
+
+    const merged = [...activityMap.values()]
         .sort((a, b) => b.detectedAt - a.detectedAt)
         .slice(0, MAX_EVENTS_PER_TOKEN);
 

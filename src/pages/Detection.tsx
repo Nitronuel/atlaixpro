@@ -1,10 +1,11 @@
 // Route-level product screen for the Atlaix application.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { AlphaGauntletEvent, AlphaGauntletEventType } from '../types';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { DatabaseService } from '../services/DatabaseService';
+import { ImpactfulActivityService } from '../services/ImpactfulActivityService';
 
 type DetectionCategory = Exclude<AlphaGauntletEventType, 'Market Stress'>;
 
@@ -42,6 +43,25 @@ const CATEGORY_CONFIG: Array<{
 
 const CHAIN_OPTIONS = ['All Chains', 'Solana', 'Ethereum', 'BNB Chain'];
 const TABLE_BATCH_SIZE = 5;
+const AUTO_REFRESH_INTERVAL_MS = 60000;
+const AUTO_WATCH_LIMIT = 50;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
+const parseCurrencyValue = (value: string | number | undefined) => {
+    if (typeof value === 'number') return value;
+    if (!value) return 0;
+
+    const raw = value.toString().replace(/[$,\s]/g, '').toUpperCase();
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return 0;
+
+    if (raw.includes('T')) return parsed * 1_000_000_000_000;
+    if (raw.includes('B')) return parsed * 1_000_000_000;
+    if (raw.includes('M')) return parsed * 1_000_000;
+    if (raw.includes('K')) return parsed * 1_000;
+    return parsed;
+};
 
 const getTimeAgo = (timestamp: number) => {
     const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
@@ -128,6 +148,7 @@ const isInfrastructureToken = (event: AlphaGauntletEvent) => {
 
 export const Detection: React.FC = () => {
     const navigate = useNavigate();
+    const watchedTokenKeysRef = useRef<Set<string>>(new Set());
     const [events, setEvents] = useState<AlphaGauntletEvent[]>([]);
     const [loading, setLoading] = useState(true);
     const [tokenQuery, setTokenQuery] = useState('');
@@ -137,6 +158,7 @@ export const Detection: React.FC = () => {
     useEffect(() => {
         let cancelled = false;
         let hasDisplayedEvents = false;
+        let refreshInFlight = false;
 
         const applyEvents = (nextEvents: AlphaGauntletEvent[]) => {
             if (cancelled || nextEvents.length === 0) return false;
@@ -155,6 +177,9 @@ export const Detection: React.FC = () => {
         };
 
         const loadEvents = async (force = false) => {
+            if (refreshInFlight) return;
+            refreshInFlight = true;
+
             try {
                 if (!cancelled && !hasDisplayedEvents) setLoading(true);
                 const response = await DatabaseService.getMarketData(force, false);
@@ -171,12 +196,13 @@ export const Detection: React.FC = () => {
             } catch (error) {
                 console.error('Global detection feed error', error);
             } finally {
+                refreshInFlight = false;
                 if (!cancelled) setLoading(false);
             }
         };
 
-        hydrateStoredEvents().finally(() => loadEvents());
-        const interval = setInterval(() => loadEvents(false), 15000);
+        hydrateStoredEvents().finally(() => loadEvents(true));
+        const interval = setInterval(() => loadEvents(true), AUTO_REFRESH_INTERVAL_MS);
 
         return () => {
             cancelled = true;
@@ -247,6 +273,31 @@ export const Detection: React.FC = () => {
             events: eventsByCategory.get(category.type) || []
         }))
         .filter((category) => category.events.length > 0);
+
+    useEffect(() => {
+        const watchCandidates = qualifiedEvents
+            .filter((event) => event.token.address)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, AUTO_WATCH_LIMIT);
+
+        watchCandidates.forEach((event) => {
+            const tokenAddress = event.token.address;
+            if (!tokenAddress) return;
+
+            const watchKey = `${event.token.chain.toLowerCase()}:${tokenAddress.toLowerCase()}`;
+            if (watchedTokenKeysRef.current.has(watchKey)) return;
+            watchedTokenKeysRef.current.add(watchKey);
+
+            ImpactfulActivityService.watchToken({
+                chain: event.token.chain,
+                tokenAddress,
+                pairAddress: event.token.pairAddress,
+                priceUsd: parseCurrencyValue(event.token.price),
+                liquidityUsd: event.metrics?.liquidity || parseCurrencyValue(event.token.liquidity),
+                ttlMs: event.severity === 'High' ? ONE_DAY_MS : ONE_HOUR_MS
+            });
+        });
+    }, [qualifiedEvents]);
 
     return (
         <div className="flex flex-col gap-6 animate-fade-in pb-8">
