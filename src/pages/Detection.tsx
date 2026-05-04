@@ -6,6 +6,7 @@ import { AlphaGauntletEvent, AlphaGauntletEventType } from '../types';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { DatabaseService } from '../services/DatabaseService';
 import { ImpactfulActivityService } from '../services/ImpactfulActivityService';
+import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
 type DetectionCategory = Exclude<AlphaGauntletEventType, 'Market Stress'>;
 
@@ -261,56 +262,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
     }];
 };
 
-const INFRASTRUCTURE_TOKEN_SYMBOLS = new Set([
-    'WETH',
-    'WBTC',
-    'WBNB',
-    'WSOL',
-    'WAVAX',
-    'WMATIC',
-    'WPOL',
-    'WFTM',
-    'WTRX',
-    'WCORE',
-    'WSEI',
-    'WBERA',
-    'WROSE',
-    'USDT',
-    'USDC',
-    'DAI',
-    'FDUSD',
-    'TUSD',
-    'USDD',
-    'USDE',
-    'USDS',
-    'PYUSD',
-    'FRAX',
-    'LUSD',
-    'GUSD',
-    'BUSD'
-]);
-
-const INFRASTRUCTURE_NAME_PATTERNS = [
-    /\bwrapped\b/i,
-    /\bwormhole\b/i,
-    /\bbridged\b/i,
-    /\bbridge\b/i,
-    /\bbinance-peg\b/i,
-    /\bpegged\b/i,
-    /\bstablecoin\b/i,
-    /\busd coin\b/i,
-    /\btether\b/i,
-    /\bdai stablecoin\b/i,
-    /\bliquidity pool\b/i,
-    /\blp token\b/i
-];
-
 const isInfrastructureToken = (event: AlphaGauntletEvent) => {
-    const symbol = event.token.ticker?.trim().toUpperCase() || '';
-    const name = event.token.name?.trim() || '';
-
-    return INFRASTRUCTURE_TOKEN_SYMBOLS.has(symbol) ||
-        INFRASTRUCTURE_NAME_PATTERNS.some((pattern) => pattern.test(name));
+    return isExcludedAlphaToken(event.token);
 };
 
 const getDetectionEventKey = (event: AlphaGauntletEvent) => {

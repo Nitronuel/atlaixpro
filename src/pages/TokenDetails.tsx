@@ -462,7 +462,6 @@ export const TokenDetails: React.FC = () => {
                         <div className="flex items-center justify-between border-b border-border bg-card px-5 py-4">
                             <div>
                                 <div className="text-sm font-bold text-text-light">{tokenSymbol} Full Chart</div>
-                                <div className="text-xs text-text-medium">Chart-only Dexscreener workspace</div>
                             </div>
                             <button
                                 onClick={() => setChartExpanded(false)}

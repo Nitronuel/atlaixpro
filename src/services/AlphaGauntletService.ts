@@ -1,5 +1,6 @@
 // Intelligence service module for Atlaix data workflows.
 import { AlphaGauntletEvent, AlphaGauntletEventType, AlphaGauntletTrigger, MarketCoin } from '../types';
+import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
 const OVERVIEW_THRESHOLD = 70;
 const DETECTION_THRESHOLD = 65;
@@ -89,6 +90,8 @@ export const AlphaGauntletService = {
     DETECTION_THRESHOLD,
 
     qualifyToken(coin: MarketCoin): AlphaGauntletEvent | null {
+        if (isExcludedAlphaToken(coin)) return null;
+
         const marketCap = parseMetric(coin.cap);
         const liquidity = parseMetric(coin.liquidity);
         const volume24h = parseMetric(coin.volume24h);

@@ -2,6 +2,7 @@
 import { AlphaGauntletEvent, MarketCoin, SavedWallet } from '../types';
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from '../config';
+import { filterAlphaTokens, isExcludedAlphaToken } from '../utils/tokenFilters';
 
 // --- INITIALIZE SUPABASE ---
 const hasSupabaseConfig = Boolean(APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseAnonKey);
@@ -20,6 +21,7 @@ let hasWarnedAboutSupabase = false;
 let hasWarnedAboutSmartMoneyTable = false;
 let hasWarnedAboutDetectionEventsTable = false;
 let lastStalePurgeAt = 0;
+let lastExcludedPurgeAt = 0;
 
 const warnSupabaseOnce = (message: string) => {
     if (hasWarnedAboutSupabase) return;
@@ -56,11 +58,6 @@ const REQUIREMENTS = {
     FEED_MIN_SCORE: 32,
     TARGET_LIST_SIZE: 1000
 };
-
-const EXCLUDED_SYMBOLS = [
-    'USDC', 'USDT', 'DAI', 'BUSD', 'TUSD', 'USDS', 'EURC', 'STETH',
-    'USDE', 'FDUSD', 'WRAPPED', 'MSOL', 'JITOSOL', 'SLERF'
-];
 
 const USD_QUOTE_SYMBOLS = new Set([
     'USD', 'USDC', 'USDT', 'DAI', 'USDS',
@@ -148,6 +145,7 @@ const STALE_TOKEN_RETENTION_DAYS = 7;
 const HYDRATION_LIMIT = 700;
 const ACTIVE_FEED_LIMIT = 1000;
 const STALE_PURGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const EXCLUDED_PURGE_INTERVAL_MS = 10 * 60 * 1000;
 const LOCAL_CACHE_KEY = 'atlaix-live-alpha-cache';
 const LOCAL_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 const DEXSCREENER_SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
@@ -265,6 +263,49 @@ const getTokenAddressKey = (chain: string | undefined, address: string | undefin
 
 const getPairAddressKey = (pair: DexPair) => getTokenAddressKey(getChainId(pair.chainId), pair.baseToken.address);
 
+const isExcludedPair = (pair: DexPair) => isExcludedAlphaToken({
+    symbol: pair.baseToken?.symbol,
+    name: pair.baseToken?.name,
+    chain: getChainId(pair.chainId),
+    chainId: pair.chainId,
+    address: pair.baseToken?.address
+});
+
+const purgeExcludedSupabaseRows = async (rows: any[]) => {
+    if (!rows.length || !supabase || !supabaseAvailable) return;
+    if (Date.now() - lastExcludedPurgeAt < EXCLUDED_PURGE_INTERVAL_MS) return;
+
+    const excludedAddresses = [...new Set(rows
+        .filter((row) => isExcludedAlphaToken(row.raw_data || {
+            ticker: row.ticker,
+            name: row.name,
+            chain: row.chain,
+            address: row.address
+        }))
+        .map((row) => row.address)
+        .filter(Boolean))];
+
+    if (!excludedAddresses.length) return;
+    lastExcludedPurgeAt = Date.now();
+
+    for (let i = 0; i < excludedAddresses.length; i += 50) {
+        const chunk = excludedAddresses.slice(i, i + 50);
+        const { error } = await supabase
+            .from('discovered_tokens')
+            .delete()
+            .in('address', chunk);
+
+        if (error) {
+            if (/row-level security|permission|not allowed|forbidden/i.test(error.message)) return;
+            warnSupabaseOnce(`Supabase Excluded Token Purge Warning: ${error.message}`);
+            if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
+                supabaseAvailable = false;
+            }
+            return;
+        }
+    }
+};
+
 const getPairStats = (pair: DexPair) => {
     const liquidity = pair.liquidity?.usd || 0;
     const volume = pair.volume?.h24 || 0;
@@ -376,7 +417,7 @@ const mergeFetchedPairs = (pairs: DexPair[], existingAddresses: Set<string>) => 
 
     for (const pair of pairs) {
         const symbol = pair.baseToken?.symbol?.toUpperCase();
-        if (!symbol || EXCLUDED_SYMBOLS.includes(symbol)) continue;
+        if (!symbol || isExcludedPair(pair)) continue;
 
         const addressKey = getPairAddressKey(pair);
         const previous = bestByAddress.get(addressKey);
@@ -498,7 +539,7 @@ export const DatabaseService = {
 
         if (cache.marketData) {
             return {
-                data: cache.marketData.data,
+                data: filterAlphaTokens(cache.marketData.data),
                 source: 'MEMORY_CACHE',
                 latency: Math.round(performance.now() - start)
             };
@@ -507,9 +548,12 @@ export const DatabaseService = {
         const localCache = getLocalCachedMarketData();
         if (!localCache) return null;
 
-        cache.marketData = localCache;
+        cache.marketData = {
+            ...localCache,
+            data: filterAlphaTokens(localCache.data)
+        };
         return {
-            data: localCache.data,
+            data: cache.marketData.data,
             source: 'LOCAL_CACHE',
             latency: Math.round(performance.now() - start)
         };
@@ -548,7 +592,7 @@ export const DatabaseService = {
             const age = Date.now() - cache.marketData.timestamp;
             if (age < CACHE_FRESH_DURATION) {
                 return {
-                    data: cache.marketData.data,
+                    data: filterAlphaTokens(cache.marketData.data),
                     source: 'CACHE',
                     latency: Math.round(performance.now() - start)
                 };
@@ -679,7 +723,7 @@ export const DatabaseService = {
 
             // 5. Limit size & Sync
             // Return the top 1000 assets to maintain a broader market view.
-            const finalData = mergedList.slice(0, ACTIVE_FEED_LIMIT).map((entry) => entry.coin);
+            const finalData = filterAlphaTokens(mergedList.slice(0, ACTIVE_FEED_LIMIT).map((entry) => entry.coin));
 
             // Sync new discoveries to DB (Background)
             if (newPairs.length > 0 || updatedPairs.length > 0) {
@@ -698,7 +742,7 @@ export const DatabaseService = {
             console.error("Critical Fetch Error:", error);
             const stored = await DatabaseService.fetchFromSupabase();
             // Fallback to seed if DB is also dead
-            return { data: stored.length ? stored : SEED_DATA, source: 'FALLBACK', latency: 0 };
+            return { data: filterAlphaTokens(stored.length ? stored : SEED_DATA), source: 'FALLBACK', latency: 0 };
         }
     },
 
@@ -850,6 +894,7 @@ export const DatabaseService = {
 
     syncToSupabase: async (tokens: MarketCoin[]) => {
         try {
+            tokens = filterAlphaTokens(tokens);
             if (!tokens.length || !supabase || !supabaseAvailable) return;
             const dedupedPayload = new Map<string, {
                 address: string;
@@ -951,7 +996,13 @@ export const DatabaseService = {
                 }
                 return [];
             }
-            const tokens = data.map((row: any) => row.raw_data as MarketCoin);
+            purgeExcludedSupabaseRows(data).catch((error) => {
+                if (error instanceof Error) {
+                    warnSupabaseOnce(`Supabase Excluded Token Purge Warning: ${error.message}`);
+                }
+            });
+
+            const tokens = filterAlphaTokens(data.map((row: any) => row.raw_data as MarketCoin));
             if (tokens.length) {
                 setCachedMarketData(tokens);
             }
@@ -1193,6 +1244,9 @@ export const DatabaseService = {
     searchGlobalPairs: async (query: string): Promise<MarketCoin[]> => {
         const pairs = await searchDexScreener(query);
         // Transform and return top results
-        return pairs.slice(0, 10).map((p, i) => DatabaseService.transformPair(p, i));
+        return pairs
+            .filter((pair) => !isExcludedPair(pair))
+            .slice(0, 10)
+            .map((p, i) => DatabaseService.transformPair(p, i));
     }
 };
