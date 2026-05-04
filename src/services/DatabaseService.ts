@@ -133,7 +133,7 @@ interface DexPair {
     priceChange: { h1: number; h24: number; h6: number; };
     liquidity?: { usd: number; };
     fdv?: number;
-    volume: { h24: number; };
+    volume: { h24: number; h24Buy?: number; h24Sell?: number; buy?: number; sell?: number; buys?: number; sells?: number; };
     txns: { h24: { buys: number; sells: number; } };
     pairCreatedAt?: number;
     info?: { imageUrl?: string; };
@@ -795,7 +795,10 @@ export const DatabaseService = {
         const totalTxns = buys + sells;
         const flowRatio = totalTxns > 0 ? (buys / totalTxns) : 0.5;
         const dexFlowScore = Math.round(flowRatio * 100);
-        const estimatedNetFlow = (pair.volume.h24 * (flowRatio - 0.5));
+        const volume24h = pair.volume?.h24 || 0;
+        const buyVolume24h = Number(pair.volume?.h24Buy ?? pair.volume?.buy ?? pair.volume?.buys ?? 0) || (volume24h * flowRatio);
+        const sellVolume24h = Number(pair.volume?.h24Sell ?? pair.volume?.sell ?? pair.volume?.sells ?? 0) || Math.max(0, volume24h - buyVolume24h);
+        const estimatedNetFlow = buyVolume24h - sellVolume24h;
         const netFlowStr = (estimatedNetFlow >= 0 ? '+' : '-') + formatCurrency(Math.abs(estimatedNetFlow));
 
         let signal: MarketCoin['signal'] = 'None';
@@ -822,9 +825,11 @@ export const DatabaseService = {
             d7: `${(pair.priceChange?.h6 || 0).toFixed(2)}%`,
             cap: formatCurrency(pair.fdv || pair.liquidity?.usd || 0),
             liquidity: formatCurrency(pair.liquidity?.usd || 0),
-            volume24h: formatCurrency(pair.volume.h24),
+            volume24h: formatCurrency(volume24h),
             dexBuys: buys.toString(),
             dexSells: sells.toString(),
+            buyVolume24h: formatCurrency(buyVolume24h),
+            sellVolume24h: formatCurrency(sellVolume24h),
             dexFlow: dexFlowScore,
             netFlow: netFlowStr,
             smartMoney: smartMoneySignal === 'Inflow' ? 'Inflow' : 'Neutral',

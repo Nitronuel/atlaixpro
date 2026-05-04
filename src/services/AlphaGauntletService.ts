@@ -55,12 +55,25 @@ const classifyEvent = (
     triggers: AlphaGauntletTrigger[],
     priceChange24h: number,
     buySellRatio: number,
-    lpToMarketCapRatio: number
+    lpToMarketCapRatio: number,
+    volumeFlowRatio: number,
+    netFlow: number
 ): AlphaGauntletEventType => {
+    const strongPositiveMomentum = priceChange24h >= 12;
+    const strongNegativeMomentum = priceChange24h <= -12;
+    const buyVolumeLeads = volumeFlowRatio >= 1.02 || netFlow > 0;
+    const sellVolumeLeads = volumeFlowRatio <= 0.98 || netFlow < 0;
+    const countSellPressure = buySellRatio <= 0.8;
+
     if (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed')) return 'Liquidity Event';
     if (triggers.includes('Price Dump') && (triggers.includes('Strong Sell Pressure') || lpToMarketCapRatio < 0.15)) return 'Market Stress';
     if (triggers.includes('Price Recovery') && triggers.includes('Volume Spike')) return 'Recovery';
-    if (triggers.includes('Strong Sell Pressure')) return 'Distribution';
+    if (triggers.includes('Strong Sell Pressure')) {
+        if (strongPositiveMomentum && buyVolumeLeads) return 'Recovery';
+        if (strongPositiveMomentum) return triggers.includes('Price Recovery') ? 'Recovery' : 'Unusual Activity';
+        if (strongNegativeMomentum || (countSellPressure && sellVolumeLeads)) return 'Distribution';
+        return 'Unusual Activity';
+    }
     if (triggers.includes('Strong Buy Pressure') && (triggers.includes('Volume Spike') || buySellRatio >= 1.4)) return 'Accumulation';
     if (priceChange24h < -15) return 'Market Stress';
     return 'Unusual Activity';
@@ -86,6 +99,9 @@ export const AlphaGauntletService = {
         const ageHours = getAgeHours(coin);
         const lpToMarketCapRatio = marketCap > 0 ? liquidity / marketCap : 0;
         const buySellRatio = sells > 0 ? buys / sells : buys > 0 ? buys : 0;
+        const buyVolume24h = parseMetric(coin.buyVolume24h);
+        const sellVolume24h = parseMetric(coin.sellVolume24h);
+        const volumeFlowRatio = sellVolume24h > 0 ? buyVolume24h / sellVolume24h : buyVolume24h > 0 ? buyVolume24h : buySellRatio;
         const priceChange24h = parseMetric(coin.h24);
         const priceChange1h = parseMetric(coin.h1);
         const netFlow = parseMetric(coin.netFlow);
@@ -109,8 +125,8 @@ export const AlphaGauntletService = {
 
         if (volumeToLiquidity >= 1.2 || volumeToMarketCap >= 0.2 || volume24h >= 1000000) triggers.push('Volume Spike');
         if (transactions24h >= 2000 || transactions24h / Math.max(holderProxy, 1) >= 2) triggers.push('Transaction Spike');
-        if ((buySellRatio >= 1.25 && netFlow > 0) || (buySellRatio >= 1.5 && volume24h >= 500000)) triggers.push('Strong Buy Pressure');
-        if ((buySellRatio <= 0.8 && netFlow < 0) || (buySellRatio <= 0.67 && volume24h >= 500000)) triggers.push('Strong Sell Pressure');
+        if ((buySellRatio >= 1.25 && netFlow > 0) || (volumeFlowRatio >= 1.08 && priceChange24h >= 5) || (buySellRatio >= 1.5 && volume24h >= 500000)) triggers.push('Strong Buy Pressure');
+        if ((buySellRatio <= 0.8 && netFlow < 0) || (volumeFlowRatio <= 0.92 && priceChange24h <= 5) || (buySellRatio <= 0.67 && volume24h >= 500000 && netFlow <= 0)) triggers.push('Strong Sell Pressure');
         if (lpToMarketCapRatio >= 0.25 && volumeToLiquidity >= 0.6) triggers.push('Liquidity Added');
         if (lpToMarketCapRatio <= 0.08 && volume24h >= 500000) triggers.push('Liquidity Removed');
         if (holderProxy >= 2500 && transactions24h >= 2500) triggers.push('Holder Growth Spike');
@@ -120,7 +136,7 @@ export const AlphaGauntletService = {
 
         if (triggers.length === 0) return null;
 
-        const eventType = classifyEvent(triggers, priceChange24h, buySellRatio, lpToMarketCapRatio);
+        const eventType = classifyEvent(triggers, priceChange24h, buySellRatio, lpToMarketCapRatio, volumeFlowRatio, netFlow);
 
         const marketStructure = Math.round((
             scoreRatio(marketCap, 5000000) * 0.35 +
@@ -174,6 +190,9 @@ export const AlphaGauntletService = {
                 ageHours,
                 lpToMarketCapRatio,
                 buySellRatio,
+                buyVolume24h,
+                sellVolume24h,
+                volumeFlowRatio,
                 priceChange24h,
                 netFlow
             }

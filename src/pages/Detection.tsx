@@ -9,6 +9,15 @@ import { ImpactfulActivityService } from '../services/ImpactfulActivityService';
 
 type DetectionCategory = Exclude<AlphaGauntletEventType, 'Market Stress'>;
 
+type GlobalTokenEvent = {
+    id: string;
+    source: AlphaGauntletEvent;
+    title: string;
+    description: string;
+    usdValue: number;
+    detectedAt: number;
+};
+
 const CATEGORY_CONFIG: Array<{
     type: DetectionCategory;
     title: string;
@@ -94,6 +103,127 @@ const severityClass = (severity: AlphaGauntletEvent['severity']) => {
     return 'text-primary-green border-primary-green/30 bg-primary-green/10';
 };
 
+const severityAccentClass = (severity: AlphaGauntletEvent['severity']) => {
+    if (severity === 'High') return 'bg-primary-red';
+    if (severity === 'Medium') return 'bg-primary-yellow';
+    return 'bg-primary-green';
+};
+
+const formatCompactUsd = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) return '$0';
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        notation: 'compact',
+        maximumFractionDigits: 2
+    }).format(value);
+};
+
+const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] => {
+    const tokenLabel = event.token.ticker;
+    const valueBasis = Math.max(
+        event.metrics.volume24h || 0,
+        event.metrics.liquidity || 0,
+        (event.metrics.marketCap || 0) * 0.01
+    );
+    const events: GlobalTokenEvent[] = [];
+
+    if (event.triggers.includes('Strong Buy Pressure')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:buy-pressure`,
+            source: event,
+            title: 'Qualified Buy Pressure',
+            description: `${tokenLabel} is showing stronger buy-side pressure across the latest 24h market flow.`,
+            usdValue: Math.max(event.metrics.buyVolume24h || 0, valueBasis),
+            detectedAt: event.detectedAt
+        });
+    }
+
+    if (event.triggers.includes('Strong Sell Pressure')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:sell-pressure`,
+            source: event,
+            title: 'Qualified Sell Pressure',
+            description: `${tokenLabel} has elevated sell-side pressure relative to current market activity.`,
+            usdValue: Math.max(event.metrics.sellVolume24h || 0, valueBasis),
+            detectedAt: event.detectedAt
+        });
+    }
+
+    if (event.triggers.includes('Price Recovery')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:recovery`,
+            source: event,
+            title: 'Recovery Momentum',
+            description: `${tokenLabel} is rebounding with ${event.metrics.priceChange24h >= 0 ? '+' : ''}${event.metrics.priceChange24h.toFixed(2)}% 24h price momentum.`,
+            usdValue: event.metrics.volume24h,
+            detectedAt: event.detectedAt
+        });
+    }
+
+    if (event.triggers.includes('Price Dump')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:price-dump`,
+            source: event,
+            title: 'Major Dump Event',
+            description: `${tokenLabel} moved ${event.metrics.priceChange24h.toFixed(2)}% over 24h with elevated activity.`,
+            usdValue: event.metrics.volume24h,
+            detectedAt: event.detectedAt
+        });
+    } else if (event.metrics.priceChange24h >= 12) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:price-pump`,
+            source: event,
+            title: 'Major Pump Event',
+            description: `${tokenLabel} moved +${event.metrics.priceChange24h.toFixed(2)}% over 24h with meaningful volume.`,
+            usdValue: event.metrics.volume24h,
+            detectedAt: event.detectedAt
+        });
+    }
+
+    if (event.triggers.includes('Volume Spike')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:volume`,
+            source: event,
+            title: 'Major Volume Event',
+            description: `${tokenLabel} produced ${formatCompactUsd(event.metrics.volume24h)} in 24h market volume.`,
+            usdValue: event.metrics.volume24h,
+            detectedAt: event.detectedAt
+        });
+    }
+
+    if (event.triggers.includes('Liquidity Added') || event.triggers.includes('Liquidity Removed')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:liquidity`,
+            source: event,
+            title: event.triggers.includes('Liquidity Removed') ? 'Liquidity Risk Event' : 'Liquidity Event',
+            description: `${tokenLabel} has a notable liquidity structure change with ${formatCompactUsd(event.metrics.liquidity)} active liquidity.`,
+            usdValue: event.metrics.liquidity,
+            detectedAt: event.detectedAt
+        });
+    }
+
+    if (event.triggers.includes('Abnormal Large Trades')) {
+        events.push({
+            id: `${getDetectionEventKey(event)}:large-trades`,
+            source: event,
+            title: 'Abnormal Large Trades',
+            description: `${tokenLabel} has abnormal net flow of ${formatCompactUsd(Math.abs(event.metrics.netFlow))}.`,
+            usdValue: Math.abs(event.metrics.netFlow),
+            detectedAt: event.detectedAt
+        });
+    }
+
+    return events.length ? events : [{
+        id: `${getDetectionEventKey(event)}:activity`,
+        source: event,
+        title: `${event.eventType} Signal`,
+        description: `${tokenLabel} remains active in global detection with a ${event.score} Alpha score.`,
+        usdValue: valueBasis,
+        detectedAt: event.detectedAt
+    }];
+};
+
 const INFRASTRUCTURE_TOKEN_SYMBOLS = new Set([
     'WETH',
     'WBTC',
@@ -146,31 +276,69 @@ const isInfrastructureToken = (event: AlphaGauntletEvent) => {
         INFRASTRUCTURE_NAME_PATTERNS.some((pattern) => pattern.test(name));
 };
 
+const getDetectionEventKey = (event: AlphaGauntletEvent) => {
+    const tokenKey = event.token.address || event.token.ticker;
+    return [
+        event.token.chain.toLowerCase(),
+        tokenKey.toLowerCase(),
+        event.eventType.toLowerCase()
+    ].join(':');
+};
+
 export const Detection: React.FC = () => {
     const navigate = useNavigate();
     const watchedTokenKeysRef = useRef<Set<string>>(new Set());
+    const activeDetectedAtRef = useRef<Map<string, number>>(new Map());
     const [events, setEvents] = useState<AlphaGauntletEvent[]>([]);
     const [loading, setLoading] = useState(true);
     const [tokenQuery, setTokenQuery] = useState('');
     const [chain, setChain] = useState('All Chains');
     const [visibleRows, setVisibleRows] = useState<Record<string, number>>({});
 
+    const stabilizeEvents = (nextEvents: AlphaGauntletEvent[], replaceActiveSet = true) => {
+        const activeKeys = new Set<string>();
+
+        const stableEvents = nextEvents.map((event) => {
+            const key = getDetectionEventKey(event);
+            activeKeys.add(key);
+
+            const detectedAt = activeDetectedAtRef.current.get(key) || event.detectedAt;
+            activeDetectedAtRef.current.set(key, detectedAt);
+
+            return {
+                ...event,
+                detectedAt
+            };
+        });
+
+        if (replaceActiveSet) {
+            activeDetectedAtRef.current.forEach((_, key) => {
+                if (!activeKeys.has(key)) {
+                    activeDetectedAtRef.current.delete(key);
+                }
+            });
+        }
+
+        return stableEvents;
+    };
+
     useEffect(() => {
         let cancelled = false;
         let hasDisplayedEvents = false;
         let refreshInFlight = false;
 
-        const applyEvents = (nextEvents: AlphaGauntletEvent[]) => {
-            if (cancelled || nextEvents.length === 0) return false;
+        const applyEvents = (nextEvents: AlphaGauntletEvent[], replaceActiveSet = true) => {
+            if (cancelled || nextEvents.length === 0) return null;
             hasDisplayedEvents = true;
-            setEvents(nextEvents);
-            return true;
+            const stableEvents = stabilizeEvents(nextEvents, replaceActiveSet);
+            setEvents(stableEvents);
+            return stableEvents;
         };
 
         const hydrateStoredEvents = async () => {
             try {
                 const storedEvents = await DatabaseService.fetchDetectionEvents();
-                applyEvents(storedEvents);
+                applyEvents(storedEvents, false);
             } catch (error) {
                 console.error('Global detection cache hydration error', error);
             }
@@ -187,8 +355,10 @@ export const Detection: React.FC = () => {
 
                 if (!cancelled) {
                     if (qualifiedEvents.length > 0) {
-                        applyEvents(qualifiedEvents);
-                        DatabaseService.syncDetectionEvents(qualifiedEvents);
+                        const stableEvents = applyEvents(qualifiedEvents);
+                        if (stableEvents) {
+                            DatabaseService.syncDetectionEvents(stableEvents);
+                        }
                     } else if (!hasDisplayedEvents) {
                         await hydrateStoredEvents();
                     }
@@ -217,8 +387,9 @@ export const Detection: React.FC = () => {
             const qualifiedEvents = AlphaGauntletService.getDetectionEvents(response.data);
 
             if (qualifiedEvents.length > 0) {
-                setEvents(qualifiedEvents);
-                DatabaseService.syncDetectionEvents(qualifiedEvents);
+                const stableEvents = stabilizeEvents(qualifiedEvents);
+                setEvents(stableEvents);
+                DatabaseService.syncDetectionEvents(stableEvents);
                 return;
             }
 
@@ -273,6 +444,16 @@ export const Detection: React.FC = () => {
             events: eventsByCategory.get(category.type) || []
         }))
         .filter((category) => category.events.length > 0);
+
+    const recentGlobalEvents = useMemo(() => {
+        return [...qualifiedEvents]
+            .flatMap(buildGlobalTokenEvents)
+            .sort((a, b) => {
+                if (b.detectedAt !== a.detectedAt) return b.detectedAt - a.detectedAt;
+                return b.source.score - a.source.score;
+            })
+            .slice(0, 12);
+    }, [qualifiedEvents]);
 
     useEffect(() => {
         const watchCandidates = qualifiedEvents
@@ -347,116 +528,174 @@ export const Detection: React.FC = () => {
                 </div>
             </section>
 
-            <section className="grid grid-cols-1 2xl:grid-cols-2 gap-5">
-                {loading && events.length === 0 ? (
-                    <div className="rounded-xl border border-border bg-card p-8 text-center 2xl:col-span-2">
-                        <RefreshCw className="mx-auto mb-3 animate-spin text-primary-green" size={28} />
-                        <div className="text-sm font-bold text-text-light">Running detection engine qualification...</div>
-                    </div>
-                ) : populatedCategories.length === 0 ? (
-                    <div className="rounded-xl border border-border bg-card p-8 text-center 2xl:col-span-2">
-                        <div className="text-sm font-bold text-text-light">No admitted tokens match the active filters</div>
-                        <div className="mt-1 text-xs text-text-medium">Tables will appear when a token qualifies for a detection category.</div>
-                    </div>
-                ) : populatedCategories.map((category) => {
-                    return (
-                        <div key={category.type} className="rounded-xl border border-border bg-card overflow-hidden">
-                            <div className="border-b border-border px-5 py-4">
-                                <div>
-                                    <h3 className="text-lg font-bold text-text-light">{category.title}</h3>
-                                    <p className="mt-1 text-sm text-text-medium">{category.description}</p>
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
+                <section className="grid grid-cols-1 2xl:grid-cols-2 gap-5 min-w-0">
+                    {loading && events.length === 0 ? (
+                        <div className="rounded-xl border border-border bg-card p-8 text-center 2xl:col-span-2">
+                            <RefreshCw className="mx-auto mb-3 animate-spin text-primary-green" size={28} />
+                            <div className="text-sm font-bold text-text-light">Running detection engine qualification...</div>
+                        </div>
+                    ) : populatedCategories.length === 0 ? (
+                        <div className="rounded-xl border border-border bg-card p-8 text-center 2xl:col-span-2">
+                            <div className="text-sm font-bold text-text-light">No admitted tokens match the active filters</div>
+                            <div className="mt-1 text-xs text-text-medium">Tables will appear when a token qualifies for a detection category.</div>
+                        </div>
+                    ) : populatedCategories.map((category) => {
+                        return (
+                            <div key={category.type} className="rounded-xl border border-border bg-card overflow-hidden">
+                                <div className="border-b border-border px-5 py-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-text-light">{category.title}</h3>
+                                        <p className="mt-1 text-sm text-text-medium">{category.description}</p>
+                                    </div>
                                 </div>
-                            </div>
 
-                            <div className="overflow-hidden">
-                                <table className="w-full table-fixed text-left">
-                                    <colgroup>
-                                        <col className="w-[64px]" />
-                                        <col />
-                                        <col className="w-[76px]" />
-                                        <col className="w-[112px]" />
-                                        <col className="w-[92px]" />
-                                    </colgroup>
-                                    <thead className="bg-[#111315] text-[11px] uppercase tracking-wide text-text-medium">
-                                        <tr>
-                                            <th className="px-4 py-3 font-bold">Chain</th>
-                                            <th className="px-4 py-3 font-bold">Token</th>
-                                            <th className="px-4 py-3 font-bold">Score</th>
-                                            <th className="px-4 py-3 font-bold">Severity</th>
-                                            <th className="px-4 py-3 font-bold text-right">Detected</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-border/70">
-                                        {category.events.slice(0, visibleRows[category.type] || TABLE_BATCH_SIZE).map((event) => (
-                                            <tr
-                                                key={`${event.token.address || event.token.ticker}-${event.eventType}`}
-                                                onClick={() => navigate(`/detection/token/${encodeURIComponent(event.token.address || event.token.ticker)}?source=detection&severity=${encodeURIComponent(event.severity)}&eventType=${encodeURIComponent(event.eventType)}&score=${encodeURIComponent(String(event.score))}&detectedAt=${encodeURIComponent(String(event.detectedAt))}`)}
-                                                className="cursor-pointer hover:bg-[#1C1F22] transition-colors"
-                                            >
-                                                <td className="px-4 py-4">
-                                                    {getChainLogo(event.token.chain) ? (
-                                                        <img
-                                                            src={getChainLogo(event.token.chain)}
-                                                            alt={normalizeChain(event.token.chain)}
-                                                            title={normalizeChain(event.token.chain)}
-                                                            className="h-7 w-7 rounded-full border border-border bg-[#111315] object-cover p-0.5"
-                                                        />
-                                                    ) : (
-                                                        <span
-                                                            title={normalizeChain(event.token.chain)}
-                                                            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-[#111315] text-[10px] font-bold text-text-medium"
-                                                        >
-                                                            ?
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-4 min-w-0">
-                                                    <div className="flex items-center gap-3 min-w-0">
-                                                        <img
-                                                            src={event.token.img}
-                                                            alt={event.token.ticker}
-                                                            className="h-8 w-8 shrink-0 rounded-full border border-border bg-[#111315] object-cover"
-                                                            onError={(imageEvent) => { imageEvent.currentTarget.style.display = 'none'; }}
-                                                        />
-                                                        <div className="min-w-0 max-w-[150px]">
-                                                            <div className="truncate font-bold text-text-light" title={event.token.ticker}>{event.token.ticker}</div>
-                                                            <div className="truncate text-xs text-text-medium" title={event.token.name}>{event.token.name}</div>
+                                <div className="overflow-hidden">
+                                    <table className="w-full table-fixed text-left">
+                                        <colgroup>
+                                            <col />
+                                            <col className="w-[76px]" />
+                                            <col className="w-[112px]" />
+                                            <col className="w-[92px]" />
+                                        </colgroup>
+                                        <thead className="bg-[#111315] text-[11px] uppercase tracking-wide text-text-medium">
+                                            <tr>
+                                                <th className="px-4 py-3 font-bold">Token</th>
+                                                <th className="px-4 py-3 font-bold">Score</th>
+                                                <th className="px-4 py-3 font-bold">Severity</th>
+                                                <th className="px-4 py-3 font-bold text-right">Detected</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border/70">
+                                            {category.events.slice(0, visibleRows[category.type] || TABLE_BATCH_SIZE).map((event) => (
+                                                <tr
+                                                    key={`${event.token.address || event.token.ticker}-${event.eventType}`}
+                                                    onClick={() => navigate(`/detection/token/${encodeURIComponent(event.token.address || event.token.ticker)}?source=detection&severity=${encodeURIComponent(event.severity)}&eventType=${encodeURIComponent(event.eventType)}&score=${encodeURIComponent(String(event.score))}&detectedAt=${encodeURIComponent(String(event.detectedAt))}`)}
+                                                    className="cursor-pointer hover:bg-[#1C1F22] transition-colors"
+                                                >
+                                                    <td className="px-4 py-4 min-w-0">
+                                                        <div className="flex items-center gap-3 min-w-0">
+                                                            <img
+                                                                src={event.token.img}
+                                                                alt={event.token.ticker}
+                                                                className="h-8 w-8 shrink-0 rounded-full border border-border bg-[#111315] object-cover"
+                                                                onError={(imageEvent) => { imageEvent.currentTarget.style.display = 'none'; }}
+                                                            />
+                                                            <div className="min-w-0 max-w-[150px]">
+                                                                <div className="truncate font-bold text-text-light" title={event.token.ticker}>{event.token.ticker}</div>
+                                                                <div className="truncate text-xs text-text-medium" title={event.token.name}>{event.token.name}</div>
+                                                            </div>
                                                         </div>
+                                                    </td>
+                                                    <td className="px-4 py-4">
+                                                        <span className="font-mono text-sm font-bold text-primary-green">{event.score}</span>
+                                                    </td>
+                                                    <td className="px-4 py-4">
+                                                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${severityClass(event.severity)}`}>
+                                                            {event.severity}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-4 text-right text-xs font-mono text-text-medium">{getTimeAgo(event.detectedAt)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {category.events.length > (visibleRows[category.type] || TABLE_BATCH_SIZE) && (
+                                    <div className="border-t border-border bg-[#111315]/60 px-5 py-3">
+                                        <button
+                                            onClick={() => {
+                                                setVisibleRows((current) => ({
+                                                    ...current,
+                                                    [category.type]: (current[category.type] || TABLE_BATCH_SIZE) + TABLE_BATCH_SIZE
+                                                }));
+                                            }}
+                                            className="w-full rounded-lg border border-dashed border-border py-2 text-xs font-bold text-text-medium hover:border-primary-green/50 hover:text-primary-green transition-colors"
+                                        >
+                                            See More
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </section>
+
+                <aside className="rounded-xl border border-border bg-card overflow-hidden xl:sticky xl:top-6">
+                    <div className="border-b border-border px-5 py-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <h3 className="text-lg font-bold text-text-light">Global Events</h3>
+                                <p className="mt-1 text-sm text-text-medium">Latest activity across detected tokens.</p>
+                            </div>
+                            <span className="rounded-full border border-primary-green/30 bg-primary-green/10 px-2.5 py-1 text-xs font-bold text-primary-green">
+                                {recentGlobalEvents.length}
+                            </span>
+                        </div>
+                    </div>
+                    <div className="max-h-[720px] overflow-y-auto p-2.5">
+                        {loading && recentGlobalEvents.length === 0 ? (
+                            <div className="p-5 text-sm font-bold text-text-medium">Waiting for token events...</div>
+                        ) : recentGlobalEvents.length === 0 ? (
+                            <div className="p-5">
+                                <div className="text-sm font-bold text-text-light">No global events yet</div>
+                                <div className="mt-1 text-xs text-text-medium">Events will appear as detected tokens show activity.</div>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col gap-2.5">
+                                {recentGlobalEvents.map((globalEvent) => {
+                                    const event = globalEvent.source;
+                                    return (
+                                    <button
+                                        key={globalEvent.id}
+                                        onClick={() => navigate(`/detection/token/${encodeURIComponent(event.token.address || event.token.ticker)}?source=detection&severity=${encodeURIComponent(event.severity)}&eventType=${encodeURIComponent(event.eventType)}&score=${encodeURIComponent(String(event.score))}&detectedAt=${encodeURIComponent(String(event.detectedAt))}`)}
+                                        className="group flex w-full overflow-hidden rounded-xl border border-border bg-[#1C1F22] text-left shadow-sm transition-colors hover:border-text-medium"
+                                    >
+                                        <div className={`w-1.5 shrink-0 ${severityAccentClass(event.severity)}`}></div>
+                                        <div className="flex min-h-[128px] flex-1 flex-col justify-between p-3.5">
+                                            <div>
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase text-text-light">
+                                                        <ShieldAlert size={13} className="shrink-0 text-text-light" />
+                                                        <span className="truncate">{globalEvent.title}</span>
                                                     </div>
-                                                </td>
-                                                <td className="px-4 py-4">
-                                                    <span className="font-mono text-sm font-bold text-primary-green">{event.score}</span>
-                                                </td>
-                                                <td className="px-4 py-4">
-                                                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${severityClass(event.severity)}`}>
+                                                    <span className="shrink-0 text-[10px] font-mono text-text-medium">{getTimeAgo(globalEvent.detectedAt)}</span>
+                                                </div>
+                                                <p className="mt-3 line-clamp-2 text-xs font-bold leading-snug text-text-light">
+                                                    {globalEvent.description}
+                                                </p>
+                                            </div>
+                                            <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-2.5">
+                                                <div className="flex min-w-0 items-center gap-2">
+                                                    <img
+                                                        src={event.token.img}
+                                                        alt={event.token.ticker}
+                                                        title={event.token.name}
+                                                        className="h-5 w-5 shrink-0 rounded-full border border-border bg-[#111315] object-cover"
+                                                        onError={(imageEvent) => { imageEvent.currentTarget.style.display = 'none'; }}
+                                                    />
+                                                    <span className="truncate text-[11px] font-black text-text-medium" title={event.token.name}>
+                                                        {event.token.ticker}
+                                                    </span>
+                                                </div>
+                                                <div className="flex shrink-0 items-center gap-2">
+                                                    <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${severityClass(event.severity)}`}>
                                                         {event.severity}
                                                     </span>
-                                                </td>
-                                                <td className="px-4 py-4 text-right text-xs font-mono text-text-medium">{getTimeAgo(event.detectedAt)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {category.events.length > (visibleRows[category.type] || TABLE_BATCH_SIZE) && (
-                                <div className="border-t border-border bg-[#111315]/60 px-5 py-3">
-                                    <button
-                                        onClick={() => {
-                                            setVisibleRows((current) => ({
-                                                ...current,
-                                                [category.type]: (current[category.type] || TABLE_BATCH_SIZE) + TABLE_BATCH_SIZE
-                                            }));
-                                        }}
-                                        className="w-full rounded-lg border border-dashed border-border py-2 text-xs font-bold text-text-medium hover:border-primary-green/50 hover:text-primary-green transition-colors"
-                                    >
-                                        See More
+                                                    <span className="font-mono text-[11px] font-black text-text-light">
+                                                        {formatCompactUsd(globalEvent.usdValue)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </button>
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-            </section>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </aside>
+            </div>
         </div>
     );
 };

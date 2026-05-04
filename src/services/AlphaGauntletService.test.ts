@@ -51,4 +51,60 @@ describe('AlphaGauntletService', () => {
 
         expect(event).toBeNull();
     });
+
+    it('does not classify sell-count pressure as distribution when price and USD flow are positive', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            ticker: 'AI',
+            h1: '8.96%',
+            h24: '46.91%',
+            cap: '$58.61M',
+            liquidity: '$1.78M',
+            volume24h: '$975.28K',
+            dexBuys: '2845',
+            dexSells: '4127',
+            buyVolume24h: '$495.00K',
+            sellVolume24h: '$484.00K',
+            netFlow: '+$11.00K'
+        }));
+
+        expect(event).not.toBeNull();
+        expect(event?.eventType).not.toBe('Distribution');
+        expect(['Recovery', 'Unusual Activity', 'Accumulation', 'Liquidity Event']).toContain(event?.eventType);
+    });
+
+    it('does not keep plain distribution when sell counts conflict with strong recovery momentum', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            ticker: 'AI',
+            h1: '8.96%',
+            h24: '46.91%',
+            cap: '$16.60M',
+            liquidity: '$1.78M',
+            volume24h: '$975.28K',
+            dexBuys: '2845',
+            dexSells: '4127',
+            buyVolume24h: '$398.00K',
+            sellVolume24h: '$577.00K',
+            netFlow: '-$179.00K'
+        }));
+
+        expect(event).not.toBeNull();
+        expect(event?.eventType).toBe('Recovery');
+    });
+
+    it('keeps true distribution when sell pressure has negative price and negative USD flow', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            h1: '-4.50%',
+            h24: '-8.00%',
+            cap: '$8.00M',
+            liquidity: '$900.00K',
+            dexBuys: '1600',
+            dexSells: '3600',
+            buyVolume24h: '$320.00K',
+            sellVolume24h: '$820.00K',
+            netFlow: '-$500.00K'
+        }));
+
+        expect(event).not.toBeNull();
+        expect(event?.eventType).toBe('Distribution');
+    });
 });

@@ -69,6 +69,8 @@ export interface MarketCoin {
     volume24h: string;
     dexBuys: string;
     dexSells: string;
+    buyVolume24h?: string;
+    sellVolume24h?: string;
     dexFlow: number;
     netFlow: string;
     smartMoney: string;
@@ -131,6 +133,9 @@ export interface AlphaGauntletEvent {
         ageHours: number;
         lpToMarketCapRatio: number;
         buySellRatio: number;
+        buyVolume24h: number;
+        sellVolume24h: number;
+        volumeFlowRatio: number;
         priceChange24h: number;
         netFlow: number;
     };

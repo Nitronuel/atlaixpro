@@ -5,6 +5,7 @@ import { Activity, AlertTriangle, ArrowLeft, Bell, Check, Copy, RefreshCw, Searc
 import { ChainActivityService } from '../services/ChainActivityService';
 import { DatabaseService } from '../services/DatabaseService';
 import { ImpactfulActivity, ImpactfulActivityService } from '../services/ImpactfulActivityService';
+import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { MarketCoin } from '../types';
 
 type TokenSnapshot = {
@@ -25,6 +26,8 @@ type TokenSnapshot = {
     sells24h: number;
     poolCount: number;
     activeWallets24h: number;
+    buyVolume24h?: number;
+    sellVolume24h?: number;
     pairCreatedAt?: number;
     url?: string;
 };
@@ -96,6 +99,23 @@ const parsePrice = (price: string) => {
     return Number(price.replace(/[$,]/g, '')) || 0;
 };
 
+const parseMarketValue = (value: string | number | undefined) => {
+    if (typeof value === 'number') return value;
+    if (!value) return 0;
+
+    const raw = value.toString().replace(/[$,\s]/g, '').toUpperCase();
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return 0;
+
+    if (raw.includes('T')) return parsed * 1_000_000_000_000;
+    if (raw.includes('B')) return parsed * 1_000_000_000;
+    if (raw.includes('M')) return parsed * 1_000_000;
+    if (raw.includes('K')) return parsed * 1_000;
+    return parsed;
+};
+
+const toFormattedMarketValue = (value: number) => formatCurrency(value);
+
 const normalizeChain = (chain?: string) => {
     if (!chain) return 'Unknown Chain';
     const map: Record<string, string> = {
@@ -112,27 +132,38 @@ const normalizeChain = (chain?: string) => {
     return map[chain.toLowerCase()] || chain.charAt(0).toUpperCase() + chain.slice(1);
 };
 
-const toSnapshotFromPair = (pair: any): TokenSnapshot => ({
-    name: pair?.baseToken?.name || 'Unknown Token',
-    symbol: pair?.baseToken?.symbol || 'TOKEN',
-    address: pair?.baseToken?.address || '',
-    pairAddress: pair?.pairAddress,
-    chain: pair?.chainId || 'unknown',
-    dex: pair?.dexId,
-    imageUrl: pair?.info?.imageUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(pair?.baseToken?.symbol || 'TOKEN')}&background=111827&color=fff`,
-    price: formatPrice(pair?.priceUsd),
-    priceChange24h: Number(pair?.priceChange?.h24 || 0),
-    priceChange1h: Number(pair?.priceChange?.h1 || 0),
-    volume24h: Number(pair?.volume?.h24 || 0),
-    liquidity: Number(pair?.liquidity?.usd || 0),
-    marketCap: Number(pair?.marketCap || pair?.fdv || 0),
-    buys24h: Number(pair?.txns?.h24?.buys || 0),
-    sells24h: Number(pair?.txns?.h24?.sells || 0),
-    poolCount: Number(pair?.poolCount || 1),
-    activeWallets24h: Number(pair?.activeWallets24h || pair?.boosts?.active || pair?.makers || 0),
-    pairCreatedAt: pair?.pairCreatedAt,
-    url: pair?.url
-});
+const toSnapshotFromPair = (pair: any): TokenSnapshot => {
+    const buys24h = Number(pair?.txns?.h24?.buys || 0);
+    const sells24h = Number(pair?.txns?.h24?.sells || 0);
+    const totalTxns = buys24h + sells24h;
+    const volume24h = Number(pair?.volume?.h24 || 0);
+    const buyVolume24h = Number(pair?.volume?.h24Buy ?? pair?.volume?.buy ?? pair?.volume?.buys ?? 0) || (totalTxns > 0 ? volume24h * (buys24h / totalTxns) : 0);
+    const sellVolume24h = Number(pair?.volume?.h24Sell ?? pair?.volume?.sell ?? pair?.volume?.sells ?? 0) || Math.max(0, volume24h - buyVolume24h);
+
+    return {
+        name: pair?.baseToken?.name || 'Unknown Token',
+        symbol: pair?.baseToken?.symbol || 'TOKEN',
+        address: pair?.baseToken?.address || '',
+        pairAddress: pair?.pairAddress,
+        chain: pair?.chainId || 'unknown',
+        dex: pair?.dexId,
+        imageUrl: pair?.info?.imageUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(pair?.baseToken?.symbol || 'TOKEN')}&background=111827&color=fff`,
+        price: formatPrice(pair?.priceUsd),
+        priceChange24h: Number(pair?.priceChange?.h24 || 0),
+        priceChange1h: Number(pair?.priceChange?.h1 || 0),
+        volume24h,
+        liquidity: Number(pair?.liquidity?.usd || 0),
+        marketCap: Number(pair?.marketCap || pair?.fdv || 0),
+        buys24h,
+        sells24h,
+        poolCount: Number(pair?.poolCount || 1),
+        activeWallets24h: Number(pair?.activeWallets24h || pair?.boosts?.active || pair?.makers || 0),
+        buyVolume24h,
+        sellVolume24h,
+        pairCreatedAt: pair?.pairCreatedAt,
+        url: pair?.url
+    };
+};
 
 const toSnapshotFromMarketCoin = (coin: MarketCoin): TokenSnapshot => ({
     name: coin.name,
@@ -151,8 +182,48 @@ const toSnapshotFromMarketCoin = (coin: MarketCoin): TokenSnapshot => ({
     sells24h: Number(coin.dexSells || 0),
     poolCount: 1,
     activeWallets24h: coin.activeWallets24h || 0,
+    buyVolume24h: parseMarketValue(coin.buyVolume24h) || undefined,
+    sellVolume24h: parseMarketValue(coin.sellVolume24h) || undefined,
     pairCreatedAt: coin.createdTimestamp
 });
+
+const toMarketCoinFromSnapshot = (snapshot: TokenSnapshot): MarketCoin => {
+    const totalTxns = snapshot.buys24h + snapshot.sells24h;
+    const buyVolume24h = snapshot.buyVolume24h || (totalTxns > 0 ? snapshot.volume24h * (snapshot.buys24h / totalTxns) : 0);
+    const sellVolume24h = snapshot.sellVolume24h || Math.max(0, snapshot.volume24h - buyVolume24h);
+    const netFlow = buyVolume24h - sellVolume24h;
+
+    return {
+        id: 0,
+        name: snapshot.name,
+        ticker: snapshot.symbol,
+        price: snapshot.price,
+        h1: `${snapshot.priceChange1h.toFixed(2)}%`,
+        h24: `${snapshot.priceChange24h.toFixed(2)}%`,
+        d7: '0.00%',
+        cap: toFormattedMarketValue(snapshot.marketCap),
+        liquidity: toFormattedMarketValue(snapshot.liquidity),
+        volume24h: toFormattedMarketValue(snapshot.volume24h),
+        dexBuys: String(snapshot.buys24h),
+        dexSells: String(snapshot.sells24h),
+        buyVolume24h: toFormattedMarketValue(buyVolume24h),
+        sellVolume24h: toFormattedMarketValue(sellVolume24h),
+        dexFlow: totalTxns > 0 ? Math.round((snapshot.buys24h / totalTxns) * 100) : 50,
+        netFlow: `${netFlow >= 0 ? '+' : '-'}${toFormattedMarketValue(Math.abs(netFlow))}`,
+        smartMoney: netFlow > 0 ? 'Inflow' : 'Neutral',
+        smartMoneySignal: netFlow > 50_000 ? 'Inflow' : netFlow < -50_000 ? 'Outflow' : 'Neutral',
+        signal: snapshot.priceChange24h >= 12 ? 'Breakout' : snapshot.volume24h >= 1_000_000 ? 'Volume Spike' : 'None',
+        riskLevel: snapshot.liquidity < 50_000 ? 'Medium' : 'Low',
+        age: getAge(snapshot.pairCreatedAt),
+        createdTimestamp: snapshot.pairCreatedAt || Date.now(),
+        img: snapshot.imageUrl,
+        trend: snapshot.priceChange24h >= 0 ? 'Bullish' : 'Bearish',
+        chain: snapshot.chain,
+        address: snapshot.address,
+        pairAddress: snapshot.pairAddress,
+        activeWallets24h: snapshot.activeWallets24h
+    };
+};
 
 const severityStyles = (severity: ImpactfulActivity['severity']) => {
     if (severity === 'Critical') return {
@@ -391,6 +462,11 @@ export const TokenDetection: React.FC = () => {
     const [watchStatus, setWatchStatus] = useState('');
     const [error, setError] = useState('');
 
+    const currentSignal = useMemo(() => {
+        if (!token) return null;
+        return AlphaGauntletService.qualifyToken(toMarketCoinFromSnapshot(token));
+    }, [token]);
+
     const registerWatch = async (resolved: TokenSnapshot, ttlMs: number, label: string) => {
         if (!resolved.address) return;
 
@@ -603,6 +679,22 @@ export const TokenDetection: React.FC = () => {
                                 </span>
                                 <span className="text-[10px] font-bold uppercase tracking-wide text-primary-green">Live Data</span>
                             </div>
+                            {isDetectionToken && detectionEventType && (
+                                <>
+                                    <div className="h-1 w-1 rounded-full bg-border"></div>
+                                    <span className="rounded border border-border bg-card/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-text-medium">
+                                        Admitted as {detectionEventType}
+                                    </span>
+                                </>
+                            )}
+                            {currentSignal && (
+                                <>
+                                    <div className="h-1 w-1 rounded-full bg-border"></div>
+                                    <span className="rounded border border-primary-green/20 bg-primary-green/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-green">
+                                        Current signal: {currentSignal.eventType}
+                                    </span>
+                                </>
+                            )}
                         </div>
                     </div>
 
