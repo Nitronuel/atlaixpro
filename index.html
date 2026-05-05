@@ -67,6 +67,105 @@
             color: var(--text-light);
         }
 
+        /*
+         * Windows 150% display scaling makes a 1920px laptop behave like a
+         * 1280px CSS viewport. This density mode keeps the product surface
+         * closer to its 125% layout without changing browser zoom.
+         */
+        html.atlaix-compact-ui {
+            font-size: 83.333%;
+        }
+
+        html.atlaix-compact-ui body {
+            text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        @media (max-width: 1023px) {
+            html.atlaix-compact-ui {
+                font-size: 100%;
+            }
+        }
+
+        /*
+         * Narrow high-DPR phones need a different density treatment: keep text
+         * legible and taps comfortable, but reduce repeated chrome, page
+         * padding, and card spacing so product screens waste less room.
+         */
+        @media (max-width: 430px) {
+            html.atlaix-mobile-compact body {
+                overflow-x: hidden;
+                text-size-adjust: 100%;
+                -webkit-text-size-adjust: 100%;
+            }
+
+            html.atlaix-mobile-compact .h-\[80px\] {
+                height: 68px !important;
+            }
+
+            html.atlaix-mobile-compact main.p-4,
+            html.atlaix-mobile-compact .p-4 {
+                padding: 0.75rem !important;
+            }
+
+            html.atlaix-mobile-compact .p-5,
+            html.atlaix-mobile-compact .p-6,
+            html.atlaix-mobile-compact .p-8 {
+                padding: 1rem !important;
+            }
+
+            html.atlaix-mobile-compact .px-4,
+            html.atlaix-mobile-compact .px-5,
+            html.atlaix-mobile-compact .px-6,
+            html.atlaix-mobile-compact .px-8 {
+                padding-left: 0.875rem !important;
+                padding-right: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .py-4,
+            html.atlaix-mobile-compact .py-5,
+            html.atlaix-mobile-compact .py-6,
+            html.atlaix-mobile-compact .py-8 {
+                padding-top: 0.875rem !important;
+                padding-bottom: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .gap-5,
+            html.atlaix-mobile-compact .gap-6 {
+                gap: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .gap-4 {
+                gap: 0.75rem !important;
+            }
+
+            html.atlaix-mobile-compact .mt-6 {
+                margin-top: 1rem !important;
+            }
+
+            html.atlaix-mobile-compact .mb-6 {
+                margin-bottom: 1rem !important;
+            }
+
+            html.atlaix-mobile-compact .w-\[300px\] {
+                width: min(280px, 86vw) !important;
+            }
+
+            html.atlaix-mobile-compact h1.text-2xl {
+                font-size: 1.375rem !important;
+                line-height: 1.75rem !important;
+            }
+
+            html.atlaix-mobile-compact .rounded-2xl {
+                border-radius: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .data-table th,
+            html.atlaix-mobile-compact .data-table td {
+                padding: 0.5rem 0.35rem !important;
+            }
+        }
+
         /* Custom Scrollbar */
         ::-webkit-scrollbar {
             width: 12px;

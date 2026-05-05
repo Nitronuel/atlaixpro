@@ -454,9 +454,14 @@ const server = createServer(async (request, response) => {
         const parts = requestUrl.pathname.split('/').filter(Boolean);
         const chain = parts[2] || '';
         const tokenAddress = parts[3] || '';
+        const activities = ImpactfulTokenActivityStore.getActivities(chain, tokenAddress);
+        const metadata = ImpactfulTokenActivityStore.getActivityMetadata(chain, tokenAddress);
 
         json(response, 200, {
-            activities: ImpactfulTokenActivityStore.getActivities(chain, tokenAddress),
+            activities,
+            savedAt: metadata.savedAt,
+            expiresAt: metadata.expiresAt,
+            version: metadata.version,
             stats: ImpactfulTokenActivityStore.getWatchStats()
         });
         return;

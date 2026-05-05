@@ -15,6 +15,42 @@ export type ImpactfulActivity = {
 };
 
 const parseUsd = (value: string) => Number(String(value || '').replace(/[$,]/g, '')) || 0;
+const ACTIVITY_CACHE_PREFIX = 'atlaix-token-activity-cache:';
+const ACTIVITY_CACHE_MAX_AGE_MS = 60 * 1000;
+
+const canUseLocalStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const activityCacheKey = (chain: string, tokenAddress: string) =>
+    `${ACTIVITY_CACHE_PREFIX}${chain.toLowerCase()}:${tokenAddress.toLowerCase()}`;
+
+const normalizeActivities = (activities: any[], source: ImpactfulActivity['source'] = 'webhook'): ImpactfulActivity[] => {
+    return activities.map((activity: any) => ({
+        id: activity.id,
+        type: activity.type,
+        severity: activity.severity,
+        title: activity.title,
+        description: activity.description,
+        usdValue: Number(activity.usdValue || 0),
+        tokenAmount: Number(activity.tokenAmount || 0),
+        wallet: activity.wallet || '',
+        txHash: activity.txHash || '',
+        detectedAt: Number(activity.detectedAt || Date.now()),
+        source: activity.source || source
+    }));
+};
+
+const setCachedActivities = (chain: string, tokenAddress: string, activities: ImpactfulActivity[]) => {
+    if (!canUseLocalStorage() || !activities.length) return;
+
+    try {
+        window.localStorage.setItem(activityCacheKey(chain, tokenAddress), JSON.stringify({
+            activities: activities.slice(0, 80),
+            timestamp: Date.now()
+        }));
+    } catch {
+        // Ignore storage quota and privacy mode errors.
+    }
+};
 
 const getThresholds = (liquidityUsd: number) => {
     const liquidityBased = liquidityUsd > 0 ? liquidityUsd * 0.005 : 0;
@@ -38,6 +74,23 @@ const normalizeTitle = (event: RealActivity, usdValue: number, threshold: number
 };
 
 export const ImpactfulActivityService = {
+    getCachedActivities: (chain: string, tokenAddress: string): ImpactfulActivity[] => {
+        if (!canUseLocalStorage()) return [];
+
+        try {
+            const raw = window.localStorage.getItem(activityCacheKey(chain, tokenAddress));
+            if (!raw) return [];
+
+            const parsed = JSON.parse(raw) as { activities?: ImpactfulActivity[]; timestamp?: number };
+            if (!Array.isArray(parsed.activities) || typeof parsed.timestamp !== 'number') return [];
+            if (Date.now() - parsed.timestamp > ACTIVITY_CACHE_MAX_AGE_MS) return [];
+
+            return normalizeActivities(parsed.activities);
+        } catch {
+            return [];
+        }
+    },
+
     watchToken: async (input: {
         chain: string;
         tokenAddress: string;
@@ -69,7 +122,9 @@ export const ImpactfulActivityService = {
             });
             if (!response.ok) return activities;
             const data = await response.json();
-            return Array.isArray(data.activities) ? data.activities : activities;
+            const cached = Array.isArray(data.activities) ? normalizeActivities(data.activities) : activities;
+            setCachedActivities(chain, tokenAddress, cached);
+            return cached;
         } catch (error) {
             console.warn('[ImpactfulActivity] cache write failed', error);
             return activities;
@@ -82,20 +137,9 @@ export const ImpactfulActivityService = {
             if (!response.ok) return [];
             const data = await response.json();
             const activities = Array.isArray(data.activities) ? data.activities : [];
-
-            return activities.map((activity: any) => ({
-                id: activity.id,
-                type: activity.type,
-                severity: activity.severity,
-                title: activity.title,
-                description: activity.description,
-                usdValue: Number(activity.usdValue || 0),
-                tokenAmount: Number(activity.tokenAmount || 0),
-                wallet: activity.wallet || '',
-                txHash: activity.txHash || '',
-                detectedAt: Number(activity.detectedAt || Date.now()),
-                source: 'webhook'
-            }));
+            const normalized = normalizeActivities(activities, 'webhook');
+            setCachedActivities(chain, tokenAddress, normalized);
+            return normalized;
         } catch (error) {
             console.warn('[ImpactfulActivity] webhook activity fetch failed', error);
             return [];

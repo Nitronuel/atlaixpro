@@ -61,6 +61,7 @@ const MAX_WATCH_MS = 24 * 60 * 60 * 1000;
 const DATA_DIR = resolve(process.cwd(), 'data', 'token-activity');
 const STATE_FILE = resolve(DATA_DIR, 'state.json');
 const ALCHEMY_NOTIFY_API = 'https://dashboard.alchemy.com/api';
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 const CHAIN_TO_ALCHEMY_NETWORK: Record<string, string> = {
     ethereum: 'ETH_MAINNET',
@@ -108,7 +109,12 @@ const readEnv = (...keys: string[]) => {
     return '';
 };
 
-const persistState = () => {
+const persistStateNow = () => {
+    if (persistTimer) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
+    }
+
     mkdirSync(DATA_DIR, { recursive: true });
     const payload: PersistedState = {
         watchedTokens: [...watchedTokens.values()],
@@ -119,6 +125,13 @@ const persistState = () => {
         }))
     };
     writeFileSync(STATE_FILE, JSON.stringify(payload));
+};
+
+const persistState = () => {
+    if (persistTimer) return;
+    persistTimer = setTimeout(() => {
+        persistStateNow();
+    }, 750);
 };
 
 const loadState = () => {
@@ -511,6 +524,19 @@ export const ImpactfulTokenActivityStore = {
     getActivities: (chain: string, tokenAddress: string) => {
         cleanupExpiredWatches();
         return tokenActivities.get(tokenKey(chain, tokenAddress)) || [];
+    },
+
+    getActivityMetadata: (chain: string, tokenAddress: string) => {
+        cleanupExpiredWatches();
+        const key = tokenKey(chain, tokenAddress);
+        const savedAt = tokenActivitySavedAt.get(key) || 0;
+        const activities = tokenActivities.get(key) || [];
+
+        return {
+            savedAt,
+            expiresAt: savedAt ? savedAt + CACHE_TTL_MS : 0,
+            version: activities.map((activity) => activity.id || activity.txHash).join('|')
+        };
     },
 
     ingestAlchemyWebhook: (payload: unknown) => {

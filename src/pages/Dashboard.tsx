@@ -1,6 +1,6 @@
 // Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw } from 'lucide-react';
+import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw, SlidersHorizontal, X, RotateCcw } from 'lucide-react';
 import { MarketCoin } from '../types';
 import { DatabaseService } from '../services/DatabaseService';
 import { useNavigate } from 'react-router-dom';
@@ -31,6 +31,48 @@ const parseCurrency = (val: string | number) => {
     return isNegative ? -result : result;
 };
 
+interface FeedFilters {
+    visibleCount: string;
+    chain: string;
+    marketCapMin: string;
+    marketCapMax: string;
+    liquidityMin: string;
+    liquidityMax: string;
+    priceChangeMin: string;
+    priceChangeMax: string;
+    volumeMin: string;
+    volumeMax: string;
+}
+
+const DEFAULT_FEED_FILTERS: FeedFilters = {
+    visibleCount: 'all',
+    chain: 'all',
+    marketCapMin: '',
+    marketCapMax: '',
+    liquidityMin: '',
+    liquidityMax: '',
+    priceChangeMin: '',
+    priceChangeMax: '',
+    volumeMin: '',
+    volumeMax: ''
+};
+
+const parseFilterNumber = (value: string) => {
+    if (!value.trim()) return null;
+    const parsed = Number(value.replace(/[$,%\s,]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getTokenKey = (coin: MarketCoin) =>
+    `${coin.chain || 'unknown'}:${coin.address || coin.ticker}`.toLowerCase();
+
+const mergeFeedData = (primary: MarketCoin[], fallback: MarketCoin[]) => {
+    const merged = new Map<string, MarketCoin>();
+    fallback.forEach((coin) => merged.set(getTokenKey(coin), coin));
+    primary.forEach((coin) => merged.set(getTokenKey(coin), coin));
+    return Array.from(merged.values());
+};
+
 export const Dashboard: React.FC<DashboardProps> = () => {
     const [timeFrame, setTimeFrame] = useState('12H');
     const [searchQuery, setSearchQuery] = useState('');
@@ -53,6 +95,9 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
     const [searchError, setSearchError] = useState<string>('');
+    const [showFeedFilters, setShowFeedFilters] = useState(false);
+    const [feedFilters, setFeedFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
+    const [draftFeedFilters, setDraftFeedFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
 
     // Live Search Filter Effect
     // Live Search Filter Effect
@@ -83,14 +128,18 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 const globalResults = await DatabaseService.searchGlobalPairs(query);
 
                 // Merge: Local first, then unique Global
-                const existingAddrs = new Set(localMatches.map(c => c.address.toLowerCase()));
-                const uniqueGlobal = globalResults.filter(c => !existingAddrs.has(c.address.toLowerCase()));
+                const existingPairs = new Set(localMatches.map(c => (c.pairAddress || c.address || '').toLowerCase()));
+                const uniqueGlobal = globalResults.filter(c => !existingPairs.has((c.pairAddress || c.address || '').toLowerCase()));
 
                 // Combine
                 let combined = [...localMatches, ...uniqueGlobal];
 
-                // Sort by Market Cap (High to Low)
-                combined.sort((a, b) => parseCurrency(b.cap) - parseCurrency(a.cap));
+                // Sort by pair liquidity first so duplicate token pairs are easier to compare.
+                combined.sort((a, b) => {
+                    const liquidityDiff = parseCurrency(b.liquidity) - parseCurrency(a.liquidity);
+                    if (liquidityDiff !== 0) return liquidityDiff;
+                    return parseCurrency(b.cap) - parseCurrency(a.cap);
+                });
 
                 // Set suggestions
                 setSuggestions(combined.slice(0, 10));
@@ -108,22 +157,37 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
         try {
             if (!force && marketData.length === 0) {
+                let hasHydratedFeed = false;
+                let hydratedFeed: MarketCoin[] = [];
                 const cached = DatabaseService.getCachedMarketData();
                 if (cached?.data.length) {
+                    hydratedFeed = cached.data;
                     setMarketData(cached.data);
                     setLastUpdated(new Date());
                     setIsLoading(false);
+                    hasHydratedFeed = true;
                 }
 
-                const hydrated = await DatabaseService.getInitialMarketData();
-                if (hydrated.data.length) {
-                    setMarketData(hydrated.data);
+                const persistedTokens = await DatabaseService.fetchFromSupabase();
+                if (persistedTokens.length) {
+                    hydratedFeed = persistedTokens;
+                    setMarketData(persistedTokens);
                     setLastUpdated(new Date());
                     setIsLoading(false);
+                    hasHydratedFeed = true;
+                } else if (!hasHydratedFeed) {
+                    const hydrated = await DatabaseService.getInitialMarketData();
+                    if (hydrated.data.length) {
+                        hydratedFeed = hydrated.data;
+                        setMarketData(hydrated.data);
+                        setLastUpdated(new Date());
+                        setIsLoading(false);
+                        hasHydratedFeed = true;
+                    }
                 }
 
-                const response = await DatabaseService.getMarketData(true, false);
-                setMarketData(response.data);
+                const response = await DatabaseService.getMarketData(true, hasHydratedFeed);
+                setMarketData(hasHydratedFeed ? mergeFeedData(response.data, hydratedFeed) : response.data);
                 setLastUpdated(new Date());
                 return;
             }
@@ -152,8 +216,28 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const handleTokenNavigation = (token: MarketCoin | string) => {
         const identifier = typeof token === 'string' ? token : (token.address || token.ticker);
         if (identifier) {
-            navigate(`/token/${identifier}`);
+            const params = typeof token === 'string' || !token.pairAddress
+                ? ''
+                : `?pair=${encodeURIComponent(token.pairAddress)}&chain=${encodeURIComponent(token.chain)}`;
+            navigate(`/token/${identifier}${params}`);
         }
+    };
+
+    const handleFeedTableWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+        if (event.deltaY === 0) return;
+
+        const tableScroller = event.currentTarget;
+        const atTop = tableScroller.scrollTop <= 0;
+        const atBottom = tableScroller.scrollTop + tableScroller.clientHeight >= tableScroller.scrollHeight - 1;
+        const shouldHandoffToPage = (event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom);
+
+        if (!shouldHandoffToPage) return;
+
+        const pageScroller = tableScroller.closest('main');
+        if (!pageScroller) return;
+
+        pageScroller.scrollBy({ top: event.deltaY, behavior: 'auto' });
+        event.preventDefault();
     };
 
     const handleSearchSubmit = () => {
@@ -187,11 +271,60 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         setCurrentPage(1); // Reset to first page on sort change
     };
 
-    const sortedData = useMemo(() => {
-        let data = [...marketData];
-        if (!sortConfig) return data; // Neutral state returns data as-is (Hot Score sorted from service)
+    const chainOptions = useMemo(() => {
+        return Array.from(new Set(marketData.map((coin) => coin.chain).filter(Boolean))).sort();
+    }, [marketData]);
 
-        return data.sort((a, b) => {
+    const activeFilterCount = useMemo(() => {
+        return Object.entries(feedFilters).filter(([key, value]) => {
+            const defaultValue = DEFAULT_FEED_FILTERS[key as keyof FeedFilters];
+            return value !== defaultValue && value !== '';
+        }).length;
+    }, [feedFilters]);
+
+    const filteredData = useMemo(() => {
+        return marketData.filter((coin) => {
+            if (feedFilters.chain !== 'all' && coin.chain !== feedFilters.chain) return false;
+
+            const marketCap = parseCurrency(coin.cap);
+            const liquidity = parseCurrency(coin.liquidity);
+            const volume = parseCurrency(coin.volume24h);
+            const priceChange = parseFloat(coin.h24.replace(/[%+,]/g, ''));
+
+            const marketCapMin = parseFilterNumber(feedFilters.marketCapMin);
+            const marketCapMax = parseFilterNumber(feedFilters.marketCapMax);
+            const liquidityMin = parseFilterNumber(feedFilters.liquidityMin);
+            const liquidityMax = parseFilterNumber(feedFilters.liquidityMax);
+            const volumeMin = parseFilterNumber(feedFilters.volumeMin);
+            const volumeMax = parseFilterNumber(feedFilters.volumeMax);
+            const priceChangeMin = parseFilterNumber(feedFilters.priceChangeMin);
+            const priceChangeMax = parseFilterNumber(feedFilters.priceChangeMax);
+
+            if (marketCapMin !== null && marketCap < marketCapMin) return false;
+            if (marketCapMax !== null && marketCap > marketCapMax) return false;
+            if (liquidityMin !== null && liquidity < liquidityMin) return false;
+            if (liquidityMax !== null && liquidity > liquidityMax) return false;
+            if (volumeMin !== null && volume < volumeMin) return false;
+            if (volumeMax !== null && volume > volumeMax) return false;
+            if (priceChangeMin !== null && priceChange < priceChangeMin) return false;
+            if (priceChangeMax !== null && priceChange > priceChangeMax) return false;
+
+            return true;
+        });
+    }, [feedFilters, marketData]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [feedFilters]);
+
+    const sortedData = useMemo(() => {
+        let data = [...filteredData];
+        if (!sortConfig) {
+            const limit = feedFilters.visibleCount === 'all' ? data.length : Number(feedFilters.visibleCount);
+            return data.slice(0, Number.isFinite(limit) ? limit : data.length);
+        }
+
+        data = data.sort((a, b) => {
             const { key, direction } = sortConfig;
 
             const getValue = (item: MarketCoin) => {
@@ -217,7 +350,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             }
             return direction === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
         });
-    }, [marketData, sortConfig]);
+
+        const limit = feedFilters.visibleCount === 'all' ? data.length : Number(feedFilters.visibleCount);
+        return data.slice(0, Number.isFinite(limit) ? limit : data.length);
+    }, [feedFilters.visibleCount, filteredData, sortConfig]);
 
     // AI Market Pulse Logic
     const formatCompactCurrency = (num: number) => {
@@ -331,7 +467,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     };
 
     const getTokenKey = (coin: MarketCoin, context: string) =>
-        coin.address || coin.pairAddress || `${context}-${coin.chain}-${coin.ticker}-${coin.name}`;
+        coin.pairAddress || coin.address || `${context}-${coin.chain}-${coin.ticker}-${coin.name}`;
 
     const getChainIcon = (chain: string) => {
         const normalized = (chain || '').toLowerCase();
@@ -424,14 +560,169 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         );
     };
 
+    const updateDraftFilter = (key: keyof FeedFilters, value: string) => {
+        setDraftFeedFilters((current) => ({ ...current, [key]: value }));
+    };
+
+    const openFeedFilterMenu = () => {
+        setDraftFeedFilters(feedFilters);
+        setShowFeedFilters(true);
+    };
+
+    const resetFeedFilters = () => {
+        setDraftFeedFilters(DEFAULT_FEED_FILTERS);
+        setFeedFilters(DEFAULT_FEED_FILTERS);
+        setShowFeedFilters(false);
+        setCurrentPage(1);
+    };
+
+    const applyFeedFilters = () => {
+        setFeedFilters(draftFeedFilters);
+        setShowFeedFilters(false);
+        setCurrentPage(1);
+    };
+
+    const FilterSelect = ({
+        label,
+        value,
+        onChange,
+        options
+    }: {
+        label: string;
+        value: string;
+        onChange: (value: string) => void;
+        options: Array<{ value: string; label: string }>;
+    }) => (
+        <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
+            <div className="text-sm font-bold text-text-medium">{label}</div>
+            <select
+                value={value}
+                onChange={(event) => onChange(event.target.value)}
+                className="h-10 w-full appearance-none rounded-lg border border-border bg-[#111315] px-4 text-sm font-bold text-text-light outline-none transition-colors hover:border-text-medium focus:border-primary-green/50"
+            >
+                {options.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+            </select>
+        </div>
+    );
+
+    const FilterRange = ({
+        label,
+        minKey,
+        maxKey,
+        suffix
+    }: {
+        label: string;
+        minKey: keyof FeedFilters;
+        maxKey: keyof FeedFilters;
+        suffix: string;
+    }) => (
+        <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
+            <div className="text-sm font-bold text-text-medium">{label}</div>
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <label className="relative">
+                    <input
+                        value={draftFeedFilters[minKey]}
+                        onChange={(event) => updateDraftFilter(minKey, event.target.value)}
+                        inputMode="decimal"
+                        placeholder="Min"
+                        className="h-10 w-full rounded-lg border border-border bg-[#111315] px-4 pr-8 text-sm font-bold text-text-light outline-none placeholder-text-dark transition-colors focus:border-primary-green/50"
+                    />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-text-medium">{suffix}</span>
+                </label>
+                <span className="text-text-dark">-</span>
+                <label className="relative">
+                    <input
+                        value={draftFeedFilters[maxKey]}
+                        onChange={(event) => updateDraftFilter(maxKey, event.target.value)}
+                        inputMode="decimal"
+                        placeholder="Max"
+                        className="h-10 w-full rounded-lg border border-border bg-[#111315] px-4 pr-8 text-sm font-bold text-text-light outline-none placeholder-text-dark transition-colors focus:border-primary-green/50"
+                    />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-text-medium">{suffix}</span>
+                </label>
+            </div>
+        </div>
+    );
+
+    const aiMarketPulseSection = (
+        <section className="min-w-0 relative z-20">
+            <div className="mb-2 flex items-center gap-2">
+                <h3 className="text-sm font-black text-text-light">AI Market Pulse</h3>
+                <span className="h-1.5 w-1.5 rounded-full bg-primary-green" />
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="min-h-[64px] rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium">
+                                <Activity size={14} className="text-text-medium" />
+                                <span className="truncate">AI Sentiment</span>
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-2">
+                                <div
+                                    className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-extrabold shadow-[0_0_10px_rgba(38,211,86,0.2)] ${marketPulse.sentimentScore >= 50 ? 'bg-primary-green text-main' : 'bg-primary-red text-white'}`}
+                                >
+                                    {marketPulse.sentimentScore}
+                                </div>
+                                <span className="truncate text-sm font-black text-text-light">{marketPulse.sentimentLabel}</span>
+                            </div>
+                        </div>
+                        <div className="hidden h-8 w-1 shrink-0 rounded-full bg-primary-green/70 sm:block" />
+                    </div>
+                </div>
+
+                <div className="min-h-[64px] rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium">
+                                <Zap size={14} className="text-text-medium" />
+                                <span className="truncate">Smart Rotation</span>
+                            </div>
+                            <div className="mt-1.5 flex min-w-0 items-center gap-2">
+                                <span className="truncate text-base font-black text-text-light">{marketPulse.bestChain}</span>
+                                <span className="shrink-0 rounded bg-primary-green/10 px-2 py-1 text-[10px] font-black text-primary-green">
+                                    ${formatCompactCurrency(marketPulse.bestChainFlow)} Vol
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    className="min-h-[64px] cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm transition-colors hover:border-text-medium"
+                    onClick={() => marketPulse.topInflowToken && handleTokenNavigation(marketPulse.topInflowToken)}
+                >
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium">
+                                <TrendingUp size={14} className="text-text-medium" />
+                                <span className="truncate">Top Inflow</span>
+                            </div>
+                            <div className="mt-1.5 flex min-w-0 items-center justify-between gap-3">
+                                <span className="truncate text-base font-black text-text-light">{marketPulse.topInflowToken?.ticker || "Scanning..."}</span>
+                                <span className="shrink-0 text-sm font-black text-primary-green">
+                                    {marketPulse.topInflowToken?.netFlow || "$0"}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+
     return (
         <div className="flex flex-col gap-6 pb-16">
-            <div className="bg-card border border-border rounded-xl p-3 md:p-5 shadow-lg relative z-40">
-                <div className="flex flex-row items-center gap-2 w-full flex-nowrap">
-                    <div className="flex-1 bg-main border border-border rounded-lg flex items-center px-4 py-2.5 transition-all focus-within:border-primary-green/50 relative">
+            {aiMarketPulseSection}
+
+            <div className="relative z-40 flex justify-end">
+                <div className="flex w-full flex-row items-center gap-2 flex-nowrap md:max-w-[560px]">
+                    <div className="flex-1 bg-[#111315] border border-border rounded-lg flex items-center px-3 py-2 transition-all focus-within:border-primary-green/50 relative shadow-sm">
                         <input
                             type="text"
-                            className="bg-transparent border-none text-text-light outline-none w-full text-[0.95rem] placeholder-text-dark"
+                            className="bg-transparent border-none text-text-light outline-none w-full text-sm placeholder-text-dark"
                             placeholder="search token name or past CA"
                             value={searchQuery}
                             onChange={(e) => {
@@ -477,10 +768,16 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                                 <span className="text-xs text-text-dark truncate max-w-[120px]">{coin.name}</span>
                                             </div>
 
-                                            {/* Center: Market Cap */}
-                                            <div className="flex flex-col items-end flex-1 px-3 border-r border-border/30 mr-3">
-                                                <span className="text-[10px] text-text-dark uppercase tracking-wider">MCap</span>
-                                                <span className="font-mono text-sm text-text-medium">{coin.cap}</span>
+                                            {/* Center: Pair quality metrics */}
+                                            <div className="grid grid-cols-2 gap-4 flex-1 px-3 border-r border-border/30 mr-3">
+                                                <div className="flex flex-col items-end">
+                                                    <span className="text-[10px] text-text-dark uppercase tracking-wider">MCap</span>
+                                                    <span className="font-mono text-sm text-text-medium">{coin.cap}</span>
+                                                </div>
+                                                <div className="flex flex-col items-end">
+                                                    <span className="text-[10px] text-text-dark uppercase tracking-wider">Liq</span>
+                                                    <span className="font-mono text-sm font-bold text-primary-green">{coin.liquidity}</span>
+                                                </div>
                                             </div>
 
                                             {/* Right: Price & Change */}
@@ -500,19 +797,19 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                         )}
                     </div>
                     <button
-                        className="bg-primary-green text-main w-11 h-11 md:w-14 md:h-11 rounded-lg flex-shrink-0 flex items-center justify-center hover:bg-primary-green-darker transition-colors shadow-md"
+                        className="bg-primary-green text-main h-10 w-10 rounded-lg flex-shrink-0 flex items-center justify-center hover:bg-primary-green-darker transition-colors shadow-md"
                         onClick={handleSearchSubmit}
                         tabIndex={-1}
                     >
-                        <Search size={20} strokeWidth={2.5} />
+                        <Search size={18} strokeWidth={2.5} />
                     </button>
                 </div>
-            </div >
+            </div>
 
             <div className="bg-card border border-border rounded-xl p-3 md:p-5 overflow-visible shadow-sm relative z-30">
                 <div className="flex flex-col gap-3 mb-4">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="flex items-center justify-between gap-3">
                             <h3 className="font-bold text-lg flex items-center gap-2">
                                 Live Alpha Feed
                                 <span className="relative flex h-2.5 w-2.5">
@@ -528,18 +825,38 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                 <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
                             </button>
                         </div>
-                        <div className="flex flex-col items-end">
-                            <div className="text-xs text-text-medium font-mono">
-                                Showing {paginatedData.length} of {sortedData.length}
-                            </div>
-                            <div className="text-[10px] text-text-dark mt-0.5">
-                                Last sync: {lastUpdated.toLocaleTimeString()}
+                        <div className="flex items-center justify-between gap-3 md:justify-end">
+                            <button
+                                onClick={openFeedFilterMenu}
+                                className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition-colors sm:h-10 sm:gap-2 sm:px-4 sm:text-sm ${activeFilterCount > 0
+                                    ? 'border-primary-green/50 bg-primary-green/10 text-primary-green'
+                                    : 'border-border bg-card-hover text-text-light hover:border-text-medium'
+                                    }`}
+                            >
+                                <SlidersHorizontal size={14} className="sm:h-4 sm:w-4" />
+                                <span>Filters</span>
+                                {activeFilterCount > 0 && (
+                                    <span className="rounded-full bg-primary-green px-1.5 py-0.5 text-[10px] font-black text-main">
+                                        {activeFilterCount}
+                                    </span>
+                                )}
+                            </button>
+                            <div className="flex min-w-0 flex-col items-end">
+                                <div className="text-xs text-text-medium font-mono">
+                                    Showing {paginatedData.length} of {sortedData.length}
+                                </div>
+                                <div className="text-[10px] text-text-dark mt-0.5 truncate">
+                                    Last sync: {lastUpdated.toLocaleTimeString()}
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="overflow-x-auto overflow-y-auto max-h-[65vh] min-h-[400px] custom-scrollbar">
+                <div
+                    onWheel={handleFeedTableWheel}
+                    className="overflow-x-auto overflow-y-auto max-h-[65vh] min-h-[400px] custom-scrollbar"
+                >
                     {isLoading && marketData.length === 0 ? (
                         <div className="w-full h-[400px] flex items-center justify-center flex-col gap-3">
                             <div className="w-8 h-8 border-2 border-primary-green border-t-transparent rounded-full animate-spin"></div>
@@ -648,66 +965,67 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 </div>
             </div>
 
-            <div className="w-full relative z-20">
-                <h3 className="text-base font-bold mb-4 text-text-light">AI Market Pulse</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
-
-                    <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-center gap-1.5 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
-                            <Activity size={14} className="text-text-medium" /> AI Sentiment
-                        </div>
-                        <div className="text-[10px] text-text-dark font-medium uppercase tracking-wide">Market Score</div>
-                        <div className="text-base md:text-lg font-bold text-text-light flex items-center gap-2">
-                            <div
-                                className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-extrabold shadow-[0_0_10px_rgba(38,211,86,0.2)] ${marketPulse.sentimentScore >= 50 ? 'bg-primary-green text-main' : 'bg-primary-red text-white'}`}
+            {showFeedFilters && (
+                <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/70 px-3 py-6 backdrop-blur-sm">
+                    <div className="flex max-h-[92vh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-border bg-[#1C1F22] shadow-[0_30px_120px_rgba(0,0,0,0.65)]">
+                        <div className="flex items-center justify-between border-b border-border px-5 py-4 md:px-7">
+                            <h2 className="text-xl font-black text-text-light">Filters</h2>
+                            <button
+                                onClick={() => setShowFeedFilters(false)}
+                                className="rounded-lg p-2 text-text-medium transition-colors hover:bg-card-hover hover:text-text-light"
+                                aria-label="Close filters"
                             >
-                                {marketPulse.sentimentScore}
+                                <X size={22} />
+                            </button>
+                        </div>
+
+                        <div className="custom-scrollbar flex-1 overflow-y-auto px-5 py-5 md:px-7">
+                            <div className="flex flex-col gap-5">
+                                <FilterSelect
+                                    label="Visible Coin Range"
+                                    value={draftFeedFilters.visibleCount}
+                                    onChange={(value) => updateDraftFilter('visibleCount', value)}
+                                    options={[
+                                        { value: 'all', label: 'Show All' },
+                                        { value: '20', label: 'Show 20' },
+                                        { value: '50', label: 'Show 50' },
+                                        { value: '100', label: 'Show 100' }
+                                    ]}
+                                />
+                                <FilterSelect
+                                    label="Networks"
+                                    value={draftFeedFilters.chain}
+                                    onChange={(value) => updateDraftFilter('chain', value)}
+                                    options={[
+                                        { value: 'all', label: 'All Networks' },
+                                        ...chainOptions.map((chain) => ({ value: chain, label: chain }))
+                                    ]}
+                                />
+                                <FilterRange label="Market Cap" minKey="marketCapMin" maxKey="marketCapMax" suffix="$" />
+                                <FilterRange label="Liquidity" minKey="liquidityMin" maxKey="liquidityMax" suffix="$" />
+                                <FilterRange label="Price Change (24h)" minKey="priceChangeMin" maxKey="priceChangeMax" suffix="%" />
+                                <FilterRange label="Volume (24h)" minKey="volumeMin" maxKey="volumeMax" suffix="$" />
                             </div>
-                            <span className="leading-tight text-sm truncate">{marketPulse.sentimentLabel}</span>
                         </div>
-                    </div>
 
-                    <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-center gap-1.5 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
-                            <Zap size={14} className="text-text-medium" /> Smart Rotation
+                        <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4 md:px-7">
+                            <button
+                                onClick={resetFeedFilters}
+                                className="inline-flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-black text-primary-green transition-colors hover:bg-primary-green/10"
+                            >
+                                <RotateCcw size={16} />
+                                Reset
+                            </button>
+                            <button
+                                onClick={applyFeedFilters}
+                                className="rounded-lg bg-primary-green px-8 py-3 text-sm font-black text-main transition-colors hover:bg-primary-green-darker"
+                            >
+                                Apply
+                            </button>
                         </div>
-                        <div className="text-[10px] text-text-dark font-medium uppercase tracking-wide">Highest Vol Chain</div>
-                        <div className="text-sm md:text-base font-bold text-text-light flex flex-wrap items-center gap-1.5">
-                            {marketPulse.bestChain}
-                            <span className="text-[9px] text-primary-green font-bold px-1.5 py-0.5 rounded bg-primary-green/10 whitespace-nowrap">
-                                ${formatCompactCurrency(marketPulse.bestChainFlow)} Vol
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-center gap-1.5 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
-                            <TrendingUp size={14} className="text-text-medium" /> Top Inflow
-                        </div>
-                        <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center w-full font-bold text-sm md:text-base gap-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => marketPulse.topInflowToken && handleTokenNavigation(marketPulse.topInflowToken)}>
-                            <span className="truncate">{marketPulse.topInflowToken?.ticker || "Scanning..."}</span>
-                            <span className="text-primary-green text-xs md:text-sm whitespace-nowrap">
-                                {marketPulse.topInflowToken?.netFlow || "$0"}
-                            </span>
-                        </div>
-                        <div className="mt-0.5 flex justify-start">
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${marketPulse.topInflowToken?.riskLevel === 'Low' ? 'bg-primary-green/10 text-primary-green' : 'bg-primary-yellow/10 text-primary-yellow'}`}>
-                                {marketPulse.topInflowToken?.riskLevel || 'Low'} Risk
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-center gap-1.5 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
-                            <ShieldCheck size={14} className="text-primary-green" /> Risk Levels
-                        </div>
-                        <div className="text-sm md:text-lg font-bold text-primary-green">0 Critical Risks</div>
-                        <button className="mt-1.5 w-full bg-primary-green/10 border border-primary-green/30 text-primary-green text-[9px] md:text-[10px] font-bold py-1.5 rounded hover:bg-primary-green hover:text-main transition-colors uppercase tracking-wide">
-                            Check Alert
-                        </button>
                     </div>
                 </div>
-            </div>
+            )}
         </div >
     );
 };

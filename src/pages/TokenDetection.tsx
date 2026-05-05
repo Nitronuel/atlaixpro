@@ -520,6 +520,12 @@ export const TokenDetection: React.FC = () => {
 
             if (resolved.address) {
                 const priceUsd = parsePrice(resolved.price);
+                const localCachedActivity = ImpactfulActivityService.getCachedActivities(resolved.chain, resolved.address);
+                if (localCachedActivity.length) {
+                    setActivity(localCachedActivity);
+                    setActivityLoading(false);
+                }
+
                 const cachedActivity = await ImpactfulActivityService.getWebhookActivities(resolved.chain, resolved.address);
                 const derivedActivity = buildDetectionContextActivities(resolved, {
                     eventType: detectionEventType,

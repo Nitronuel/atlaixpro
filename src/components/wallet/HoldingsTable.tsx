@@ -14,8 +14,10 @@ interface HoldingsTableProps {
 
 export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loading, chain, timeFilter, onRefresh }) => {
     const navigate = useNavigate();
-    const [visibleCount, setVisibleCount] = useState(20);
     const [showDust, setShowDust] = useState(false);
+    const sortedAssets = [...(portfolioData?.assets || [])].sort((a, b) => b.rawValue - a.rawValue);
+    const visibleAssets = sortedAssets.filter((asset) => showDust || asset.rawValue > 1);
+    const hasSmallBalances = sortedAssets.some((asset) => asset.rawValue <= 1);
 
     return (
         <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
@@ -60,19 +62,7 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                                 <td colSpan={5} className="py-12 text-center text-text-medium">No assets found on this chain.</td>
                             </tr>
                         ) : (
-                            portfolioData.assets
-                                .filter(a => showDust || a.rawValue > 1)
-                                // Removed time filtering -> Now we show ALL assets with their Period PnL
-                                .sort((a, b) => {
-                                    if (timeFilter !== 'ALL') {
-                                        // Sort by PnL Percent if period filter is active? Or keep Value?
-                                        // Maintain Value as primary sort key; consider implementing secondary sorting if required.
-                                        return b.rawValue - a.rawValue;
-                                    }
-                                    return b.rawValue - a.rawValue;
-                                })
-                                .slice(0, visibleCount)
-                                .map((asset, i) => {
+                            visibleAssets.map((asset, i) => {
                                     const buyTime = (asset as any).buyTime || 0;
                                     const isNew = buyTime > 0 && (Date.now() - buyTime) < 24 * 60 * 60 * 1000;
                                     const timeAgo = buyTime ? (() => {
@@ -150,7 +140,7 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                                     );
                                 })
                         )}
-                        {portfolioData && portfolioData.assets.some(a => a.rawValue <= 1) && (
+                        {portfolioData && hasSmallBalances && (
                             <tr>
                                 <td colSpan={5} className="py-1">
                                     <button
@@ -170,16 +160,6 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                 </table>
             </div>
 
-            {portfolioData && portfolioData.assets.length > visibleCount && (
-                <div className="p-4 border-t border-border flex justify-center">
-                    <button
-                        className="text-xs font-bold text-text-medium hover:text-text-light transition-colors"
-                        onClick={() => setVisibleCount(prev => prev + 10)}
-                    >
-                        Load More Assets
-                    </button>
-                </div>
-            )}
         </div>
     );
 };

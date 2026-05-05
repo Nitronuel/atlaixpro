@@ -55,9 +55,12 @@ const CATEGORY_CONFIG: Array<{
 const CHAIN_OPTIONS = ['All Chains', 'Solana', 'Ethereum', 'BNB Chain'];
 const TABLE_BATCH_SIZE = 5;
 const AUTO_REFRESH_INTERVAL_MS = 60000;
+const FULL_DISCOVERY_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const AUTO_WATCH_LIMIT = 50;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+const GLOBAL_EVENTS_CACHE_KEY = 'atlaix-global-events-cache';
+const GLOBAL_EVENTS_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 
 const parseCurrencyValue = (value: string | number | undefined) => {
     if (typeof value === 'number') return value;
@@ -262,6 +265,38 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
     }];
 };
 
+const canUseLocalStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const getCachedGlobalEvents = (): GlobalTokenEvent[] => {
+    if (!canUseLocalStorage()) return [];
+
+    try {
+        const raw = window.localStorage.getItem(GLOBAL_EVENTS_CACHE_KEY);
+        if (!raw) return [];
+
+        const parsed = JSON.parse(raw) as { data?: GlobalTokenEvent[]; timestamp?: number };
+        if (!Array.isArray(parsed.data) || typeof parsed.timestamp !== 'number') return [];
+        if (Date.now() - parsed.timestamp > GLOBAL_EVENTS_CACHE_MAX_AGE_MS) return [];
+
+        return parsed.data;
+    } catch {
+        return [];
+    }
+};
+
+const setCachedGlobalEvents = (events: GlobalTokenEvent[]) => {
+    if (!canUseLocalStorage() || events.length === 0) return;
+
+    try {
+        window.localStorage.setItem(GLOBAL_EVENTS_CACHE_KEY, JSON.stringify({
+            data: events,
+            timestamp: Date.now()
+        }));
+    } catch {
+        // Ignore storage quota and privacy mode errors.
+    }
+};
+
 const isInfrastructureToken = (event: AlphaGauntletEvent) => {
     return isExcludedAlphaToken(event.token);
 };
@@ -284,6 +319,7 @@ export const Detection: React.FC = () => {
     const [tokenQuery, setTokenQuery] = useState('');
     const [chain, setChain] = useState('All Chains');
     const [visibleRows, setVisibleRows] = useState<Record<string, number>>({});
+    const [cachedGlobalEvents, setCachedGlobalEventsState] = useState<GlobalTokenEvent[]>(() => getCachedGlobalEvents());
 
     const stabilizeEvents = (nextEvents: AlphaGauntletEvent[], replaceActiveSet = true) => {
         const activeKeys = new Set<string>();
@@ -316,6 +352,7 @@ export const Detection: React.FC = () => {
         let cancelled = false;
         let hasDisplayedEvents = false;
         let refreshInFlight = false;
+        let lastFullRefreshAt = 0;
 
         const applyEvents = (nextEvents: AlphaGauntletEvent[], replaceActiveSet = true) => {
             if (cancelled || nextEvents.length === 0) return null;
@@ -327,6 +364,9 @@ export const Detection: React.FC = () => {
 
         const hydrateStoredEvents = async () => {
             try {
+                const cachedEvents = DatabaseService.getCachedDetectionEvents();
+                applyEvents(cachedEvents, false);
+
                 const storedEvents = await DatabaseService.fetchDetectionEvents();
                 applyEvents(storedEvents, false);
             } catch (error) {
@@ -337,10 +377,11 @@ export const Detection: React.FC = () => {
         const loadEvents = async (force = false) => {
             if (refreshInFlight) return;
             refreshInFlight = true;
+            if (force) lastFullRefreshAt = Date.now();
 
             try {
                 if (!cancelled && !hasDisplayedEvents) setLoading(true);
-                const response = await DatabaseService.getMarketData(force, false);
+                const response = await DatabaseService.getMarketData(force, !force);
                 const qualifiedEvents = AlphaGauntletService.getDetectionEvents(response.data);
 
                 if (!cancelled) {
@@ -361,8 +402,11 @@ export const Detection: React.FC = () => {
             }
         };
 
-        hydrateStoredEvents().finally(() => loadEvents(true));
-        const interval = setInterval(() => loadEvents(true), AUTO_REFRESH_INTERVAL_MS);
+        hydrateStoredEvents().finally(() => loadEvents(!hasDisplayedEvents));
+        const interval = setInterval(() => {
+            const shouldRunFullDiscovery = Date.now() - lastFullRefreshAt >= FULL_DISCOVERY_REFRESH_INTERVAL_MS;
+            loadEvents(shouldRunFullDiscovery);
+        }, AUTO_REFRESH_INTERVAL_MS);
 
         return () => {
             cancelled = true;
@@ -446,6 +490,14 @@ export const Detection: React.FC = () => {
     }, [qualifiedEvents]);
 
     useEffect(() => {
+        if (recentGlobalEvents.length === 0) return;
+        setCachedGlobalEvents(recentGlobalEvents);
+        setCachedGlobalEventsState(recentGlobalEvents);
+    }, [recentGlobalEvents]);
+
+    const globalEventsToRender = recentGlobalEvents.length > 0 ? recentGlobalEvents : cachedGlobalEvents;
+
+    useEffect(() => {
         const watchCandidates = qualifiedEvents
             .filter((event) => event.token.address)
             .sort((a, b) => b.score - a.score)
@@ -517,22 +569,22 @@ export const Detection: React.FC = () => {
                 </div>
             </section>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
-                <section className="grid grid-cols-1 2xl:grid-cols-2 gap-5 min-w-0">
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_340px] gap-4 2xl:gap-5 items-start">
+                <section className="grid grid-cols-1 xl:grid-cols-2 gap-4 2xl:gap-5 min-w-0">
                     {loading && events.length === 0 ? (
-                        <div className="rounded-xl border border-border bg-card p-8 text-center 2xl:col-span-2">
+                        <div className="rounded-xl border border-border bg-card p-8 text-center xl:col-span-2">
                             <RefreshCw className="mx-auto mb-3 animate-spin text-primary-green" size={28} />
                             <div className="text-sm font-bold text-text-light">Running detection engine qualification...</div>
                         </div>
                     ) : populatedCategories.length === 0 ? (
-                        <div className="rounded-xl border border-border bg-card p-8 text-center 2xl:col-span-2">
+                        <div className="rounded-xl border border-border bg-card p-8 text-center xl:col-span-2">
                             <div className="text-sm font-bold text-text-light">No admitted tokens match the active filters</div>
                             <div className="mt-1 text-xs text-text-medium">Tables will appear when a token qualifies for a detection category.</div>
                         </div>
                     ) : populatedCategories.map((category) => {
                         return (
-                            <div key={category.type} className="rounded-xl border border-border bg-card overflow-hidden">
-                                <div className="border-b border-border px-5 py-4">
+                            <div key={category.type} className="min-w-0 rounded-xl border border-border bg-card overflow-hidden">
+                                <div className="border-b border-border px-4 py-4 2xl:px-5">
                                     <div>
                                         <h3 className="text-lg font-bold text-text-light">{category.title}</h3>
                                         <p className="mt-1 text-sm text-text-medium">{category.description}</p>
@@ -543,16 +595,16 @@ export const Detection: React.FC = () => {
                                     <table className="w-full table-fixed text-left">
                                         <colgroup>
                                             <col />
-                                            <col className="w-[54px] sm:w-[76px]" />
-                                            <col className="w-[78px] sm:w-[112px]" />
-                                            <col className="w-[68px] sm:w-[92px]" />
+                                            <col className="w-[50px] 2xl:w-[76px]" />
+                                            <col className="w-[76px] 2xl:w-[112px]" />
+                                            <col className="w-[64px] 2xl:w-[92px]" />
                                         </colgroup>
                                         <thead className="bg-[#111315] text-[11px] uppercase tracking-wide text-text-medium">
                                             <tr>
-                                                <th className="px-3 py-3 font-bold sm:px-4">Token</th>
-                                                <th className="px-2 py-3 font-bold sm:px-4">Score</th>
-                                                <th className="px-2 py-3 font-bold sm:px-4">Severity</th>
-                                                <th className="px-2 py-3 font-bold text-right sm:px-4">Detected</th>
+                                                <th className="px-3 py-3 font-bold 2xl:px-4">Token</th>
+                                                <th className="px-2 py-3 font-bold 2xl:px-4">Score</th>
+                                                <th className="px-2 py-3 font-bold 2xl:px-4">Severity</th>
+                                                <th className="px-2 py-3 font-bold text-right 2xl:px-4">Detected</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border/70">
@@ -562,29 +614,29 @@ export const Detection: React.FC = () => {
                                                     onClick={() => navigate(`/detection/token/${encodeURIComponent(event.token.address || event.token.ticker)}?source=detection&severity=${encodeURIComponent(event.severity)}&eventType=${encodeURIComponent(event.eventType)}&score=${encodeURIComponent(String(event.score))}&detectedAt=${encodeURIComponent(String(event.detectedAt))}`)}
                                                     className="cursor-pointer hover:bg-[#1C1F22] transition-colors"
                                                 >
-                                                    <td className="px-3 py-4 min-w-0 sm:px-4">
-                                                        <div className="flex items-center gap-2 min-w-0 sm:gap-3">
+                                                    <td className="px-3 py-4 min-w-0 2xl:px-4">
+                                                        <div className="flex items-center gap-2 min-w-0 2xl:gap-3">
                                                             <img
                                                                 src={event.token.img}
                                                                 alt={event.token.ticker}
-                                                                className="h-7 w-7 shrink-0 rounded-full border border-border bg-[#111315] object-cover sm:h-8 sm:w-8"
+                                                                className="h-7 w-7 shrink-0 rounded-full border border-border bg-[#111315] object-cover 2xl:h-8 2xl:w-8"
                                                                 onError={(imageEvent) => { imageEvent.currentTarget.style.display = 'none'; }}
                                                             />
-                                                            <div className="min-w-0 max-w-[120px] sm:max-w-[170px]">
-                                                                <div className="truncate text-sm font-bold text-text-light sm:text-base" title={event.token.ticker}>{event.token.ticker}</div>
-                                                                <div className="truncate text-[11px] text-text-medium sm:text-xs" title={event.token.name}>{event.token.name}</div>
+                                                            <div className="min-w-0 max-w-[96px] 2xl:max-w-[170px]">
+                                                                <div className="truncate text-sm font-bold text-text-light 2xl:text-base" title={event.token.ticker}>{event.token.ticker}</div>
+                                                                <div className="truncate text-[11px] text-text-medium 2xl:text-xs" title={event.token.name}>{event.token.name}</div>
                                                             </div>
                                                         </div>
                                                     </td>
-                                                    <td className="px-2 py-4 sm:px-4">
-                                                        <span className="font-mono text-xs font-bold text-primary-green sm:text-sm">{event.score}</span>
+                                                    <td className="px-2 py-4 2xl:px-4">
+                                                        <span className="font-mono text-xs font-bold text-primary-green 2xl:text-sm">{event.score}</span>
                                                     </td>
-                                                    <td className="px-2 py-4 sm:px-4">
-                                                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold sm:px-2.5 sm:py-1 sm:text-xs ${severityClass(event.severity)}`}>
+                                                    <td className="px-2 py-4 2xl:px-4">
+                                                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold 2xl:px-2.5 2xl:py-1 2xl:text-xs ${severityClass(event.severity)}`}>
                                                             {event.severity}
                                                         </span>
                                                     </td>
-                                                    <td className="px-2 py-4 text-right text-[11px] font-mono text-text-medium sm:px-4 sm:text-xs">{getTimeAgo(event.detectedAt)}</td>
+                                                    <td className="px-2 py-4 text-right text-[11px] font-mono text-text-medium 2xl:px-4 2xl:text-xs">{getTimeAgo(event.detectedAt)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -620,16 +672,16 @@ export const Detection: React.FC = () => {
                         </div>
                     </div>
                     <div className="max-h-[720px] overflow-y-auto p-2.5">
-                        {loading && recentGlobalEvents.length === 0 ? (
+                        {loading && globalEventsToRender.length === 0 ? (
                             <div className="p-5 text-sm font-bold text-text-medium">Waiting for token events...</div>
-                        ) : recentGlobalEvents.length === 0 ? (
+                        ) : globalEventsToRender.length === 0 ? (
                             <div className="p-5">
                                 <div className="text-sm font-bold text-text-light">No global events yet</div>
                                 <div className="mt-1 text-xs text-text-medium">Events will appear as detected tokens show activity.</div>
                             </div>
                         ) : (
                             <div className="flex flex-col gap-2.5">
-                                {recentGlobalEvents.map((globalEvent) => {
+                                {globalEventsToRender.map((globalEvent) => {
                                     const event = globalEvent.source;
                                     return (
                                     <button

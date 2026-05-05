@@ -70,7 +70,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
 
     if (path.includes('/heatmap')) return 'Token Heatmap';
     if (path.includes('/sentiment')) return 'Sentiment Intelligence';
-    if (path.includes('/detection')) return 'Global Detection';
+    if (path.includes('/detection')) return 'Detection';
     if (path.includes('/ai-assistant')) return 'AI Assistant';
     if (path.includes('/wallet')) return 'Wallet Tracker';
     if (path.includes('/wallet')) return 'Wallet Tracker';

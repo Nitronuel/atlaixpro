@@ -446,19 +446,6 @@ export const WalletTracking: React.FC = () => {
                                 <WalletStatsGrid stats={walletStats} loading={loading} />
                             </div>
 
-                            {/* Net Worth Chart Placeholder - Keeping structure simple, chart can be its own component later */}
-                            <div className="bg-card border border-border rounded-xl p-6">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="font-bold text-text-light">Net Worth</h3>
-                                    <span className="text-xs text-text-medium bg-main px-2 py-0.5 rounded border border-border">{chain}</span>
-                                </div>
-                                <div className="text-2xl font-bold text-text-light mb-1">
-                                    {portfolioData ? portfolioData.netWorth : walletStats.netWorth || 'Loading...'}
-                                </div>
-                                <div className="w-full min-h-[150px] flex items-center justify-center text-text-medium text-xs bg-main/30 rounded border border-border/10 text-center px-4">
-                                    Net worth history chart is temporarily disabled until the historical series is sourced from real portfolio snapshots.
-                                </div>
-                            </div>
                         </div>
 
                         {/* Holdings Table */}

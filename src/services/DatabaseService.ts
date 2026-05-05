@@ -41,6 +41,17 @@ const warnDetectionEventsTableOnce = (message: string) => {
     console.warn(message);
 };
 
+const formatSupabaseError = (error: any) => {
+    const parts = [
+        error?.message,
+        error?.details ? `details: ${error.details}` : '',
+        error?.hint ? `hint: ${error.hint}` : '',
+        error?.code ? `code: ${error.code}` : ''
+    ].filter(Boolean);
+
+    return parts.join(' | ') || 'Unknown Supabase error';
+};
+
 const DEXSCREENER_SEARCH_URL = '/api/dexscreener/latest/dex/search';
 const DEXSCREENER_PAIRS_URL = '/api/dexscreener/latest/dex/pairs';
 const DEXSCREENER_TOKENS_URL = '/api/dexscreener/latest/dex/tokens';
@@ -138,10 +149,15 @@ interface DexPair {
 
 interface Cache {
     marketData: { data: MarketCoin[]; timestamp: number; } | null;
+    detectionEvents: { data: AlphaGauntletEvent[]; timestamp: number; } | null;
 }
-const cache: Cache = { marketData: null };
+const cache: Cache = { marketData: null, detectionEvents: null };
 const CACHE_FRESH_DURATION = 15000; // Refresh every 15s to find new tokens continually
-const STALE_TOKEN_RETENTION_DAYS = 7;
+const DETECTION_EVENTS_LOCAL_CACHE_KEY = 'atlaix-detection-events-cache';
+const DETECTION_EVENTS_LOCAL_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+// Discovered tokens can remain useful even when they are not rediscovered every week.
+// Keep the cache broad, then rely on the feed filters/scoring to surface the best rows.
+const STALE_TOKEN_RETENTION_DAYS = 30;
 const HYDRATION_LIMIT = 700;
 const ACTIVE_FEED_LIMIT = 1000;
 const STALE_PURGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -303,6 +319,36 @@ const purgeExcludedSupabaseRows = async (rows: any[]) => {
             }
             return;
         }
+    }
+};
+
+const setCachedDetectionEvents = (events: AlphaGauntletEvent[]) => {
+    const filteredEvents = events.filter((event) => event?.token && event.eventType);
+    cache.detectionEvents = { data: filteredEvents, timestamp: Date.now() };
+
+    if (!canUseLocalStorage()) return;
+
+    try {
+        window.localStorage.setItem(DETECTION_EVENTS_LOCAL_CACHE_KEY, JSON.stringify(cache.detectionEvents));
+    } catch {
+        // Ignore storage quota and privacy mode errors.
+    }
+};
+
+const getLocalCachedDetectionEvents = () => {
+    if (!canUseLocalStorage()) return null;
+
+    try {
+        const raw = window.localStorage.getItem(DETECTION_EVENTS_LOCAL_CACHE_KEY);
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw) as Cache['detectionEvents'];
+        if (!parsed?.data || !Array.isArray(parsed.data) || typeof parsed.timestamp !== 'number') return null;
+        if (Date.now() - parsed.timestamp > DETECTION_EVENTS_LOCAL_CACHE_MAX_AGE_MS) return null;
+
+        return parsed;
+    } catch {
+        return null;
     }
 };
 
@@ -559,6 +605,21 @@ export const DatabaseService = {
         };
     },
 
+    getCachedDetectionEvents: (): AlphaGauntletEvent[] => {
+        if (cache.detectionEvents) {
+            const age = Date.now() - cache.detectionEvents.timestamp;
+            if (age < DETECTION_EVENTS_LOCAL_CACHE_MAX_AGE_MS) {
+                return cache.detectionEvents.data;
+            }
+        }
+
+        const localCache = getLocalCachedDetectionEvents();
+        if (!localCache) return [];
+
+        cache.detectionEvents = localCache;
+        return localCache.data;
+    },
+
     getInitialMarketData: async (): Promise<{ data: MarketCoin[], source: string, latency: number }> => {
         const start = performance.now();
         const cached = DatabaseService.getCachedMarketData();
@@ -725,9 +786,9 @@ export const DatabaseService = {
             // Return the top 1000 assets to maintain a broader market view.
             const finalData = filterAlphaTokens(mergedList.slice(0, ACTIVE_FEED_LIMIT).map((entry) => entry.coin));
 
-            // Sync new discoveries to DB (Background)
+            // Persist accepted feed tokens before returning so reloads hydrate the same set.
             if (newPairs.length > 0 || updatedPairs.length > 0) {
-                DatabaseService.syncToSupabase(finalData).catch(err => console.warn("Supabase Sync Warning:", err.message));
+                await DatabaseService.syncToSupabase(finalData);
             }
 
             setCachedMarketData(finalData);
@@ -931,7 +992,7 @@ export const DatabaseService = {
                 .upsert(dbPayload, { onConflict: 'address,chain' });
 
             if (error) {
-                warnSupabaseOnce(`Supabase Sync Warning: ${error.message}`);
+                warnSupabaseOnce(`Supabase discovered_tokens sync failed: ${formatSupabaseError(error)}. Apply supabase/discovered_tokens.sql if the table or unique constraint is missing.`);
                 if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
                     supabaseAvailable = false;
                 }
@@ -989,7 +1050,7 @@ export const DatabaseService = {
 
             if (error || !data) {
                 if (error) {
-                    warnSupabaseOnce(`Supabase Sync Warning: ${error.message}`);
+                    warnSupabaseOnce(`Supabase discovered_tokens read failed: ${formatSupabaseError(error)}. Apply supabase/discovered_tokens.sql if the table is missing.`);
                     if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
                         supabaseAvailable = false;
                     }
@@ -1038,9 +1099,15 @@ export const DatabaseService = {
                 return [];
             }
 
-            return data
+            const events = data
                 .map((row: any) => row.raw_event as AlphaGauntletEvent)
                 .filter((event: AlphaGauntletEvent | null | undefined): event is AlphaGauntletEvent => Boolean(event?.token && event.eventType));
+
+            if (events.length) {
+                setCachedDetectionEvents(events);
+            }
+
+            return events;
         } catch (e) {
             if (e instanceof Error && /fetch failed|failed to fetch|network/i.test(e.message)) {
                 supabaseAvailable = false;
@@ -1051,7 +1118,9 @@ export const DatabaseService = {
 
     syncDetectionEvents: async (events: AlphaGauntletEvent[]) => {
         try {
-            if (!events.length || !supabase || !supabaseAvailable || !detectionEventsTableAvailable) return;
+            if (!events.length) return;
+            setCachedDetectionEvents(events.slice(0, 200));
+            if (!supabase || !supabaseAvailable || !detectionEventsTableAvailable) return;
 
             const dedupedPayload = new Map<string, {
                 event_key: string;
@@ -1183,7 +1252,7 @@ export const DatabaseService = {
         }
     },
 
-    getTokenDetails: async (address: string, chainFilter?: string): Promise<any> => {
+    getTokenDetails: async (address: string, chainFilter?: string, preferredPairAddress?: string): Promise<any> => {
         try {
             if (!address || address.length < 30) return null;
 
@@ -1206,13 +1275,19 @@ export const DatabaseService = {
                 // Chain Filter
                 if (chainFilter && p.chainId.toLowerCase() !== chainFilter.toLowerCase()) return;
 
+                if (preferredPairAddress && p.pairAddress?.toLowerCase() === preferredPairAddress.toLowerCase()) {
+                    bestPair = p;
+                    maxLiq = p.liquidity?.usd || 0;
+                    return;
+                }
+
                 // Blacklist specific DEXes known for bad data
                 if (['9inch', 'shibaswap'].includes(p.dexId)) return;
 
                 const liq = p.liquidity?.usd || 0;
 
                 // Track "best" pair: STRICTLY highest liquidity wins
-                if (liq > maxLiq) {
+                if (!preferredPairAddress && liq > maxLiq) {
                     maxLiq = liq;
                     bestPair = p;
                 }

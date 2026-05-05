@@ -21,7 +21,7 @@ import {
 import { DatabaseService } from '../services/DatabaseService';
 import { ChainActivityService, RealActivity } from '../services/ChainActivityService';
 import { MoralisService } from '../services/MoralisService';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { EnrichedTokenData } from '../types';
 import { SolanaRpcService } from '../services/SolanaRpcService';
 import { formatCompactNumber } from '../utils/format';
@@ -112,6 +112,9 @@ const buildDexAggregateActivity = (args: {
 export const TokenDetails: React.FC = () => {
     const { address } = useParams<{ address: string }>();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const preferredPairAddress = searchParams.get('pair') || undefined;
+    const preferredChain = searchParams.get('chain') || undefined;
     const [enrichedData, setEnrichedData] = useState<EnrichedTokenData | null>(null);
     const [loading, setLoading] = useState(true);
     const [activityFeed, setActivityFeed] = useState<RealActivity[]>([]);
@@ -132,7 +135,7 @@ export const TokenDetails: React.FC = () => {
             setLoading(true);
 
             try {
-                const data = await DatabaseService.getTokenDetails(address);
+                const data = await DatabaseService.getTokenDetails(address, preferredChain, preferredPairAddress);
                 if (data) {
                     const enriched: EnrichedTokenData = {
                         ...data,
@@ -199,7 +202,7 @@ export const TokenDetails: React.FC = () => {
         };
 
         fetchData();
-    }, [address]);
+    }, [address, preferredChain, preferredPairAddress]);
 
     useEffect(() => {
         setCompactChartLoaded(false);
@@ -328,7 +331,7 @@ export const TokenDetails: React.FC = () => {
                 </div>
             </section>
 
-            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_1fr_248px]">
+            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.9fr)_248px]">
                 <div className="overflow-hidden rounded-lg border border-border bg-card p-3">
                     <div className="relative h-[500px] overflow-hidden bg-main">
                         {!compactChartLoaded && (
