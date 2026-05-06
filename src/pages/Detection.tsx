@@ -369,8 +369,10 @@ export const Detection: React.FC = () => {
 
                 const storedEvents = await DatabaseService.fetchDetectionEvents();
                 applyEvents(storedEvents, false);
+                return storedEvents.length > 0 || cachedEvents.length > 0;
             } catch (error) {
                 console.error('Global detection cache hydration error', error);
+                return false;
             }
         };
 
@@ -402,7 +404,11 @@ export const Detection: React.FC = () => {
             }
         };
 
-        hydrateStoredEvents().finally(() => loadEvents(!hasDisplayedEvents));
+        hydrateStoredEvents().then((hydrated) => {
+            if (!hydrated) {
+                loadEvents(true);
+            }
+        });
         const interval = setInterval(() => {
             const shouldRunFullDiscovery = Date.now() - lastFullRefreshAt >= FULL_DISCOVERY_REFRESH_INTERVAL_MS;
             loadEvents(shouldRunFullDiscovery);

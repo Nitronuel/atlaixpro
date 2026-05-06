@@ -353,6 +353,48 @@ const getLocalCachedDetectionEvents = () => {
     }
 };
 
+const getDetectionEventKey = (event: AlphaGauntletEvent) => {
+    const tokenKey = event.token.address || event.token.ticker;
+    return [
+        event.token.chain.toLowerCase(),
+        tokenKey.toLowerCase(),
+        event.eventType.toLowerCase()
+    ].join(':');
+};
+
+const preserveStoredDetectionTimes = async (events: AlphaGauntletEvent[]) => {
+    if (!events.length || !supabase || !supabaseAvailable || !detectionEventsTableAvailable) {
+        return events;
+    }
+
+    try {
+        const eventKeys = [...new Set(events.map(getDetectionEventKey))];
+        const { data, error } = await supabase
+            .from(DETECTION_EVENTS_TABLE)
+            .select('event_key, detected_at, raw_event')
+            .in('event_key', eventKeys);
+
+        if (error || !data) return events;
+
+        const detectedAtByKey = new Map<string, number>();
+        data.forEach((row: any) => {
+            const rawDetectedAt = Number(row.raw_event?.detectedAt || 0);
+            const storedDetectedAt = row.detected_at ? new Date(row.detected_at).getTime() : 0;
+            const detectedAt = rawDetectedAt || storedDetectedAt;
+            if (row.event_key && detectedAt > 0) {
+                detectedAtByKey.set(row.event_key, detectedAt);
+            }
+        });
+
+        return events.map((event) => {
+            const preservedDetectedAt = detectedAtByKey.get(getDetectionEventKey(event));
+            return preservedDetectedAt ? { ...event, detectedAt: preservedDetectedAt } : event;
+        });
+    } catch {
+        return events;
+    }
+};
+
 const getPairStats = (pair: DexPair) => {
     const liquidity = pair.liquidity?.usd || 0;
     const volume = pair.volume?.h24 || 0;
@@ -1120,7 +1162,8 @@ export const DatabaseService = {
     syncDetectionEvents: async (events: AlphaGauntletEvent[]) => {
         try {
             if (!events.length) return;
-            setCachedDetectionEvents(events.slice(0, 200));
+            const timestampStableEvents = await preserveStoredDetectionTimes(events.slice(0, 200));
+            setCachedDetectionEvents(timestampStableEvents);
             if (!supabase || !supabaseAvailable || !detectionEventsTableAvailable) return;
 
             const dedupedPayload = new Map<string, {
@@ -1137,15 +1180,11 @@ export const DatabaseService = {
                 raw_event: AlphaGauntletEvent;
             }>();
 
-            events.slice(0, 200).forEach((event) => {
+            timestampStableEvents.forEach((event) => {
                 const tokenKey = event.token.address || event.token.ticker;
                 if (!tokenKey) return;
 
-                const eventKey = [
-                    event.token.chain.toLowerCase(),
-                    tokenKey.toLowerCase(),
-                    event.eventType.toLowerCase()
-                ].join(':');
+                const eventKey = getDetectionEventKey(event);
 
                 dedupedPayload.set(eventKey, {
                     event_key: eventKey,
