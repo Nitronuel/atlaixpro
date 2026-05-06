@@ -52,9 +52,10 @@ const formatSupabaseError = (error: any) => {
     return parts.join(' | ') || 'Unknown Supabase error';
 };
 
-const DEXSCREENER_SEARCH_URL = '/api/dexscreener/latest/dex/search';
-const DEXSCREENER_PAIRS_URL = '/api/dexscreener/latest/dex/pairs';
-const DEXSCREENER_TOKENS_URL = '/api/dexscreener/latest/dex/tokens';
+const DEXSCREENER_ROUTE_PREFIX = typeof window === 'undefined' ? 'https://api.dexscreener.com' : '/api/dexscreener';
+const DEXSCREENER_SEARCH_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/search`;
+const DEXSCREENER_PAIRS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/pairs`;
+const DEXSCREENER_TOKENS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/tokens`;
 const SMART_MONEY_TABLE = 'smart_money_wallets';
 const DETECTION_EVENTS_TABLE = 'detection_engine_events';
 

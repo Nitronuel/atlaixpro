@@ -7,7 +7,7 @@ import { fetchProvider } from './ProviderGateway';
 
 export class SolanaRpcService {
     private static readonly IS_BROWSER = typeof window !== 'undefined';
-    private static readonly IS_DEV = import.meta.env.DEV;
+    private static readonly IS_DEV = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV);
     private static RPC_ENDPOINTS = [
         ...(SolanaRpcService.IS_BROWSER ? ['/api/providers/solana-helius'] : (APP_CONFIG.heliusKey ? [`https://mainnet.helius-rpc.com/?api-key=${APP_CONFIG.heliusKey}`] : [])),
         ...(SolanaRpcService.IS_BROWSER ? ['/api/providers/solana-alchemy'] : (APP_CONFIG.alchemyKey ? [`https://solana-mainnet.g.alchemy.com/v2/${APP_CONFIG.alchemyKey}`] : [])),

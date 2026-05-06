@@ -17,6 +17,7 @@ export type ImpactfulActivity = {
 const parseUsd = (value: string) => Number(String(value || '').replace(/[$,]/g, '')) || 0;
 const ACTIVITY_CACHE_PREFIX = 'atlaix-token-activity-cache:';
 const ACTIVITY_CACHE_MAX_AGE_MS = 60 * 1000;
+const ACTIVITY_CACHE_MAX_ITEMS = 100;
 
 const canUseLocalStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
@@ -44,7 +45,7 @@ const setCachedActivities = (chain: string, tokenAddress: string, activities: Im
 
     try {
         window.localStorage.setItem(activityCacheKey(chain, tokenAddress), JSON.stringify({
-            activities: activities.slice(0, 80),
+            activities: activities.slice(0, ACTIVITY_CACHE_MAX_ITEMS),
             timestamp: Date.now()
         }));
     } catch {

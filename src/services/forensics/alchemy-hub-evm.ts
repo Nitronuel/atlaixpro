@@ -471,7 +471,11 @@ async function classifyEvmPublicConnectors(chain: EvmChain, tokenAddress: string
         return [address, null] as const;
     });
 
-    return new Map(entries.filter((entry): entry is [string, PublicEvmConnectorDecision] => Boolean(entry[1])));
+    const decisions: Array<[string, PublicEvmConnectorDecision]> = [];
+    entries.forEach(([address, decision]) => {
+        if (decision) decisions.push([address, decision]);
+    });
+    return new Map<string, PublicEvmConnectorDecision>(decisions);
 }
 
 function buildTransferEdges(transfers: AlchemyTransfer[], decimals: number, trackedWallets: Set<string>) {

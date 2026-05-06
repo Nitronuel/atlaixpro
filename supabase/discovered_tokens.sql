@@ -26,6 +26,15 @@ create index if not exists discovered_tokens_chain_last_seen_idx
 create index if not exists discovered_tokens_ticker_idx
     on public.discovered_tokens (ticker);
 
+create unique index if not exists discovered_tokens_address_chain_unique_idx
+    on public.discovered_tokens (address, chain);
+
+alter table public.discovered_tokens
+    add column if not exists created_at timestamptz not null default timezone('utc', now());
+
+alter table public.discovered_tokens
+    add column if not exists updated_at timestamptz not null default timezone('utc', now());
+
 alter table public.discovered_tokens enable row level security;
 
 drop policy if exists "Discovered tokens are readable" on public.discovered_tokens;

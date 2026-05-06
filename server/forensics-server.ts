@@ -67,6 +67,8 @@ const { analyzeAlchemyHubToken } = await import('../src/services/forensics/alche
 const { analyzeAlchemyHubEvmToken } = await import('../src/services/forensics/alchemy-hub-evm');
 const { fetchMoralisTopHolders } = await import('../src/services/forensics/moralis-top-holders');
 const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import('../src/services/forensics/alchemy-hub-chains');
+const { DetectionEngineRunner } = await import('./detection-engine-runner');
+const detectionEngine = new DetectionEngineRunner();
 
 const PROVIDER_TIMEOUT_MS = 18_000;
 const PROVIDER_ALLOWED_HOSTS = new Set([
@@ -307,6 +309,8 @@ queue.start(async (tokenAddress, stage) => {
     return report;
 });
 
+detectionEngine.start();
+
 const server = createServer(async (request, response) => {
     const method = request.method || 'GET';
     const requestUrl = new URL(request.url || '/', `http://${request.headers.host || `127.0.0.1:${PORT}`}`);
@@ -375,6 +379,17 @@ const server = createServer(async (request, response) => {
             json(response, 500, { error: error instanceof Error ? error.message : 'Solana Alchemy proxy failed.' });
             return;
         }
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/detection/status') {
+        json(response, 200, detectionEngine.getStatus());
+        return;
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/detection/run') {
+        const status = await detectionEngine.runNow();
+        json(response, 200, status);
+        return;
     }
 
     if (method === 'POST' && requestUrl.pathname === '/api/token-activity/watch') {
@@ -454,13 +469,14 @@ const server = createServer(async (request, response) => {
         const parts = requestUrl.pathname.split('/').filter(Boolean);
         const chain = parts[2] || '';
         const tokenAddress = parts[3] || '';
-        const activities = ImpactfulTokenActivityStore.getActivities(chain, tokenAddress);
+        const activities = await ImpactfulTokenActivityStore.getActivities(chain, tokenAddress);
         const metadata = ImpactfulTokenActivityStore.getActivityMetadata(chain, tokenAddress);
 
         json(response, 200, {
             activities,
             savedAt: metadata.savedAt,
             expiresAt: metadata.expiresAt,
+            maxEvents: metadata.maxEvents,
             version: metadata.version,
             stats: ImpactfulTokenActivityStore.getWatchStats()
         });
