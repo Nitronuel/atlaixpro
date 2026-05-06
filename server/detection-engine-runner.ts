@@ -5,6 +5,7 @@ import type { RealActivity } from '../src/services/ChainActivityService';
 import { DatabaseService } from '../src/services/DatabaseService';
 import { ImpactfulTokenActivityStore } from './impactful-token-activity';
 import type { ImpactfulTokenActivity } from './impactful-token-activity';
+import { DetectionSnapshotStore } from './detection-snapshot-store';
 
 type RunnerStatus = {
     enabled: boolean;
@@ -191,9 +192,10 @@ export class DetectionEngineRunner {
                 .sort((a, b) => b.score - a.score)
                 .slice(0, this.status.topLimit);
 
-            await DatabaseService.syncDetectionEvents(topEvents);
-            await this.watchTopEvents(topEvents);
-            await this.prewarmTopEvents(topEvents);
+            const sharedTopEvents = await DetectionSnapshotStore.upsertEvents(topEvents);
+            await DatabaseService.syncDetectionEvents(sharedTopEvents);
+            await this.watchTopEvents(sharedTopEvents);
+            await this.prewarmTopEvents(sharedTopEvents);
 
             this.status.tokensDetected = detectedEvents.length;
             this.status.tokensWatched = topEvents.length;

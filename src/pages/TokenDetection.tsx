@@ -189,9 +189,10 @@ const toSnapshotFromMarketCoin = (coin: MarketCoin): TokenSnapshot => ({
 
 const findStoredDetectionCoin = async (query: string): Promise<{ coin: MarketCoin; event: AlphaGauntletEvent } | null> => {
     const normalizedQuery = query.toLowerCase();
+    const serverEvents = await DatabaseService.fetchServerDetectionFeed();
     const cachedEvents = DatabaseService.getCachedDetectionEvents();
     const storedEvents = await DatabaseService.fetchDetectionEvents();
-    const events = [...storedEvents, ...cachedEvents];
+    const events = [...serverEvents, ...storedEvents, ...cachedEvents];
 
     const event = events.find((candidate) => {
         const address = candidate.token.address?.toLowerCase();

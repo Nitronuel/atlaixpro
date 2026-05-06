@@ -364,6 +364,12 @@ export const Detection: React.FC = () => {
 
         const hydrateStoredEvents = async () => {
             try {
+                const serverEvents = await DatabaseService.fetchServerDetectionFeed();
+                if (serverEvents.length) {
+                    applyEvents(serverEvents, false);
+                    return true;
+                }
+
                 const cachedEvents = DatabaseService.getCachedDetectionEvents();
                 applyEvents(cachedEvents, false);
 
@@ -383,6 +389,12 @@ export const Detection: React.FC = () => {
 
             try {
                 if (!cancelled && !hasDisplayedEvents) setLoading(true);
+                const serverEvents = await DatabaseService.fetchServerDetectionFeed();
+                if (!cancelled && serverEvents.length > 0) {
+                    applyEvents(serverEvents, false);
+                    return;
+                }
+
                 const response = await DatabaseService.getMarketData(force, !force);
                 const qualifiedEvents = AlphaGauntletService.getDetectionEvents(response.data);
 
@@ -423,6 +435,13 @@ export const Detection: React.FC = () => {
     const refreshEvents = async () => {
         try {
             setLoading(true);
+            await DatabaseService.runServerDetection();
+            const serverEvents = await DatabaseService.fetchServerDetectionFeed();
+            if (serverEvents.length > 0) {
+                setEvents(stabilizeEvents(serverEvents, false));
+                return;
+            }
+
             const response = await DatabaseService.getMarketData(true, false);
             const qualifiedEvents = AlphaGauntletService.getDetectionEvents(response.data);
 

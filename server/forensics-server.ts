@@ -68,6 +68,8 @@ const { analyzeAlchemyHubEvmToken } = await import('../src/services/forensics/al
 const { fetchMoralisTopHolders } = await import('../src/services/forensics/moralis-top-holders');
 const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import('../src/services/forensics/alchemy-hub-chains');
 const { DetectionEngineRunner } = await import('./detection-engine-runner');
+const { DetectionSnapshotStore } = await import('./detection-snapshot-store');
+const { DatabaseService } = await import('../src/services/DatabaseService');
 const detectionEngine = new DetectionEngineRunner();
 
 const PROVIDER_TIMEOUT_MS = 18_000;
@@ -384,6 +386,63 @@ const server = createServer(async (request, response) => {
     if (method === 'GET' && requestUrl.pathname === '/api/detection/status') {
         json(response, 200, detectionEngine.getStatus());
         return;
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/detection/feed') {
+        try {
+            const events = await DetectionSnapshotStore.getFeed();
+            json(response, 200, {
+                events,
+                generatedAt: new Date().toISOString(),
+                status: detectionEngine.getStatus()
+            });
+            return;
+        } catch (error) {
+            const fallbackEvents = await DatabaseService.fetchDetectionEvents();
+            json(response, 200, {
+                events: fallbackEvents,
+                generatedAt: new Date().toISOString(),
+                fallback: true,
+                warning: error instanceof Error ? error.message : 'Shared detection snapshot feed is unavailable.',
+                status: detectionEngine.getStatus()
+            });
+            return;
+        }
+    }
+
+    if (method === 'GET' && requestUrl.pathname.startsWith('/api/detection/token/')) {
+        try {
+            const parts = requestUrl.pathname.split('/').filter(Boolean);
+            const chain = parts[3] || '';
+            const tokenAddress = parts[4] || '';
+            const event = await DetectionSnapshotStore.getToken(chain, tokenAddress);
+
+            json(response, event ? 200 : 404, {
+                event,
+                generatedAt: new Date().toISOString()
+            });
+            return;
+        } catch (error) {
+            const parts = requestUrl.pathname.split('/').filter(Boolean);
+            const chain = (parts[3] || '').toLowerCase();
+            const tokenAddress = (parts[4] || '').toLowerCase();
+            const fallbackEvents = await DatabaseService.fetchDetectionEvents();
+            const event = fallbackEvents.find((candidate: any) => {
+                return candidate.token?.chain?.toLowerCase() === chain &&
+                    [candidate.token?.address, candidate.token?.pairAddress, candidate.token?.ticker]
+                        .filter(Boolean)
+                        .map((value: string) => value.toLowerCase())
+                        .includes(tokenAddress);
+            }) || null;
+
+            json(response, event ? 200 : 404, {
+                event,
+                generatedAt: new Date().toISOString(),
+                fallback: true,
+                warning: error instanceof Error ? error.message : 'Shared token snapshot is unavailable.'
+            });
+            return;
+        }
     }
 
     if (method === 'POST' && requestUrl.pathname === '/api/detection/run') {

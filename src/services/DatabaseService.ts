@@ -58,6 +58,9 @@ const DEXSCREENER_PAIRS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/pairs`;
 const DEXSCREENER_TOKENS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/tokens`;
 const SMART_MONEY_TABLE = 'smart_money_wallets';
 const DETECTION_EVENTS_TABLE = 'detection_engine_events';
+const apiUrl = (path: string) => APP_CONFIG.apiBaseUrl
+    ? `${APP_CONFIG.apiBaseUrl.replace(/\/$/, '')}${path}`
+    : path;
 
 // --- REQUIREMENTS ---
 // Broaden discovery intake, then rank for quality before surfacing to the feed.
@@ -661,6 +664,46 @@ export const DatabaseService = {
 
         cache.detectionEvents = localCache;
         return localCache.data;
+    },
+
+    fetchServerDetectionFeed: async (): Promise<AlphaGauntletEvent[]> => {
+        try {
+            const response = await fetch(apiUrl('/api/detection/feed'));
+            if (!response.ok) return [];
+            const payload = await response.json();
+            const events = Array.isArray(payload.events)
+                ? payload.events.filter((event: AlphaGauntletEvent | null | undefined): event is AlphaGauntletEvent => Boolean(event?.token && event.eventType))
+                : [];
+
+            if (events.length) {
+                setCachedDetectionEvents(events);
+            }
+
+            return events;
+        } catch {
+            return [];
+        }
+    },
+
+    fetchServerDetectionToken: async (chain: string, address: string): Promise<AlphaGauntletEvent | null> => {
+        try {
+            if (!chain || !address) return null;
+            const response = await fetch(apiUrl(`/api/detection/token/${encodeURIComponent(chain.toLowerCase())}/${encodeURIComponent(address)}`));
+            if (!response.ok) return null;
+            const payload = await response.json();
+            return payload.event?.token && payload.event?.eventType ? payload.event as AlphaGauntletEvent : null;
+        } catch {
+            return null;
+        }
+    },
+
+    runServerDetection: async () => {
+        try {
+            const response = await fetch(apiUrl('/api/detection/run'), { method: 'POST' });
+            return response.ok ? await response.json() : null;
+        } catch {
+            return null;
+        }
     },
 
     getInitialMarketData: async (): Promise<{ data: MarketCoin[], source: string, latency: number }> => {
