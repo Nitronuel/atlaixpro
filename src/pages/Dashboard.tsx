@@ -1,8 +1,9 @@
 // Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw, SlidersHorizontal, X, RotateCcw, BarChart3 } from 'lucide-react';
-import { MarketCoin } from '../types';
+import type { AlphaGauntletEventType, MarketCoin } from '../types';
 import { DatabaseService } from '../services/DatabaseService';
+import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { useNavigate } from 'react-router-dom';
 import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
@@ -35,6 +36,7 @@ const parseCurrency = (val: string | number) => {
 interface FeedFilters {
     visibleCount: string;
     chain: string;
+    eventType: string;
     marketCapMin: string;
     marketCapMax: string;
     liquidityMin: string;
@@ -48,6 +50,7 @@ interface FeedFilters {
 const DEFAULT_FEED_FILTERS: FeedFilters = {
     visibleCount: 'all',
     chain: 'all',
+    eventType: 'all',
     marketCapMin: '',
     marketCapMax: '',
     liquidityMin: '',
@@ -154,6 +157,33 @@ const mergeStableFeedData = (incoming: MarketCoin[], current: MarketCoin[], pres
 
 const meetsFeedVolumeMinimum = (coin: MarketCoin) =>
     parseCurrency(coin.volume24h) >= MIN_FEED_VOLUME_24H_USD;
+
+const EVENT_FILTER_OPTIONS: Array<{ value: 'all' | AlphaGauntletEventType; label: string }> = [
+    { value: 'all', label: 'All Events' },
+    { value: 'Accumulation', label: 'Accumulation' },
+    { value: 'Distribution', label: 'Distribution' },
+    { value: 'Market Stress', label: 'Market Stress' },
+    { value: 'Recovery', label: 'Recovery' },
+    { value: 'Liquidity Event', label: 'Liquidity Event' },
+    { value: 'Unusual Activity', label: 'Unusual Activity' }
+];
+
+const getEventBadgeStyle = (eventType?: AlphaGauntletEventType) => {
+    switch (eventType) {
+        case 'Accumulation':
+            return 'border-primary-green/40 bg-primary-green/10 text-primary-green';
+        case 'Distribution':
+            return 'border-primary-red/40 bg-primary-red/10 text-primary-red';
+        case 'Market Stress':
+            return 'border-primary-yellow/40 bg-primary-yellow/10 text-primary-yellow';
+        case 'Recovery':
+            return 'border-primary-blue/40 bg-primary-blue/10 text-primary-blue';
+        case 'Liquidity Event':
+            return 'border-primary-purple/40 bg-primary-purple/10 text-primary-purple';
+        default:
+            return 'border-border bg-card-hover text-text-medium';
+    }
+};
 
 export const Dashboard: React.FC<DashboardProps> = () => {
     const [timeFrame, setTimeFrame] = useState('12H');
@@ -394,6 +424,11 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             if (isExcludedAlphaToken(coin)) return false;
             if (!meetsFeedVolumeMinimum(coin)) return false;
             if (feedFilters.chain !== 'all' && coin.chain !== feedFilters.chain) return false;
+
+            if (feedFilters.eventType !== 'all') {
+                const event = AlphaGauntletService.qualifyToken(coin);
+                if (event?.eventType !== feedFilters.eventType) return false;
+            }
 
             const marketCap = parseCurrency(coin.cap);
             const liquidity = parseCurrency(coin.liquidity);
@@ -1060,6 +1095,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                             <thead>
                                 <tr>
                                     <SortHeader label="Chain Token" sortKey="ticker" minWidth="150px" />
+                                    <th style={{ minWidth: '150px' }}>
+                                        <div className="flex items-center gap-1.5 whitespace-nowrap text-left">
+                                            <Info size={12} className="text-text-dark" />
+                                            Event
+                                        </div>
+                                    </th>
                                     <SortHeader label="Price" sortKey="price" minWidth="100px" />
                                     <SortHeader label="Chg 24h" sortKey="change" minWidth="90px" />
                                     <SortHeader label="MCap" sortKey="cap" minWidth="100px" />
@@ -1079,6 +1120,8 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                     const isPositiveFlow = !coin.netFlow.includes('-');
                                     const flowColor = isPositiveFlow ? 'bg-primary-green' : 'bg-primary-red';
                                     const flowTextColor = isPositiveFlow ? 'text-primary-green' : 'text-primary-red';
+                                    const event = AlphaGauntletService.qualifyToken(coin);
+                                    const topTrigger = event?.triggers[0] || coin.signal;
 
                                     return (
                                         <tr
@@ -1096,6 +1139,17 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                                         <div className="font-bold text-xs leading-none text-text-light truncate" title={coin.ticker}>{coin.ticker}</div>
                                                         <div className="text-[9px] text-text-dark font-medium leading-tight mt-0.5 truncate" title={coin.name}>{coin.name}</div>
                                                     </div>
+                                                </div>
+                                            </td>
+
+                                            <td className="text-left">
+                                                <div className="flex w-[150px] max-w-[150px] flex-col items-start gap-1">
+                                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${getEventBadgeStyle(event?.eventType)}`}>
+                                                        <span className="truncate">{event?.eventType || 'Watching'}</span>
+                                                    </span>
+                                                    <span className="max-w-full truncate text-[10px] font-medium text-text-dark" title={topTrigger}>
+                                                        {topTrigger}
+                                                    </span>
                                                 </div>
                                             </td>
 
@@ -1193,6 +1247,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                         { value: 'all', label: 'All Networks' },
                                         ...chainOptions.map((chain) => ({ value: chain, label: chain }))
                                     ]}
+                                />
+                                <FilterSelect
+                                    label="Event Type"
+                                    value={draftFeedFilters.eventType}
+                                    onChange={(value) => updateDraftFilter('eventType', value)}
+                                    options={EVENT_FILTER_OPTIONS}
                                 />
                                 <FilterRange label="Market Cap" minKey="marketCapMin" maxKey="marketCapMax" suffix="$" />
                                 <FilterRange label="Liquidity" minKey="liquidityMin" maxKey="liquidityMax" suffix="$" />
