@@ -232,6 +232,41 @@ export const TokenDetails: React.FC = () => {
     const highSignalEvents = displayedActivity.filter(item => ['Burn', 'Whale', 'Add Liq', 'Remove Liq'].includes(item.tag || item.type));
     const visibleHighSignalEvents = highSignalEvents.length ? highSignalEvents : displayedActivity.slice(0, 6);
     const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
+    const tokenIntelligencePanel = (
+        <div className="rounded-lg border border-border bg-card p-5">
+            <h3 className="mb-4 text-base font-bold text-text-light">Token Intelligence</h3>
+            <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/50">
+                {[
+                    { icon: Droplets, label: 'LP Pools', value: enrichedData?.poolCount ? `${enrichedData.poolCount} Active` : '1 Active', valueClass: 'text-text-light' },
+                    { icon: Users, label: 'Active Wallets', value: enrichedData?.activeWallets24h ? enrichedData.activeWallets24h.toLocaleString() : 'N/A', valueClass: 'text-text-light' },
+                    { icon: Shield, label: 'Liquidity', value: formatCompactNumber(enrichedData?.liquidity?.usd, '$'), valueClass: 'text-text-light' },
+                    { icon: Activity, label: 'Volume (24H)', value: formatCompactNumber(volume24h, '$'), valueClass: 'text-text-light' },
+                    { icon: Zap, label: 'Net Volume Delta', value: `${netVolume >= 0 ? '+' : ''}${formatCompactNumber(netVolume, '$')}`, valueClass: netVolume >= 0 ? 'text-primary-green' : 'text-primary-red' },
+                    { icon: Activity, label: 'Buy / Sell Volume', value: null, customValue: true, valueClass: 'text-text-light' },
+                    { icon: Users, label: 'Holder Distribution', value: enrichedData?.holders ? enrichedData.holders.toLocaleString() : 'N/A', valueClass: 'text-text-light' },
+                    { icon: Activity, label: 'Age', value: getAgeLabel(enrichedData?.pairCreatedAt), valueClass: 'text-text-light' }
+                ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between gap-4 bg-main/20 px-3 py-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-card text-primary-green">
+                                <item.icon size={16} />
+                            </span>
+                            <span className="truncate text-sm font-medium text-text-light">{item.label}</span>
+                        </div>
+                        {item.customValue ? (
+                            <span className="shrink-0 text-sm font-bold">
+                                <span className="text-primary-green">{formatCompactNumber(buyVolume, '$')}</span>
+                                <span className="text-text-medium"> / </span>
+                                <span className="text-primary-red">{formatCompactNumber(sellVolume, '$')}</span>
+                            </span>
+                        ) : (
+                            <span className={`shrink-0 text-sm font-bold ${item.valueClass}`}>{item.value}</span>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
     const copyAddress = () => {
         if (!enrichedData?.baseToken.address) return;
         navigator.clipboard.writeText(enrichedData.baseToken.address);
@@ -274,7 +309,6 @@ export const TokenDetails: React.FC = () => {
             <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,209,255,0.09),transparent_32%),radial-gradient(circle_at_top_right,rgba(0,230,118,0.07),transparent_28%)]" />
 
             <div className="relative flex flex-col gap-1">
-                <h1 className="text-2xl font-black text-text-light">Token Details</h1>
                 <button onClick={onBack} className="flex w-fit items-center gap-2 text-sm font-medium text-text-medium transition-colors hover:text-text-light">
                     <ArrowLeft size={16} /> Back to Market
                 </button>
@@ -331,7 +365,7 @@ export const TokenDetails: React.FC = () => {
                 </div>
             </section>
 
-            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.9fr)_248px]">
+            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_248px]">
                 <div className="overflow-hidden rounded-lg border border-border bg-card p-3">
                     <div className="relative h-[500px] overflow-hidden bg-main">
                         {!compactChartLoaded && (
@@ -368,40 +402,6 @@ export const TokenDetails: React.FC = () => {
                 </div>
 
                 <div className="rounded-lg border border-border bg-card p-5">
-                    <h3 className="mb-4 text-base font-bold text-text-light">Token Intelligence</h3>
-                    <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/50">
-                        {[
-                            { icon: Droplets, label: 'LP Pools', value: enrichedData?.poolCount ? `${enrichedData.poolCount} Active` : '1 Active', valueClass: 'text-text-light' },
-                            { icon: Users, label: 'Active Wallets', value: enrichedData?.activeWallets24h ? enrichedData.activeWallets24h.toLocaleString() : 'N/A', valueClass: 'text-text-light' },
-                            { icon: Shield, label: 'Liquidity', value: formatCompactNumber(enrichedData?.liquidity?.usd, '$'), valueClass: 'text-text-light' },
-                            { icon: Activity, label: 'Volume (24H)', value: formatCompactNumber(volume24h, '$'), valueClass: 'text-text-light' },
-                            { icon: Zap, label: 'Net Volume Delta', value: `${netVolume >= 0 ? '+' : ''}${formatCompactNumber(netVolume, '$')}`, valueClass: netVolume >= 0 ? 'text-primary-green' : 'text-primary-red' },
-                            { icon: Activity, label: 'Buy / Sell Volume', value: null, customValue: true, valueClass: 'text-text-light' },
-                            { icon: Users, label: 'Holder Distribution', value: enrichedData?.holders ? enrichedData.holders.toLocaleString() : 'N/A', valueClass: 'text-text-light' },
-                            { icon: Activity, label: 'Age', value: getAgeLabel(enrichedData?.pairCreatedAt), valueClass: 'text-text-light' }
-                        ].map((item) => (
-                            <div key={item.label} className="flex items-center justify-between gap-4 bg-main/20 px-3 py-3">
-                                <div className="flex min-w-0 items-center gap-3">
-                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-card text-primary-green">
-                                        <item.icon size={16} />
-                                    </span>
-                                    <span className="truncate text-sm font-medium text-text-light">{item.label}</span>
-                                </div>
-                                {item.customValue ? (
-                                    <span className="shrink-0 text-sm font-bold">
-                                        <span className="text-primary-green">{formatCompactNumber(buyVolume, '$')}</span>
-                                        <span className="text-text-medium"> / </span>
-                                        <span className="text-primary-red">{formatCompactNumber(sellVolume, '$')}</span>
-                                    </span>
-                                ) : (
-                                    <span className={`shrink-0 text-sm font-bold ${item.valueClass}`}>{item.value}</span>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="rounded-lg border border-border bg-card p-5">
                     <h3 className="mb-4 text-base font-bold text-text-light">Quick Actions</h3>
                     <div className="grid gap-3">
                         {[
@@ -427,7 +427,9 @@ export const TokenDetails: React.FC = () => {
                 </div>
             </section>
 
-            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[0.85fr_1fr]">
+            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,0.95fr)_minmax(0,1.15fr)]">
+                {tokenIntelligencePanel}
+
                 <div className="rounded-lg border border-border bg-card p-5">
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <h3 className="text-base font-bold text-text-light">On-Chain Activity</h3>

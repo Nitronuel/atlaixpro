@@ -18,7 +18,7 @@ const STABLECOIN_SYMBOLS = new Set([
     'USDC', 'USDT', 'DAI', 'BUSD', 'TUSD', 'USDS', 'USDE', 'FDUSD', 'FRAX', 'LUSD',
     'GUSD', 'USDP', 'USDD', 'PYUSD', 'USD1', 'USDL', 'EURC', 'EURS', 'SUSD', 'MIM',
     'DOLA', 'CRVUSD', 'GHO', 'USDB', 'USDX', 'USDR', 'USDY', 'USDM', 'USDA', 'CUSD',
-    'CEUR', 'JUSD', 'JUPUSD'
+    'CEUR', 'JUSD', 'JUPUSD', 'USDF', 'USDF0', 'USD0', 'USDO', 'USDG', 'USN', 'UST', 'USTC'
 ]);
 
 const MAJOR_ASSET_SYMBOLS = new Set([
@@ -60,9 +60,18 @@ const WRAPPED_NAME_PATTERNS = [
 
 const STABLE_NAME_PATTERNS = [
     /\bstablecoin\b/i,
+    /\bstable coin\b/i,
     /\busd coin\b/i,
     /\btether\b/i,
     /\bpaypal usd\b/i,
+    /\bsynthetic usd\b/i,
+    /\bdigital dollar\b/i,
+    /\busd[-\s]?backed\b/i,
+    /\bdollar[-\s]?backed\b/i,
+    /\bpegged usd\b/i,
+    /\busd pegged\b/i,
+    /\bus dollar\b/i,
+    /\bu s dollar\b/i,
     /\bdai stable/i,
     /\busd stable/i,
     /\bstable usd\b/i
@@ -78,6 +87,20 @@ const INFRASTRUCTURE_NAME_PATTERNS = [
 
 const normalizeSymbol = (value?: string) => (value || '').trim().toUpperCase().replace(/\s+/g, '');
 const normalizeName = (value?: string) => (value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+const normalizeSymbolRoot = (value: string) => value.replace(/[^A-Z0-9]/g, '');
+
+const isStablecoinSymbol = (symbol: string) => {
+    const root = normalizeSymbolRoot(symbol);
+
+    return (
+        STABLECOIN_SYMBOLS.has(symbol) ||
+        STABLECOIN_SYMBOLS.has(root) ||
+        /^USD[A-Z0-9]{0,6}$/.test(root) ||
+        /^[A-Z0-9]{1,5}USD$/.test(root) ||
+        /^EUR[A-Z0-9]{0,6}$/.test(root) ||
+        /^[A-Z0-9]{1,5}EUR$/.test(root)
+    );
+};
 
 const MAJOR_ASSET_NAMES = new Set([
     'bitcoin',
@@ -124,7 +147,7 @@ export const classifyAlphaToken = (token: TokenFilterInput): TokenExclusion => {
 
     if (!symbol) return { excluded: false };
 
-    if (STABLECOIN_SYMBOLS.has(symbol) || STABLE_NAME_PATTERNS.some((pattern) => pattern.test(name))) {
+    if (isStablecoinSymbol(symbol) || STABLE_NAME_PATTERNS.some((pattern) => pattern.test(name))) {
         return { excluded: true, reason: 'stablecoin' };
     }
 

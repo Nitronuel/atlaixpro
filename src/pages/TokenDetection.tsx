@@ -5,7 +5,6 @@ import { Activity, AlertTriangle, ArrowLeft, Bell, Check, Copy, RefreshCw, Searc
 import { ChainActivityService } from '../services/ChainActivityService';
 import { DatabaseService } from '../services/DatabaseService';
 import { ImpactfulActivity, ImpactfulActivityService } from '../services/ImpactfulActivityService';
-import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { AlphaGauntletEvent, MarketCoin } from '../types';
 
 type TokenSnapshot = {
@@ -479,11 +478,6 @@ export const TokenDetection: React.FC = () => {
     const [watchStatus, setWatchStatus] = useState('');
     const [error, setError] = useState('');
 
-    const currentSignal = useMemo(() => {
-        if (!token) return null;
-        return AlphaGauntletService.qualifyToken(toMarketCoinFromSnapshot(token));
-    }, [token]);
-
     const registerWatch = async (resolved: TokenSnapshot, ttlMs: number, label: string) => {
         if (!resolved.address) return;
 
@@ -671,7 +665,7 @@ export const TokenDetection: React.FC = () => {
         <div className="space-y-6 pb-10">
             <div className="flex flex-col gap-4">
                 <button onClick={() => navigate('/detection')} className="flex items-center gap-2 text-text-medium hover:text-text-light transition-colors w-fit text-sm font-medium">
-                    <ArrowLeft size={18} /> Back to Global Detection
+                    <ArrowLeft size={18} /> Back to Detection Engine
                 </button>
 
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
@@ -721,14 +715,6 @@ export const TokenDetection: React.FC = () => {
                                     <div className="h-1 w-1 rounded-full bg-border"></div>
                                     <span className="rounded border border-border bg-card/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-text-medium">
                                         Admitted as {detectionEventType}
-                                    </span>
-                                </>
-                            )}
-                            {currentSignal && (
-                                <>
-                                    <div className="h-1 w-1 rounded-full bg-border"></div>
-                                    <span className="rounded border border-primary-green/20 bg-primary-green/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-green">
-                                        Current signal: {currentSignal.eventType}
                                     </span>
                                 </>
                             )}

@@ -1,9 +1,10 @@
 // Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw, SlidersHorizontal, X, RotateCcw } from 'lucide-react';
+import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw, SlidersHorizontal, X, RotateCcw, BarChart3 } from 'lucide-react';
 import { MarketCoin } from '../types';
 import { DatabaseService } from '../services/DatabaseService';
 import { useNavigate } from 'react-router-dom';
+import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
 interface DashboardProps {
     // onTokenSelect prop removed as we use routing
@@ -57,6 +58,14 @@ const DEFAULT_FEED_FILTERS: FeedFilters = {
     volumeMax: ''
 };
 
+const MIN_FEED_VOLUME_24H_USD = 100000;
+const FEED_ORDER_STORAGE_KEY = 'atlaix-live-alpha-feed-order-v1';
+
+type FeedOrderState = {
+    orderByKey: Record<string, number>;
+    nextOrder: number;
+};
+
 const parseFilterNumber = (value: string) => {
     if (!value.trim()) return null;
     const parsed = Number(value.replace(/[$,%\s,]/g, ''));
@@ -64,14 +73,87 @@ const parseFilterNumber = (value: string) => {
 };
 
 const getTokenKey = (coin: MarketCoin) =>
-    `${coin.chain || 'unknown'}:${coin.address || coin.ticker}`.toLowerCase();
+    `${coin.chain || 'unknown'}:${coin.address || coin.pairAddress || coin.ticker}`.toLowerCase();
 
-const mergeFeedData = (primary: MarketCoin[], fallback: MarketCoin[]) => {
-    const merged = new Map<string, MarketCoin>();
-    fallback.forEach((coin) => merged.set(getTokenKey(coin), coin));
-    primary.forEach((coin) => merged.set(getTokenKey(coin), coin));
-    return Array.from(merged.values());
+const loadFeedOrderState = (): FeedOrderState => {
+    if (typeof window === 'undefined') return { orderByKey: {}, nextOrder: 0 };
+
+    try {
+        const raw = window.localStorage.getItem(FEED_ORDER_STORAGE_KEY);
+        if (!raw) return { orderByKey: {}, nextOrder: 0 };
+
+        const parsed = JSON.parse(raw) as Partial<FeedOrderState>;
+        if (!parsed.orderByKey || typeof parsed.orderByKey !== 'object') {
+            return { orderByKey: {}, nextOrder: 0 };
+        }
+
+        const maxOrder = Object.values(parsed.orderByKey)
+            .filter((value): value is number => Number.isFinite(value))
+            .reduce((max, value) => Math.max(max, value), -1);
+
+        return {
+            orderByKey: parsed.orderByKey,
+            nextOrder: Number.isFinite(parsed.nextOrder) ? Math.max(parsed.nextOrder || 0, maxOrder + 1) : maxOrder + 1
+        };
+    } catch {
+        return { orderByKey: {}, nextOrder: 0 };
+    }
 };
+
+const saveFeedOrderState = (state: FeedOrderState) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+        window.localStorage.setItem(FEED_ORDER_STORAGE_KEY, JSON.stringify(state));
+    } catch {
+        // Ignore private-mode and quota errors.
+    }
+};
+
+const registerFeedOrder = (tokens: MarketCoin[], current: FeedOrderState): FeedOrderState => {
+    if (!tokens.length) return current;
+
+    let changed = false;
+    let nextOrder = current.nextOrder;
+    const orderByKey = { ...current.orderByKey };
+
+    tokens.forEach((coin) => {
+        const key = getTokenKey(coin);
+        if (orderByKey[key] !== undefined) return;
+
+        orderByKey[key] = nextOrder;
+        nextOrder += 1;
+        changed = true;
+    });
+
+    return changed ? { orderByKey, nextOrder } : current;
+};
+
+const mergeStableFeedData = (incoming: MarketCoin[], current: MarketCoin[], preserveMissing = false) => {
+    if (!incoming.length) return current;
+    if (!current.length) return incoming;
+
+    const incomingByKey = new Map<string, MarketCoin>();
+    incoming.forEach((coin) => incomingByKey.set(getTokenKey(coin), coin));
+
+    const stableRows: MarketCoin[] = [];
+    current.forEach((coin) => {
+        const key = getTokenKey(coin);
+        const updated = incomingByKey.get(key);
+        if (!updated) {
+            if (preserveMissing) stableRows.push(coin);
+            return;
+        }
+
+        stableRows.push(updated);
+        incomingByKey.delete(key);
+    });
+
+    return [...stableRows, ...incomingByKey.values()];
+};
+
+const meetsFeedVolumeMinimum = (coin: MarketCoin) =>
+    parseCurrency(coin.volume24h) >= MIN_FEED_VOLUME_24H_USD;
 
 export const Dashboard: React.FC<DashboardProps> = () => {
     const [timeFrame, setTimeFrame] = useState('12H');
@@ -98,6 +180,23 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [showFeedFilters, setShowFeedFilters] = useState(false);
     const [feedFilters, setFeedFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
     const [draftFeedFilters, setDraftFeedFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
+    const [chainVolumeSlide, setChainVolumeSlide] = useState(0);
+    const [feedOrderState, setFeedOrderState] = useState<FeedOrderState>(() => loadFeedOrderState());
+
+    const applyStableMarketData = (nextData: MarketCoin[], stableBase?: MarketCoin[], preserveMissing = false) => {
+        setMarketData((current) => {
+            const base = stableBase || current;
+            const merged = mergeStableFeedData(nextData, base, preserveMissing);
+
+            setFeedOrderState((currentOrder) => {
+                const nextOrder = registerFeedOrder(merged, currentOrder);
+                if (nextOrder !== currentOrder) saveFeedOrderState(nextOrder);
+                return nextOrder;
+            });
+
+            return merged;
+        });
+    };
 
     // Live Search Filter Effect
     // Live Search Filter Effect
@@ -112,9 +211,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
         // 1. Instant Local Search from Market Data
         const localMatches = marketData ? marketData.filter(coin =>
-            coin.ticker.toLowerCase().includes(query) ||
-            coin.name.toLowerCase().includes(query) ||
-            coin.address.toLowerCase().includes(query)
+            !isExcludedAlphaToken(coin) &&
+            meetsFeedVolumeMinimum(coin) &&
+            (
+                coin.ticker.toLowerCase().includes(query) ||
+                coin.name.toLowerCase().includes(query) ||
+                coin.address.toLowerCase().includes(query)
+            )
         ).slice(0, 5) : [];
 
         setSuggestions(localMatches);
@@ -129,7 +232,11 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
                 // Merge: Local first, then unique Global
                 const existingPairs = new Set(localMatches.map(c => (c.pairAddress || c.address || '').toLowerCase()));
-                const uniqueGlobal = globalResults.filter(c => !existingPairs.has((c.pairAddress || c.address || '').toLowerCase()));
+                const uniqueGlobal = globalResults.filter(c =>
+                    !existingPairs.has((c.pairAddress || c.address || '').toLowerCase()) &&
+                    !isExcludedAlphaToken(c) &&
+                    meetsFeedVolumeMinimum(c)
+                );
 
                 // Combine
                 let combined = [...localMatches, ...uniqueGlobal];
@@ -162,7 +269,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 const cached = DatabaseService.getCachedMarketData();
                 if (cached?.data.length) {
                     hydratedFeed = cached.data;
-                    setMarketData(cached.data);
+                    applyStableMarketData(cached.data, []);
                     setLastUpdated(new Date());
                     setIsLoading(false);
                     hasHydratedFeed = true;
@@ -171,7 +278,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 const persistedTokens = await DatabaseService.fetchFromSupabase();
                 if (persistedTokens.length) {
                     hydratedFeed = persistedTokens;
-                    setMarketData(persistedTokens);
+                    applyStableMarketData(persistedTokens);
                     setLastUpdated(new Date());
                     setIsLoading(false);
                     hasHydratedFeed = true;
@@ -179,7 +286,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     const hydrated = await DatabaseService.getInitialMarketData();
                     if (hydrated.data.length) {
                         hydratedFeed = hydrated.data;
-                        setMarketData(hydrated.data);
+                        applyStableMarketData(hydrated.data);
                         setLastUpdated(new Date());
                         setIsLoading(false);
                         hasHydratedFeed = true;
@@ -187,13 +294,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 }
 
                 const response = await DatabaseService.getMarketData(true, hasHydratedFeed);
-                setMarketData(hasHydratedFeed ? mergeFeedData(response.data, hydratedFeed) : response.data);
+                applyStableMarketData(response.data, hasHydratedFeed ? hydratedFeed : []);
                 setLastUpdated(new Date());
                 return;
             }
 
             const response = await DatabaseService.getMarketData(force, partial);
-            setMarketData(response.data);
+            applyStableMarketData(response.data, undefined, partial && !force);
             setLastUpdated(new Date());
         } catch (e) {
             console.error("DB Error", e);
@@ -284,6 +391,8 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
     const filteredData = useMemo(() => {
         return marketData.filter((coin) => {
+            if (isExcludedAlphaToken(coin)) return false;
+            if (!meetsFeedVolumeMinimum(coin)) return false;
             if (feedFilters.chain !== 'all' && coin.chain !== feedFilters.chain) return false;
 
             const marketCap = parseCurrency(coin.cap);
@@ -320,6 +429,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const sortedData = useMemo(() => {
         let data = [...filteredData];
         if (!sortConfig) {
+            data.sort((a, b) => {
+                const aOrder = feedOrderState.orderByKey[getTokenKey(a)] ?? Number.MAX_SAFE_INTEGER;
+                const bOrder = feedOrderState.orderByKey[getTokenKey(b)] ?? Number.MAX_SAFE_INTEGER;
+                if (aOrder !== bOrder) return aOrder - bOrder;
+                return getTokenKey(a).localeCompare(getTokenKey(b));
+            });
+
             const limit = feedFilters.visibleCount === 'all' ? data.length : Number(feedFilters.visibleCount);
             return data.slice(0, Number.isFinite(limit) ? limit : data.length);
         }
@@ -353,7 +469,14 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
         const limit = feedFilters.visibleCount === 'all' ? data.length : Number(feedFilters.visibleCount);
         return data.slice(0, Number.isFinite(limit) ? limit : data.length);
-    }, [feedFilters.visibleCount, filteredData, sortConfig]);
+    }, [feedFilters.visibleCount, feedOrderState.orderByKey, filteredData, sortConfig]);
+
+    useEffect(() => {
+        const total = Math.max(1, Math.ceil(sortedData.length / itemsPerPage));
+        if (currentPage > total) {
+            setCurrentPage(total);
+        }
+    }, [currentPage, sortedData.length]);
 
     // AI Market Pulse Logic
     const formatCompactCurrency = (num: number) => {
@@ -370,14 +493,17 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             topInflowToken: null,
             bestChain: "Ethereum",
             bestChainFlow: 0,
+            totalOnchainVolume: 0,
+            topChainVolumes: [],
             riskCount: 0
         };
 
+        const alphaMarketData = marketData.filter((coin) => !isExcludedAlphaToken(coin) && meetsFeedVolumeMinimum(coin));
         let bullishCount = 0;
         let totalProcessed = 0;
         let totalMarketVolume = 0;
 
-        marketData.forEach(coin => {
+        alphaMarketData.forEach(coin => {
             const h24 = parseFloat(coin.h24.replace(/[%+,]/g, ''));
             const volume = parseCurrency(coin.volume24h);
             if (h24 > 0) bullishCount++;
@@ -398,34 +524,43 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         else if (sentimentScore <= 25) sentimentLabel = "Extreme Fear";
         else if (sentimentScore <= 40) sentimentLabel = "Bearish";
 
-        const tokensByFlow = [...marketData].sort((a, b) => parseCurrency(b.netFlow) - parseCurrency(a.netFlow));
+        const tokensByFlow = [...alphaMarketData].sort((a, b) => parseCurrency(b.netFlow) - parseCurrency(a.netFlow));
         const topToken = tokensByFlow[0] || null;
 
-        const chainStats: Record<string, number> = {
-            'solana': 0, 'ethereum': 0, 'bsc': 0, 'base': 0
-        };
+        const chainStats: Record<string, number> = {};
 
-        marketData.forEach(coin => {
+        alphaMarketData.forEach(coin => {
             const chainKey = coin.chain.toLowerCase();
             const volume = parseCurrency(coin.volume24h);
+            let normalizedChain = chainKey || 'unknown';
 
-            if (chainKey.includes('sol')) chainStats['solana'] += volume;
-            else if (chainKey.includes('eth')) chainStats['ethereum'] += volume;
-            else if (chainKey.includes('bsc') || chainKey.includes('bnb')) chainStats['bsc'] += volume;
-            else if (chainKey.includes('base')) chainStats['base'] += volume;
+            if (chainKey.includes('sol')) normalizedChain = 'solana';
+            else if (chainKey.includes('eth')) normalizedChain = 'ethereum';
+            else if (chainKey.includes('bsc') || chainKey.includes('bnb')) normalizedChain = 'bsc';
+            else if (chainKey.includes('base')) normalizedChain = 'base';
+
+            chainStats[normalizedChain] = (chainStats[normalizedChain] || 0) + volume;
         });
 
         let bestChain = "Ethereum";
         let maxChainVol = -1;
+        const formatChainLabel = (chain: string) => {
+            if (chain === 'bsc') return 'BSC';
+            return chain.charAt(0).toUpperCase() + chain.slice(1);
+        };
+
+        const topChainVolumes = Object.entries(chainStats)
+            .map(([chain, volume]) => ({ chain: formatChainLabel(chain), volume }))
+            .filter((item) => item.volume > 0)
+            .sort((a, b) => b.volume - a.volume)
+            .slice(0, 6);
 
         Object.entries(chainStats).forEach(([chain, vol]) => {
             if (vol > maxChainVol) {
                 maxChainVol = vol;
-                bestChain = chain.charAt(0).toUpperCase() + chain.slice(1);
+                bestChain = formatChainLabel(chain);
             }
         });
-
-        if (bestChain === 'Bsc') bestChain = 'BSC';
 
         return {
             sentimentScore,
@@ -433,10 +568,39 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             topInflowToken: topToken,
             bestChain,
             bestChainFlow: maxChainVol,
+            totalOnchainVolume: totalMarketVolume,
+            topChainVolumes,
             riskCount: 0
         };
 
     }, [marketData]);
+
+    const chainVolumeSlideCount = Math.max(1, marketPulse.topChainVolumes.length);
+
+    useEffect(() => {
+        if (chainVolumeSlideCount <= 1) return;
+
+        const interval = window.setInterval(() => {
+            setChainVolumeSlide((current) => (current + 1) % chainVolumeSlideCount);
+        }, 3500);
+
+        return () => window.clearInterval(interval);
+    }, [chainVolumeSlideCount]);
+
+    useEffect(() => {
+        if (chainVolumeSlide >= chainVolumeSlideCount) {
+            setChainVolumeSlide(0);
+        }
+    }, [chainVolumeSlide, chainVolumeSlideCount]);
+
+    const visibleChainVolumePair = useMemo(() => {
+        const volumes = marketPulse.topChainVolumes;
+        if (!volumes.length) return [];
+
+        const current = volumes[chainVolumeSlide % volumes.length];
+        const next = volumes.length > 1 ? volumes[(chainVolumeSlide + 1) % volumes.length] : null;
+        return next ? [current, next] : [current];
+    }, [chainVolumeSlide, marketPulse.topChainVolumes]);
 
     const totalPages = Math.max(1, Math.ceil(sortedData.length / itemsPerPage));
     const paginatedData = useMemo(() => {
@@ -652,7 +816,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 <h3 className="text-sm font-black text-text-light">AI Market Pulse</h3>
                 <span className="h-1.5 w-1.5 rounded-full bg-primary-green" />
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="min-h-[64px] rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -706,6 +870,35 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                     {marketPulse.topInflowToken?.netFlow || "$0"}
                                 </span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="min-h-[64px] overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm">
+                    <div className="flex h-full min-w-0 flex-col justify-center">
+                        <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-text-medium">
+                            <BarChart3 size={14} className="text-text-medium" />
+                            <span className="truncate">24h DEX Volume</span>
+                        </div>
+                        <div key={chainVolumeSlide} className="mt-1.5 flex min-w-0 items-baseline gap-3 animate-fade-in">
+                            <div className="flex min-w-0 items-baseline gap-2">
+                                <span className="truncate text-base font-black text-text-light">
+                                    {visibleChainVolumePair[0]?.chain || 'Scanning'}
+                                </span>
+                                <span className="shrink-0 text-sm font-black text-primary-green">
+                                    ${formatCompactCurrency(visibleChainVolumePair[0]?.volume || 0)}
+                                </span>
+                            </div>
+                            {visibleChainVolumePair[1] && (
+                                <div className="flex min-w-0 items-baseline gap-1.5 opacity-45">
+                                    <span className="truncate text-xs font-black text-text-light">
+                                        {visibleChainVolumePair[1].chain}
+                                    </span>
+                                    <span className="shrink-0 font-mono text-[10px] font-bold text-primary-green">
+                                        ${formatCompactCurrency(visibleChainVolumePair[1].volume)}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

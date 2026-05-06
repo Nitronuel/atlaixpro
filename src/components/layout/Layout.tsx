@@ -65,12 +65,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
   const getPageTitle = () => {
     const path = location.pathname;
     if (path.includes('/dashboard')) return 'Overview';
+    if (path.includes('/detection/token/')) return 'Token Detection';
+    if (path.includes('/detection')) return 'Detection Engine';
     if (path.includes('/token-smart-money/')) return 'Token Smart Money View';
     if (path.includes('/token/')) return 'Token Details';
 
     if (path.includes('/heatmap')) return 'Token Heatmap';
     if (path.includes('/sentiment')) return 'Sentiment Intelligence';
-    if (path.includes('/detection')) return 'Detection';
     if (path.includes('/ai-assistant')) return 'AI Assistant';
     if (path.includes('/wallet')) return 'Wallet Tracker';
     if (path.includes('/wallet')) return 'Wallet Tracker';
@@ -85,12 +86,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
   const getPageSubtitle = () => {
     const path = location.pathname;
     if (path.includes('/dashboard')) return 'Track token and stay ahead of the crowd';
+    if (path.includes('/detection/token/')) return 'Detection context, scoring signals, and market activity for this admitted token';
+    if (path.includes('/detection')) return 'Surface qualified token events from buy pressure, sell pressure, liquidity shifts, and unusual activity';
     if (path.includes('/token-smart-money/')) return 'Wallet activity and smart-money context for this token';
     if (path.includes('/token/')) return 'Live market data, chart, token intelligence, and on-chain activity';
 
     if (path.includes('/heatmap')) return 'Visualize concentration of normal vs. abnormal activity';
     if (path.includes('/sentiment')) return 'Monitor user opinions, reviews, and feedback trends.';
-    if (path.includes('/detection')) return 'Identify anomalies, drift, or suspicious patterns';
     if (path.includes('/ai-assistant')) return 'Interact with Atlaix Intelligence';
     if (path.includes('/safe-scan')) return 'Security analysis and risk scoring for tokens';
     if (path.includes('/wallet')) return 'Monitor wallet activity, performance and patterns';

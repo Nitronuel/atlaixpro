@@ -62,14 +62,16 @@ const apiUrl = (path: string) => APP_CONFIG.apiBaseUrl
     ? `${APP_CONFIG.apiBaseUrl.replace(/\/$/, '')}${path}`
     : path;
 
+const MIN_FEED_VOLUME_24H_USD = 100000;
+
 // --- REQUIREMENTS ---
 // Broaden discovery intake, then rank for quality before surfacing to the feed.
 const REQUIREMENTS = {
     DISCOVERY_MIN_LIQUIDITY_USD: 50000,
-    DISCOVERY_MIN_VOLUME_24H: 10000,
+    DISCOVERY_MIN_VOLUME_24H: MIN_FEED_VOLUME_24H_USD,
     DISCOVERY_MIN_TXNS_24H: 25,
     RETENTION_MIN_LIQUIDITY_USD: 40000,
-    RETENTION_MIN_VOLUME_24H: 5000,
+    RETENTION_MIN_VOLUME_24H: MIN_FEED_VOLUME_24H_USD,
     FEED_MIN_SCORE: 32,
     TARGET_LIST_SIZE: 1000
 };
@@ -296,12 +298,18 @@ const purgeExcludedSupabaseRows = async (rows: any[]) => {
     if (Date.now() - lastExcludedPurgeAt < EXCLUDED_PURGE_INTERVAL_MS) return;
 
     const excludedAddresses = [...new Set(rows
-        .filter((row) => isExcludedAlphaToken(row.raw_data || {
-            ticker: row.ticker,
-            name: row.name,
-            chain: row.chain,
-            address: row.address
-        }))
+        .filter((row) => {
+            const token = row.raw_data || {
+                ticker: row.ticker,
+                name: row.name,
+                chain: row.chain,
+                address: row.address,
+                volume24h: row.volume_24h,
+                liquidity: row.liquidity
+            };
+
+            return isExcludedAlphaToken(token) || !shouldRetainCoin(token);
+        })
         .map((row) => row.address)
         .filter(Boolean))];
 
@@ -467,6 +475,9 @@ const shouldRetainCoin = (coin: MarketCoin) => {
     );
 };
 
+const filterFeedEligibleTokens = <T extends MarketCoin>(tokens: T[]): T[] =>
+    filterAlphaTokens(tokens).filter(shouldRetainCoin);
+
 const isUsefulDynamicQuery = (value: string) => {
     const normalized = value.trim();
     if (normalized.length < 2 || normalized.length > 24) return false;
@@ -631,7 +642,7 @@ export const DatabaseService = {
 
         if (cache.marketData) {
             return {
-                data: filterAlphaTokens(cache.marketData.data),
+                data: filterFeedEligibleTokens(cache.marketData.data),
                 source: 'MEMORY_CACHE',
                 latency: Math.round(performance.now() - start)
             };
@@ -642,7 +653,7 @@ export const DatabaseService = {
 
         cache.marketData = {
             ...localCache,
-            data: filterAlphaTokens(localCache.data)
+            data: filterFeedEligibleTokens(localCache.data)
         };
         return {
             data: cache.marketData.data,
@@ -739,7 +750,7 @@ export const DatabaseService = {
             const age = Date.now() - cache.marketData.timestamp;
             if (age < CACHE_FRESH_DURATION) {
                 return {
-                    data: filterAlphaTokens(cache.marketData.data),
+                    data: filterFeedEligibleTokens(cache.marketData.data),
                     source: 'CACHE',
                     latency: Math.round(performance.now() - start)
                 };
@@ -870,7 +881,7 @@ export const DatabaseService = {
 
             // 5. Limit size & Sync
             // Return the top 1000 assets to maintain a broader market view.
-            const finalData = filterAlphaTokens(mergedList.slice(0, ACTIVE_FEED_LIMIT).map((entry) => entry.coin));
+            const finalData = filterFeedEligibleTokens(mergedList.slice(0, ACTIVE_FEED_LIMIT).map((entry) => entry.coin));
 
             // Persist accepted feed tokens before returning so reloads hydrate the same set.
             if (newPairs.length > 0 || updatedPairs.length > 0) {
@@ -889,7 +900,7 @@ export const DatabaseService = {
             console.error("Critical Fetch Error:", error);
             const stored = await DatabaseService.fetchFromSupabase();
             // Fallback to seed if DB is also dead
-            return { data: filterAlphaTokens(stored.length ? stored : SEED_DATA), source: 'FALLBACK', latency: 0 };
+            return { data: filterFeedEligibleTokens(stored.length ? stored : SEED_DATA), source: 'FALLBACK', latency: 0 };
         }
     },
 
@@ -1041,7 +1052,7 @@ export const DatabaseService = {
 
     syncToSupabase: async (tokens: MarketCoin[]) => {
         try {
-            tokens = filterAlphaTokens(tokens);
+            tokens = filterFeedEligibleTokens(tokens);
             if (!tokens.length || !supabase || !supabaseAvailable) return;
             const dedupedPayload = new Map<string, {
                 address: string;
@@ -1149,7 +1160,7 @@ export const DatabaseService = {
                 }
             });
 
-            const tokens = filterAlphaTokens(data.map((row: any) => row.raw_data as MarketCoin));
+            const tokens = filterFeedEligibleTokens(data.map((row: any) => row.raw_data as MarketCoin));
             if (tokens.length) {
                 setCachedMarketData(tokens);
             }

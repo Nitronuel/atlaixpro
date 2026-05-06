@@ -691,7 +691,7 @@ export const Detection: React.FC = () => {
                     <div className="border-b border-border px-5 py-4">
                         <div className="flex items-center justify-between gap-3">
                             <div>
-                                <h3 className="text-lg font-bold text-text-light">Global Events</h3>
+                                <h3 className="text-lg font-bold text-text-light">Events</h3>
                                 <p className="mt-1 text-sm text-text-medium">Latest activity across detected tokens.</p>
                             </div>
                         </div>

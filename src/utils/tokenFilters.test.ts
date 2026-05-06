@@ -9,6 +9,11 @@ describe('alpha token hygiene filters', () => {
         });
         expect(isExcludedAlphaToken({ ticker: 'USDC', name: 'USD Coin', chain: 'base' })).toBe(true);
         expect(isExcludedAlphaToken({ ticker: 'JUPUSD', name: 'Jupiter USD', chain: 'solana' })).toBe(true);
+        expect(isExcludedAlphaToken({ ticker: 'USDF0', name: 'USDF0', chain: 'ethereum' })).toBe(true);
+        expect(isExcludedAlphaToken({ ticker: 'USD0++', name: 'Usual USD', chain: 'ethereum' })).toBe(true);
+        expect(isExcludedAlphaToken({ ticker: 'AUSD', name: 'AUSD', chain: 'base' })).toBe(true);
+        expect(isExcludedAlphaToken({ ticker: 'GHO', name: 'GHO Stablecoin', chain: 'ethereum' })).toBe(true);
+        expect(isExcludedAlphaToken({ ticker: 'EURC', name: 'Euro Coin', chain: 'base' })).toBe(true);
     });
 
     it('removes wrapped and bridged major assets', () => {
