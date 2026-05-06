@@ -333,9 +333,9 @@ const buildDetectionContextActivities = (
     }
 
     if (input.eventType) {
-        const txHash = `detection-${resolved.address}`;
+        const txHash = `detection-${resolved.address}-${input.eventType}-${detectedAt}`;
         activities.push({
-            id: `detection-${resolved.address}-${input.eventType}-${detectedAt}`,
+            id: txHash,
             type: input.eventType,
             severity: severity === 'Medium' ? 'High' : severity,
             title: `${input.eventType} Admission`,
@@ -350,7 +350,7 @@ const buildDetectionContextActivities = (
     }
 
     if (resolved.volume24h >= 5_000 && buyRatio >= 0.62) {
-        const txHash = `derived-buy-pressure-${resolved.address}`;
+        const txHash = `derived-buy-pressure-${resolved.address}-${detectedAt}`;
         activities.push({
             id: txHash,
             type: 'Whale Buy',
@@ -367,7 +367,7 @@ const buildDetectionContextActivities = (
     }
 
     if (resolved.volume24h >= 5_000 && sellRatio >= 0.62) {
-        const txHash = `derived-sell-pressure-${resolved.address}`;
+        const txHash = `derived-sell-pressure-${resolved.address}-${detectedAt}`;
         activities.push({
             id: txHash,
             type: 'Whale Sell',
@@ -385,7 +385,7 @@ const buildDetectionContextActivities = (
 
     if (Math.abs(resolved.priceChange24h) >= 10) {
         const positive = resolved.priceChange24h > 0;
-        const txHash = `derived-price-move-${resolved.address}`;
+        const txHash = `derived-price-move-${resolved.address}-${detectedAt}`;
         activities.push({
             id: txHash,
             type: positive ? 'Whale Buy' : 'Whale Sell',
@@ -402,7 +402,7 @@ const buildDetectionContextActivities = (
     }
 
     if (resolved.volume24h >= 25_000) {
-        const txHash = `derived-volume-spike-${resolved.address}`;
+        const txHash = `derived-volume-spike-${resolved.address}-${detectedAt}`;
         activities.push({
             id: txHash,
             type: 'Whale Transfer',
@@ -419,7 +419,7 @@ const buildDetectionContextActivities = (
     }
 
     if (resolved.liquidity > 0 && resolved.volume24h / resolved.liquidity >= 2) {
-        const txHash = `derived-liquidity-turnover-${resolved.address}`;
+        const txHash = `derived-liquidity-turnover-${resolved.address}-${detectedAt}`;
         activities.push({
             id: txHash,
             type: 'Liquidity Added',

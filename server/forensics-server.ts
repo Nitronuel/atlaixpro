@@ -537,6 +537,8 @@ const server = createServer(async (request, response) => {
             expiresAt: metadata.expiresAt,
             maxEvents: metadata.maxEvents,
             version: metadata.version,
+            source: ImpactfulTokenActivityStore.getActivitySource(),
+            count: activities.length,
             stats: ImpactfulTokenActivityStore.getWatchStats()
         });
         return;

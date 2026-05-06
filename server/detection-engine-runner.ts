@@ -6,6 +6,7 @@ import { DatabaseService } from '../src/services/DatabaseService';
 import { ImpactfulTokenActivityStore } from './impactful-token-activity';
 import type { ImpactfulTokenActivity } from './impactful-token-activity';
 import { DetectionSnapshotStore } from './detection-snapshot-store';
+import { buildDetectionImpactActivities } from './token-impact-timeline-builder';
 
 type RunnerStatus = {
     enabled: boolean;
@@ -194,6 +195,7 @@ export class DetectionEngineRunner {
 
             const sharedTopEvents = await DetectionSnapshotStore.upsertEvents(topEvents);
             await DatabaseService.syncDetectionEvents(sharedTopEvents);
+            await this.persistDetectionTimelineEvents(sharedTopEvents);
             await this.watchTopEvents(sharedTopEvents);
             await this.prewarmTopEvents(sharedTopEvents);
 
@@ -237,6 +239,24 @@ export class DetectionEngineRunner {
             });
             this.watchedUntil.set(watchKey, now + ttlMs);
         }
+    }
+
+    private async persistDetectionTimelineEvents(events: AlphaGauntletEvent[]) {
+        let warmed = 0;
+
+        for (const event of events) {
+            const tokenAddress = event.token.address;
+            if (!tokenAddress) continue;
+
+            const chain = event.token.chain.toLowerCase();
+            const activities = buildDetectionImpactActivities(event);
+            if (!activities.length) continue;
+
+            ImpactfulTokenActivityStore.cacheActivities(chain, tokenAddress, activities);
+            warmed += 1;
+        }
+
+        this.status.timelinesPrewarmed += warmed;
     }
 
     private async prewarmTopEvents(events: AlphaGauntletEvent[]) {

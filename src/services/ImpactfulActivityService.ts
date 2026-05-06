@@ -11,7 +11,7 @@ export type ImpactfulActivity = {
     wallet: string;
     txHash: string;
     detectedAt: number;
-    source: 'webhook' | 'recent-scan';
+    source: 'webhook' | 'recent-scan' | 'detection-engine';
 };
 
 const parseUsd = (value: string) => Number(String(value || '').replace(/[$,]/g, '')) || 0;

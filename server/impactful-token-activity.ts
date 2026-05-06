@@ -17,7 +17,7 @@ export type ImpactfulTokenActivity = {
     id: string;
     chain: string;
     tokenAddress: string;
-    type: 'Whale Buy' | 'Whale Sell' | 'Whale Transfer' | 'Liquidity Added' | 'Liquidity Removed' | 'Burn' | 'Mint' | 'Critical Contract Event';
+    type: string;
     severity: 'Critical' | 'High' | 'Signal';
     title: string;
     description: string;
@@ -26,6 +26,7 @@ export type ImpactfulTokenActivity = {
     wallet: string;
     txHash: string;
     detectedAt: number;
+    source?: string;
 };
 
 type ActivityCandidate = {
@@ -197,7 +198,8 @@ const fromSupabaseRow = (row: any): ImpactfulTokenActivity => {
         tokenAmount: Number(raw.tokenAmount ?? row.token_amount ?? 0),
         wallet: raw.wallet || row.wallet || '',
         txHash: raw.txHash || row.tx_hash || '',
-        detectedAt: raw.detectedAt ? Number(raw.detectedAt) : new Date(row.detected_at || row.saved_at || Date.now()).getTime()
+        detectedAt: raw.detectedAt ? Number(raw.detectedAt) : new Date(row.detected_at || row.saved_at || Date.now()).getTime(),
+        source: raw.source
     };
 };
 
@@ -695,6 +697,10 @@ export const ImpactfulTokenActivityStore = {
         }
 
         return tokenActivities.get(tokenKey(chain, tokenAddress)) || [];
+    },
+
+    getActivitySource: () => {
+        return supabaseAvailable && getSupabase() ? 'supabase' : 'local-fallback';
     },
 
     getActivityMetadata: (chain: string, tokenAddress: string) => {

@@ -74,8 +74,8 @@ const eventToRow = (event: AlphaGauntletEvent, firstDetectedAt?: string) => {
     return {
         detection_key: detectionKey,
         chain: token.chain.toLowerCase(),
-        token_address: token.address || token.ticker,
-        pair_address: token.pairAddress || null,
+        token_address: (token.address || token.ticker).toLowerCase(),
+        pair_address: token.pairAddress?.toLowerCase() || null,
         ticker: token.ticker,
         name: token.name,
         image_url: token.img || null,
@@ -219,7 +219,7 @@ export const DetectionSnapshotStore = {
             .from(SNAPSHOT_TABLE)
             .select('*')
             .eq('chain', normalizedChain)
-            .or(`token_address.eq.${normalizedAddress},pair_address.eq.${normalizedAddress},ticker.ilike.${address}`)
+            .or(`token_address.ilike.${normalizedAddress},pair_address.ilike.${normalizedAddress},ticker.ilike.${address}`)
             .order('score', { ascending: false })
             .limit(1);
 
