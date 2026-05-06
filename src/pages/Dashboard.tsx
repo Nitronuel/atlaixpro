@@ -630,7 +630,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         e.currentTarget.style.filter = 'grayscale(100%) opacity(0.5)';
     };
 
-    const getTokenKey = (coin: MarketCoin, context: string) =>
+    const getRenderTokenKey = (coin: MarketCoin, context: string) =>
         coin.pairAddress || coin.address || `${context}-${coin.chain}-${coin.ticker}-${coin.name}`;
 
     const getChainIcon = (chain: string) => {
@@ -943,7 +943,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                 <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
                                     {suggestions.map((coin) => (
                                         <div
-                                            key={getTokenKey(coin, 'suggestion')}
+                                            key={getRenderTokenKey(coin, 'suggestion')}
                                             className="flex items-center gap-3 px-4 py-3 hover:bg-card-hover cursor-pointer transition-colors border-b border-border/50 last:border-none"
                                             onClick={() => {
                                                 handleTokenNavigation(coin);
@@ -1082,7 +1082,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
                                     return (
                                         <tr
-                                            key={getTokenKey(coin, 'feed')}
+                                            key={getRenderTokenKey(coin, 'feed')}
                                             onClick={() => handleTokenNavigation(coin)}
                                             className="cursor-pointer hover:bg-card-hover/50 transition-colors"
                                         >
