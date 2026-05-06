@@ -6,7 +6,7 @@ import { ChainActivityService } from '../services/ChainActivityService';
 import { DatabaseService } from '../services/DatabaseService';
 import { ImpactfulActivity, ImpactfulActivityService } from '../services/ImpactfulActivityService';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
-import { MarketCoin } from '../types';
+import { AlphaGauntletEvent, MarketCoin } from '../types';
 
 type TokenSnapshot = {
     name: string;
@@ -175,9 +175,9 @@ const toSnapshotFromMarketCoin = (coin: MarketCoin): TokenSnapshot => ({
     price: coin.price,
     priceChange24h: Number(String(coin.h24).replace('%', '')) || 0,
     priceChange1h: Number(String(coin.h1).replace('%', '')) || 0,
-    volume24h: 0,
-    liquidity: 0,
-    marketCap: 0,
+    volume24h: parseMarketValue(coin.volume24h),
+    liquidity: parseMarketValue(coin.liquidity),
+    marketCap: parseMarketValue(coin.cap),
     buys24h: Number(coin.dexBuys || 0),
     sells24h: Number(coin.dexSells || 0),
     poolCount: 1,
@@ -186,6 +186,22 @@ const toSnapshotFromMarketCoin = (coin: MarketCoin): TokenSnapshot => ({
     sellVolume24h: parseMarketValue(coin.sellVolume24h) || undefined,
     pairCreatedAt: coin.createdTimestamp
 });
+
+const findStoredDetectionCoin = async (query: string): Promise<{ coin: MarketCoin; event: AlphaGauntletEvent } | null> => {
+    const normalizedQuery = query.toLowerCase();
+    const cachedEvents = DatabaseService.getCachedDetectionEvents();
+    const storedEvents = await DatabaseService.fetchDetectionEvents();
+    const events = [...storedEvents, ...cachedEvents];
+
+    const event = events.find((candidate) => {
+        const address = candidate.token.address?.toLowerCase();
+        const ticker = candidate.token.ticker?.toLowerCase();
+        const pairAddress = candidate.token.pairAddress?.toLowerCase();
+        return normalizedQuery === address || normalizedQuery === ticker || normalizedQuery === pairAddress;
+    });
+
+    return event ? { coin: event.token, event } : null;
+};
 
 const toMarketCoinFromSnapshot = (snapshot: TokenSnapshot): MarketCoin => {
     const totalTxns = snapshot.buys24h + snapshot.sells24h;
@@ -495,15 +511,26 @@ export const TokenDetection: React.FC = () => {
                 return;
             }
 
-            let pair = await DatabaseService.getTokenDetails(tokenQuery);
-            let fallbackCoin: MarketCoin | null = null;
+            const storedDetection = isDetectionToken ? await findStoredDetectionCoin(tokenQuery) : null;
+            let fallbackCoin: MarketCoin | null = storedDetection?.coin || null;
+            let pair = fallbackCoin
+                ? await withTimeout(
+                    DatabaseService.getTokenDetails(fallbackCoin.address || tokenQuery, fallbackCoin.chain, fallbackCoin.pairAddress),
+                    6000,
+                    null
+                )
+                : await DatabaseService.getTokenDetails(tokenQuery);
 
-            if (!pair) {
+            if (!pair && !fallbackCoin) {
                 const results = await DatabaseService.searchGlobalPairs(tokenQuery);
                 fallbackCoin = results[0] || null;
 
                 if (fallbackCoin?.address) {
-                    pair = await DatabaseService.getTokenDetails(fallbackCoin.address, fallbackCoin.chain);
+                    pair = await withTimeout(
+                        DatabaseService.getTokenDetails(fallbackCoin.address, fallbackCoin.chain, fallbackCoin.pairAddress),
+                        6000,
+                        null
+                    );
                 }
             }
 
@@ -511,7 +538,10 @@ export const TokenDetection: React.FC = () => {
 
             if (!resolved) {
                 setToken(null);
-                setError('No real token information was found for this scan.');
+                setError(isDetectionToken
+                    ? 'This detection is still warming up. Try again shortly.'
+                    : 'No real token information was found for this scan.'
+                );
                 return;
             }
 
