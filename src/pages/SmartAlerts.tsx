@@ -1,258 +1,259 @@
 // Route-level product screen for the Atlaix application.
 import React, { useState } from 'react';
 import {
-    Bell, Zap, Activity, TrendingUp, ShieldCheck, Plus, X,
-    CheckCircle2, AlertTriangle, Clock, Search, ChevronRight,
-    Sparkles, Flame, Wallet, Eye, BrainCircuit
+    Activity,
+    AlertTriangle,
+    Bell,
+    Clock,
+    Flame,
+    ShieldCheck,
+    TrendingUp,
+    Wallet,
+    X
 } from 'lucide-react';
-import { AiInterpretationService, InterpretationResult } from '../services/AiInterpretationService';
+
+type AlertType = 'Price' | 'Volume' | 'Liquidity' | 'Whale' | 'Alpha' | 'Risk';
+
+interface BasicAlertType {
+    title: string;
+    desc: string;
+    example: string;
+    type: AlertType;
+    metric: string;
+    icon: React.ReactNode;
+}
+
+interface AlertFeedItem {
+    id: number;
+    trigger: string;
+    type: AlertType;
+    target: string;
+    status: boolean;
+    lastTriggered: string;
+}
+
+interface AlertSetupDraft {
+    target: string;
+    condition: string;
+    value: string;
+}
+
+const BASIC_ALERT_TYPES: BasicAlertType[] = [
+    {
+        title: 'Price Target',
+        desc: 'Token crosses above or below a selected price.',
+        example: 'SOL above $200',
+        type: 'Price',
+        metric: 'Price',
+        icon: <TrendingUp size={18} />
+    },
+    {
+        title: '24h Volume Spike',
+        desc: 'Token volume reaches a selected dollar level or multiplier.',
+        example: '24h volume above $1M',
+        type: 'Volume',
+        metric: 'Volume',
+        icon: <Activity size={18} />
+    },
+    {
+        title: 'Liquidity Change',
+        desc: 'Liquidity is added, removed, or drops below a threshold.',
+        example: 'Liquidity below $100K',
+        type: 'Liquidity',
+        metric: 'Liquidity',
+        icon: <ShieldCheck size={18} />
+    },
+    {
+        title: 'Whale Buy or Sell',
+        desc: 'Large wallet activity crosses a dollar threshold.',
+        example: 'Whale buy above $50K',
+        type: 'Whale',
+        metric: 'Wallet Flow',
+        icon: <Wallet size={18} />
+    },
+    {
+        title: 'Live Alpha Event',
+        desc: 'Token appears in the Live Alpha Feed with a selected event.',
+        example: 'Liquidity Event detected',
+        type: 'Alpha',
+        metric: 'Alpha Event',
+        icon: <Flame size={18} />
+    },
+    {
+        title: 'Risk Flag',
+        desc: 'A token receives a new safety warning or risk signal.',
+        example: 'High risk flag appears',
+        type: 'Risk',
+        metric: 'Risk',
+        icon: <AlertTriangle size={18} />
+    }
+];
+
+const INITIAL_ALERTS: AlertFeedItem[] = [
+    { id: 1, trigger: 'ETH price above $3,500', type: 'Price', target: 'ETH', status: true, lastTriggered: '2 hours ago' },
+    { id: 2, trigger: 'Whale buy above $50K', type: 'Whale', target: 'Any token', status: true, lastTriggered: '1 day ago' },
+    { id: 3, trigger: 'SOL 24h volume above $1B', type: 'Volume', target: 'SOL', status: false, lastTriggered: 'Never' }
+];
+
+const TRIGGER_HISTORY = [
+    { id: 1, title: 'ETH Price Alert', time: '10:42 AM', description: 'ETH crossed $3,450.', type: 'Price' },
+    { id: 2, title: 'Whale Buy', time: '09:15 AM', description: 'A tracked wallet bought more than $50K.', type: 'Whale' },
+    { id: 3, title: 'Risk Flag', time: 'Yesterday', description: 'A token received a high-risk signal.', type: 'Risk' },
+    { id: 4, title: 'Volume Spike', time: 'Yesterday', description: 'BONK volume moved above its alert threshold.', type: 'Volume' },
+    { id: 5, title: 'Alpha Event', time: '2 days ago', description: 'A token entered the Live Alpha Feed.', type: 'Alpha' }
+] as const;
+
+const typeStyle = (type: string) => {
+    switch (type) {
+        case 'Price':
+            return 'border-primary-green/30 bg-primary-green/10 text-primary-green';
+        case 'Volume':
+            return 'border-primary-blue/30 bg-primary-blue/10 text-primary-blue';
+        case 'Liquidity':
+            return 'border-primary-purple/30 bg-primary-purple/10 text-primary-purple';
+        case 'Whale':
+            return 'border-primary-yellow/30 bg-primary-yellow/10 text-primary-yellow';
+        case 'Risk':
+            return 'border-primary-red/30 bg-primary-red/10 text-primary-red';
+        default:
+            return 'border-border bg-card-hover text-text-medium';
+    }
+};
+
+const alertIcon = (type: AlertType) => {
+    switch (type) {
+        case 'Price':
+            return <TrendingUp size={18} />;
+        case 'Whale':
+            return <Wallet size={18} />;
+        case 'Liquidity':
+            return <ShieldCheck size={18} />;
+        case 'Alpha':
+            return <Flame size={18} />;
+        case 'Risk':
+            return <AlertTriangle size={18} />;
+        default:
+            return <Activity size={18} />;
+    }
+};
+
+const SETUP_DEFAULTS: Record<AlertType, AlertSetupDraft> = {
+    Price: { target: 'SOL', condition: 'above', value: '$200' },
+    Volume: { target: 'Any token', condition: 'above', value: '$1M' },
+    Liquidity: { target: 'Any token', condition: 'below', value: '$100K' },
+    Whale: { target: 'Any token', condition: 'buy above', value: '$50K' },
+    Alpha: { target: 'Any token', condition: 'event is', value: 'Liquidity Event' },
+    Risk: { target: 'Any token', condition: 'risk is', value: 'High' }
+};
+
+const CONDITION_OPTIONS: Record<AlertType, string[]> = {
+    Price: ['above', 'below'],
+    Volume: ['above', 'below', 'increases by', 'drops by'],
+    Liquidity: ['above', 'below', 'added above', 'removed above'],
+    Whale: ['buy above', 'sell above', 'buy or sell above'],
+    Alpha: ['event is'],
+    Risk: ['risk is']
+};
+
+const VALUE_OPTIONS: Partial<Record<AlertType, string[]>> = {
+    Alpha: ['Liquidity Event', 'Volume Spike', 'Accumulation', 'Distribution', 'Unusual Activity'],
+    Risk: ['Any new risk', 'High', 'Critical']
+};
+
+const getAlertTrigger = (template: BasicAlertType, draft: AlertSetupDraft) => {
+    const target = draft.target.trim() || 'Any token';
+    const value = draft.value.trim();
+
+    switch (template.type) {
+        case 'Price':
+            return `${target} price ${draft.condition} ${value}`;
+        case 'Volume':
+            return `${target} 24h volume ${draft.condition} ${value}`;
+        case 'Liquidity':
+            return `${target} liquidity ${draft.condition} ${value}`;
+        case 'Whale':
+            return `Whale ${draft.condition} ${value} on ${target}`;
+        case 'Alpha':
+            return `${target} appears with ${value}`;
+        case 'Risk':
+            return `${target} risk flag is ${value}`;
+        default:
+            return `${target} ${draft.condition} ${value}`;
+    }
+};
 
 export const SmartAlerts: React.FC = () => {
-    const [alertInput, setAlertInput] = useState('');
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [interpretation, setInterpretation] = useState<InterpretationResult | null>(null);
-    const [showConfirmation, setShowConfirmation] = useState(false);
-    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [activeType, setActiveType] = useState<AlertType>('Price');
+    const [alertFeed, setAlertFeed] = useState<AlertFeedItem[]>(INITIAL_ALERTS);
+    const [setupType, setSetupType] = useState<BasicAlertType | null>(null);
+    const [setupDraft, setSetupDraft] = useState<AlertSetupDraft>(SETUP_DEFAULTS.Price);
 
-    const suggestions = [
-        { label: "Smart Money Buys", color: "text-primary-green border-primary-green/30 bg-transparent" },
-        { label: "Whale Movements > $50k", color: "text-primary-green border-primary-green/30 bg-transparent" },
-        { label: "Volume Spike > 300%", color: "text-primary-green border-primary-green/30 bg-transparent" },
-        { label: "Score Drop < 50", color: "text-primary-green border-primary-green/30 bg-transparent" },
-        { label: "Virality Surge", color: "text-primary-green border-primary-green/30 bg-transparent" },
-        { label: "New ATH", color: "text-primary-green border-primary-green/30 bg-transparent" },
-    ];
-
-    const [activeAlerts, setActiveAlerts] = useState([
-        { id: 1, trigger: "ETH Price > $3,500", type: "Price", status: true, lastTriggered: "2 hours ago" },
-        { id: 2, trigger: "Wallet 0x8a...9f buys > 10 ETH", type: "Wallet", status: true, lastTriggered: "1 day ago" },
-        { id: 3, trigger: "SOL Volume > $1B", type: "Volume", status: false, lastTriggered: "Never" },
-    ]);
-
-    const history = [
-        { id: 1, title: "ETH Price Alert", time: "10:42 AM", desc: "ETH crossed $3,450", type: "price" },
-        { id: 2, title: "Whale Watch", time: "09:15 AM", desc: "0x7d...2a moved $500k USDC", type: "wallet" },
-        { id: 3, title: "Risk Scan", time: "Yesterday", desc: "Token PEPE2 detected high risk", type: "risk" },
-        { id: 4, title: "Volume Spike", time: "Yesterday", desc: "BONK volume up 400%", type: "volume" },
-        { id: 5, title: "Alpha Signal", time: "2 days ago", desc: "Wallet 0x3f...1b entered early", type: "signal" },
-    ];
-
-    const handleAnalyzeAlert = async () => {
-        if (!alertInput.trim()) return;
-
-        setIsProcessing(true);
-        setSuccessMessage(null);
-        try {
-            const result = await AiInterpretationService.interpretAlert(alertInput);
-            setInterpretation(result);
-            setShowConfirmation(true);
-        } catch (error) {
-            console.error("AI Analysis failed", error);
-        } finally {
-            setIsProcessing(false);
-        }
+    const toggleAlert = (id: number) => {
+        setAlertFeed((current) => current.map((alert) => alert.id === id ? { ...alert, status: !alert.status } : alert));
     };
 
-    const handleConfirmAlert = () => {
-        if (!interpretation) return;
-
-        // Add to active alerts
-        const newAlert = {
-            id: Date.now(),
-            trigger: interpretation.structured,
-            type: "AI Smart",
-            status: true,
-            lastTriggered: "Just now"
-        };
-        setActiveAlerts([newAlert, ...activeAlerts]);
-
-        setShowConfirmation(false);
-        setAlertInput('');
-        setInterpretation(null);
-        setSuccessMessage("Alert successfully created");
-
-        setTimeout(() => setSuccessMessage(null), 3000);
+    const removeAlert = (id: number) => {
+        setAlertFeed((current) => current.filter((alert) => alert.id !== id));
     };
 
-    const handleRefine = () => {
-        setShowConfirmation(false);
-        // Keep input text for user to edit
+    const openSetupModal = (item: BasicAlertType) => {
+        setActiveType(item.type);
+        setSetupType(item);
+        setSetupDraft(SETUP_DEFAULTS[item.type]);
     };
+
+    const closeSetupModal = () => {
+        setSetupType(null);
+    };
+
+    const createAlert = () => {
+        if (!setupType) return;
+
+        const trigger = getAlertTrigger(setupType, setupDraft);
+        const target = setupDraft.target.trim() || 'Any token';
+
+        setAlertFeed((current) => [
+            {
+                id: Date.now(),
+                trigger,
+                type: setupType.type,
+                target,
+                status: true,
+                lastTriggered: 'Never'
+            },
+            ...current
+        ]);
+        closeSetupModal();
+    };
+
+    const previewTrigger = setupType ? getAlertTrigger(setupType, setupDraft) : '';
 
     return (
-        <div className="flex flex-col gap-8 pb-10 animate-fade-in relative z-10 w-full max-w-7xl mx-auto">
-
-            {/* --- Hero / Create Section --- */}
-            <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1a1d21] to-[#141619] border border-border/50 shadow-2xl p-6 md:p-8">
-                {/* Background Decor */}
-                <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-primary-green/5 blur-[120px] rounded-full pointer-events-none -translate-y-1/2 translate-x-1/2"></div>
-                <div className="absolute bottom-0 left-0 w-[200px] h-[200px] bg-primary-purple/5 blur-[100px] rounded-full pointer-events-none translate-y-1/3 -translate-x-1/3"></div>
-
-                <div className="relative z-10 flex flex-col gap-6">
-                    <div>
-                        <h2 className="text-xl md:text-2xl font-bold text-text-light">
-                            Create Smart Alert
-                        </h2>
-                        <p className="text-sm text-text-medium mt-2 max-w-2xl">
-                            Describe any market condition, wallet activity, or token metric you want to track.
-                            <span className="text-text-light font-medium"> Atlaix AI</span> will convert it into a precision trigger.
-                        </p>
-                    </div>
-
-                    <div className="flex flex-col gap-4">
-                        <div className="relative group">
-                            <div className="relative bg-black/40 backdrop-blur-sm border border-border rounded-xl flex items-center p-2 transition-all shadow-inner">
-                                <Search className="ml-3 text-text-medium transition-colors" size={22} />
-                                <input
-                                    type="text"
-                                    disabled={isProcessing}
-                                    className="w-full bg-transparent border-none outline-none text-text-light placeholder-text-dark px-4 py-2 text-sm disabled:opacity-50"
-                                    placeholder="Alert me when bitcoin gets to $100,000"
-                                    value={alertInput}
-                                    onChange={(e) => setAlertInput(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleAnalyzeAlert()}
-                                />
-                                <button
-                                    onClick={handleAnalyzeAlert}
-                                    disabled={!alertInput.trim() || isProcessing}
-                                    className={`
-                                        mr-1 bg-primary-green hover:bg-primary-green-darker text-main font-bold py-2.5 px-6 rounded-lg 
-                                        transition-transform active:scale-95 shadow-lg shadow-primary-green/20 flex items-center gap-2
-                                        disabled:opacity-50 disabled:cursor-not-allowed
-                                    `}
-                                >
-                                    {isProcessing ? (
-                                        <>
-                                            <Sparkles className="animate-spin" size={16} />
-                                            Analyzing...
-                                        </>
-                                    ) : (
-                                        "Create"
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Success Message */}
-                        {successMessage && (
-                            <div className="flex items-center gap-2 text-primary-green bg-primary-green/10 border border-primary-green/20 p-3 rounded-xl animate-fade-in">
-                                <CheckCircle2 size={18} />
-                                <span className="text-sm font-bold">{successMessage}</span>
-                            </div>
-                        )}
-
-                        {/* AI Confirmation Card */}
-                        {showConfirmation && interpretation && (
-                            <div className="bg-[#1a1c21] border border-primary-green/30 rounded-xl p-4 md:p-6 animate-fade-in shadow-xl shadow-black/50">
-                                <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-primary-green/10 border border-primary-green/20 flex items-center justify-center shrink-0">
-                                        <span className="text-primary-green font-bold text-lg">AI</span>
-                                    </div>
-                                    <div className="flex-1">
-                                        <h3 className="text-lg font-bold text-text-light mb-1">Is this what you meant?</h3>
-                                        <p className="text-sm text-text-medium mb-4">
-                                            Our AI interpreted your request as:
-                                        </p>
-
-                                        <div className="bg-black/40 border border-border p-3 rounded-lg mb-4">
-                                            <code className="text-primary-green font-mono text-sm md:text-base whitespace-pre-wrap break-words block">
-                                                {interpretation.structured}
-                                            </code>
-                                            {interpretation.details?.tokenAddress && (
-                                                <div className="mt-2 pt-2 border-t border-white/10 flex items-center gap-2">
-                                                    <span className="text-xs text-text-medium font-mono">CA:</span>
-                                                    <code className="text-xs text-text-medium font-mono opacity-80 select-all break-all">
-                                                        {interpretation.details.tokenAddress}
-                                                    </code>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className="flex flex-col sm:flex-row gap-3 items-center w-full">
-                                            <button
-                                                onClick={handleConfirmAlert}
-                                                className="w-full sm:w-auto bg-primary-green hover:bg-primary-green-darker text-main font-bold py-2 px-6 rounded-lg transition-colors shadow-lg shadow-primary-green/10 text-center"
-                                            >
-                                                Confirm Alert
-                                            </button>
-                                            <button
-                                                onClick={handleRefine}
-                                                className="w-full sm:w-auto bg-transparent border border-border hover:border-text-light text-text-medium hover:text-text-light font-medium py-2 px-6 rounded-lg transition-colors text-center"
-                                            >
-                                                Refine Request
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setShowConfirmation(false);
-                                                    setAlertInput('');
-                                                    setInterpretation(null);
-                                                }}
-                                                className="w-full sm:w-auto bg-transparent border border-border hover:border-primary-red/50 text-text-medium hover:text-primary-red font-medium py-2 px-6 rounded-lg transition-colors sm:ml-auto text-center"
-                                            >
-                                                Cancel Alert
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Suggestion Chips - Only show when not confirming */}
-                        {!showConfirmation && (
-                            <div className="flex flex-wrap gap-2.5 mt-1">
-                                <span className="text-xs font-bold text-text-dark uppercase tracking-wider py-1.5 mr-1 self-center">Try:</span>
-                                {suggestions.map((chip, idx) => (
-                                    <button
-                                        key={idx}
-                                        onClick={() => setAlertInput(chip.label)}
-                                        className={`
-                                            flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all duration-300
-                                            hover:scale-105 active:scale-95 hover:shadow-[0_0_10px_rgba(0,0,0,0.3)]
-                                            ${chip.color}
-                                        `}
-                                    >
-                                        {chip.label}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </section>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 h-full">
-
-                {/* --- Left Column: Suggested & Active --- */}
-                <div className="lg:col-span-2 flex flex-col gap-8">
-
-                    {/* Suggested Grid */}
+        <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-8 pb-10 animate-fade-in">
+            <div className="grid grid-cols-1 gap-6 md:gap-8 lg:grid-cols-3">
+                <div className="flex flex-col gap-8 lg:col-span-2">
                     <div className="flex flex-col gap-4">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-bold text-text-light flex items-center gap-2">
-                                Trending Templates
+                            <h3 className="flex items-center gap-2 text-lg font-bold text-text-light">
+                                <Bell size={18} className="text-primary-green" />
+                                Basic Alert Types
                             </h3>
-                            <button className="text-xs font-medium text-text-dark hover:text-text-light transition-colors">View All</button>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {[
-                                { title: "Bundle Wallet Liquidation", desc: "Detect simultaneous sells from linked wallets", icon: <AlertTriangle className="text-primary-green" />, query: "Alert me when linked wallets sell simultaneously" },
-                                { title: "Rug Pull Detection", desc: "Liquidity removed > 80% or Mint authority enabled", icon: <ShieldCheck className="text-primary-green" />, query: "Alert me when liquidity is removed > 80%" },
-                                { title: "DEX Whale Accumulation", desc: "Wallets >$1M balance buying >$50k in 1h", icon: <Wallet className="text-primary-green" />, query: "Alert me when a whale buys > $50k" },
-                                { title: "Smart Money Early Entry", desc: "Top 1% profitable wallets enter new token", icon: <Sparkles className="text-primary-green" />, query: "Alert me when smart money buys a new token" }
-                            ].map((card, i) => (
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            {BASIC_ALERT_TYPES.map((item) => (
                                 <div
-                                    key={i}
-                                    onClick={() => setAlertInput(card.query)}
-                                    className="group bg-card hover:bg-card-hover border border-border hover:border-text-dark/50 p-5 rounded-xl cursor-pointer transition-all duration-300 relative overflow-hidden"
+                                    key={item.type}
+                                    onClick={() => openSetupModal(item)}
+                                    className={`group relative cursor-pointer overflow-hidden rounded-xl border p-5 transition-all duration-300 hover:bg-card-hover ${activeType === item.type ? 'border-primary-green/40 bg-card-hover' : 'border-border bg-card hover:border-text-dark/50'}`}
                                 >
                                     <div className="flex items-start gap-4">
-                                        <div className="p-3 rounded-lg bg-main border border-border/50 group-hover:scale-110 transition-transform duration-300">
-                                            {card.icon}
+                                        <div className="rounded-lg border border-border/50 bg-main p-3 text-primary-green transition-transform duration-300 group-hover:scale-110">
+                                            {item.icon}
                                         </div>
                                         <div>
-                                            <h4 className="font-bold text-text-light text-sm group-hover:text-primary-green transition-colors">{card.title}</h4>
-                                            <p className="text-xs text-text-medium mt-1 leading-relaxed">{card.desc}</p>
+                                            <h4 className="text-sm font-bold text-text-light transition-colors group-hover:text-primary-green">{item.title}</h4>
+                                            <p className="mt-1 text-xs leading-relaxed text-text-medium">{item.desc}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -260,103 +261,207 @@ export const SmartAlerts: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Active Alerts List */}
-                    <div className="flex flex-col gap-4 flex-1">
+                    <div className="flex flex-1 flex-col gap-4">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-bold text-text-light flex items-center gap-2">
+                            <h3 className="flex items-center gap-2 text-lg font-bold text-text-light">
                                 <Bell size={18} className="text-text-light" />
-                                Active Alerts
+                                Alert Feed
                             </h3>
-                            <button className="text-xs font-medium text-text-dark hover:text-text-light transition-colors flex items-center gap-1">
+                            <button className="flex items-center gap-1 text-xs font-medium text-text-dark transition-colors hover:text-text-light">
                                 Manage All
                             </button>
                         </div>
 
-                        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-                            {activeAlerts.map((alert, i) => (
-                                <div key={alert.id} className={`
-                                    p-4 flex items-center justify-between gap-4 border-b border-border/50 last:border-0 hover:bg-card-hover/40 transition-colors
-                                    ${!alert.status ? 'opacity-60 grayscale-[0.5]' : ''}
-                                `}>
-                                    <div className="flex items-center gap-4">
-                                        <div className={`
-                                            w-10 h-10 rounded-full flex items-center justify-center border
-                                            ${alert.type === 'Price' ? 'bg-green-500/10 border-green-500/20 text-green-500' :
-                                                alert.type === 'Wallet' ? 'bg-blue-500/10 border-blue-500/20 text-blue-500' :
-                                                    'bg-purple-500/10 border-purple-500/20 text-purple-500'}
-                                        `}>
-                                            {alert.type === 'Price' ? <TrendingUp size={18} /> :
-                                                alert.type === 'Wallet' ? <Wallet size={18} /> : <Activity size={18} />}
-                                        </div>
-                                        <div>
-                                            <div className="font-bold text-sm text-text-light">{alert.trigger}</div>
-                                            <div className="flex items-center gap-3 mt-1">
-                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-main border border-border text-text-medium uppercase tracking-wider">{alert.type}</span>
-                                                <span className="text-[10px] text-text-dark flex items-center gap-1">
-                                                    <Clock size={10} /> Last: {alert.lastTriggered}
-                                                </span>
+                        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                            <div className="custom-scrollbar max-h-[520px] overflow-y-auto">
+                                {alertFeed.map((alert) => (
+                                    <div
+                                        key={alert.id}
+                                        className={`flex items-center justify-between gap-4 border-b border-border/50 p-4 transition-colors last:border-0 hover:bg-card-hover/40 ${!alert.status ? 'opacity-60 grayscale-[0.5]' : ''}`}
+                                    >
+                                        <div className="flex min-w-0 items-center gap-4">
+                                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-main text-primary-green shadow-inner">
+                                                {alertIcon(alert.type)}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="truncate text-sm font-bold text-text-light">{alert.trigger}</div>
+                                                <div className="mt-1 flex items-center gap-3">
+                                                    <span className="rounded border border-border bg-main px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-medium">{alert.type}</span>
+                                                    <span className="flex items-center gap-1 text-[10px] text-text-dark">
+                                                        <Clock size={10} /> Last: {alert.lastTriggered}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
 
-                                    <div className="flex items-center gap-4">
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" className="sr-only peer" checked={alert.status} readOnly />
-                                            <div className="w-9 h-5 bg-main peer-focus:outline-none border border-text-dark/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-medium after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-green peer-checked:after:bg-white peer-checked:border-primary-green"></div>
-                                        </label>
-                                        <button className="text-text-dark hover:text-primary-red transition-colors p-2 hover:bg-primary-red/10 rounded-lg">
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                </div>
-
-                {/* --- Right Column: History --- */}
-                <div className="flex flex-col gap-4">
-                    <h3 className="text-lg font-bold text-text-light flex items-center gap-2">
-                        <Clock size={18} className="text-text-medium" />
-                        Trigger History
-                    </h3>
-
-                    <div className="bg-card border border-border rounded-xl p-0 max-h-[600px] overflow-hidden flex flex-col relative w-full">
-                        {/* Timeline Line */}
-                        <div className="absolute left-[27px] top-6 bottom-12 w-[2px] bg-border z-0"></div>
-
-                        <div className="overflow-y-auto p-5 space-y-1 custom-scrollbar relative z-10">
-                            {history.map((item, i) => (
-                                <div key={i} className="flex gap-4 group">
-                                    {/* Dot */}
-                                    <div className={`
-                                        w-3.5 h-3.5 rounded-full border-[3px] border-card shrink-0 mt-1.5 relative z-10 box-content
-                                        ${i === 0 ? 'bg-primary-green shadow-[0_0_8px_rgba(38,211,86,0.6)]' : 'bg-text-dark'}
-                                    `}></div>
-
-                                    <div className="flex-1 pb-2 border-b border-border/30 last:border-0 group-hover:pl-1 transition-all">
-                                        <div className="flex justify-between items-start">
-                                            <h4 className="text-sm font-bold text-text-light leading-tight">{item.title}</h4>
-                                            <span className="text-[10px] text-text-dark font-mono">{item.time}</span>
+                                        <div className="flex items-center gap-4">
+                                            <button
+                                                onClick={() => toggleAlert(alert.id)}
+                                                className="relative inline-flex cursor-pointer items-center"
+                                                aria-label={alert.status ? 'Pause alert' : 'Activate alert'}
+                                            >
+                                                <span className="sr-only">{alert.status ? 'Pause alert' : 'Activate alert'}</span>
+                                                <span className={`relative h-5 w-9 rounded-full border transition-colors after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:transition-all after:content-[''] ${alert.status ? 'border-primary-green bg-primary-green after:translate-x-full after:border-white after:bg-white' : 'border-text-dark/30 bg-main after:border-gray-300 after:bg-text-medium'}`} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeAlert(alert.id)}
+                                                className="rounded-lg p-2 text-text-dark transition-colors hover:bg-primary-red/10 hover:text-primary-red"
+                                                aria-label="Remove alert"
+                                            >
+                                                <X size={16} />
+                                            </button>
                                         </div>
-                                        <p className="text-xs text-text-medium mt-1">{item.desc}</p>
-                                        <button className="mt-2 text-[10px] font-bold text-primary-green flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            View Details <ChevronRight size={10} />
-                                        </button>
                                     </div>
-                                </div>
-                            ))}
-
-                            {/* Empty State / Load More */}
-                            <div className="flex justify-center pt-4 bg-card relative z-10">
-                                <button className="text-xs text-text-dark hover:text-text-light transition-colors">Load older alerts</button>
+                                ))}
                             </div>
                         </div>
                     </div>
                 </div>
 
+                <div className="flex flex-col gap-4">
+                    <h3 className="flex items-center gap-2 text-lg font-bold text-text-light">
+                        <Clock size={18} className="text-text-medium" />
+                        Trigger History
+                    </h3>
+
+                    <div className="relative flex max-h-[600px] w-full flex-col overflow-hidden rounded-xl border border-border bg-card p-0">
+                        <div className="absolute bottom-12 left-[27px] top-6 z-0 w-[2px] bg-border"></div>
+
+                        <div className="custom-scrollbar relative z-10 space-y-1 overflow-y-auto p-5">
+                            {TRIGGER_HISTORY.map((item, index) => (
+                                <div key={item.id} className="group flex gap-4">
+                                    <div className={`relative z-10 mt-1.5 box-content h-3.5 w-3.5 shrink-0 rounded-full border-[3px] border-card ${index === 0 ? 'bg-primary-green shadow-[0_0_8px_rgba(38,211,86,0.6)]' : 'bg-text-dark'}`}></div>
+
+                                    <div className="flex-1 border-b border-border/30 pb-3 transition-all group-hover:pl-1 last:border-0">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <h4 className="text-sm font-bold leading-tight text-text-light">{item.title}</h4>
+                                            <span className="font-mono text-[10px] text-text-dark">{item.time}</span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-text-medium">{item.description}</p>
+                                        <button className="mt-2 flex items-center gap-1 text-[10px] font-bold text-primary-green opacity-0 transition-opacity group-hover:opacity-100">
+                                            View Details
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+
+                            <div className="relative z-10 flex justify-center bg-card pt-4">
+                                <button className="text-xs text-text-dark transition-colors hover:text-text-light">Load older alerts</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            {setupType && (
+                <div
+                    className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
+                    onClick={closeSetupModal}
+                >
+                    <div
+                        className="w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div className="flex items-start justify-between gap-4 border-b border-border p-5">
+                            <div className="flex items-start gap-3">
+                                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${typeStyle(setupType.type)}`}>
+                                    {setupType.icon}
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-text-light">Set {setupType.title}</h3>
+                                    <p className="mt-1 text-sm text-text-medium">{setupType.desc}</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeSetupModal}
+                                className="rounded-lg p-2 text-text-dark transition-colors hover:bg-card-hover hover:text-text-light"
+                                aria-label="Close alert setup"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-5 p-5">
+                            <label className="block">
+                                <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">
+                                    Target token or scope
+                                </span>
+                                <input
+                                    value={setupDraft.target}
+                                    onChange={(event) => setSetupDraft((current) => ({ ...current, target: event.target.value }))}
+                                    className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
+                                    placeholder="SOL, ETH, Any token, tracked wallet..."
+                                />
+                            </label>
+
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <label className="block">
+                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">
+                                        Condition
+                                    </span>
+                                    <select
+                                        value={setupDraft.condition}
+                                        onChange={(event) => setSetupDraft((current) => ({ ...current, condition: event.target.value }))}
+                                        className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors focus:border-primary-green/60"
+                                    >
+                                        {CONDITION_OPTIONS[setupType.type].map((condition) => (
+                                            <option key={condition} value={condition}>{condition}</option>
+                                        ))}
+                                    </select>
+                                </label>
+
+                                <label className="block">
+                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">
+                                        {setupType.type === 'Alpha' ? 'Event' : setupType.type === 'Risk' ? 'Severity' : 'Threshold'}
+                                    </span>
+                                    {VALUE_OPTIONS[setupType.type] ? (
+                                        <select
+                                            value={setupDraft.value}
+                                            onChange={(event) => setSetupDraft((current) => ({ ...current, value: event.target.value }))}
+                                            className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors focus:border-primary-green/60"
+                                        >
+                                            {VALUE_OPTIONS[setupType.type]?.map((value) => (
+                                                <option key={value} value={value}>{value}</option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <input
+                                            value={setupDraft.value}
+                                            onChange={(event) => setSetupDraft((current) => ({ ...current, value: event.target.value }))}
+                                            className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
+                                            placeholder="$50K, 20%, 2x..."
+                                        />
+                                    )}
+                                </label>
+                            </div>
+
+                            <div className="rounded-xl border border-border bg-main p-4">
+                                <div className="text-xs font-bold uppercase tracking-wider text-text-dark">Preview</div>
+                                <div className="mt-2 text-sm font-bold text-text-light">{previewTrigger}</div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col-reverse gap-3 border-t border-border p-5 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={closeSetupModal}
+                                className="rounded-xl border border-border px-5 py-3 text-sm font-bold text-text-medium transition-colors hover:bg-card-hover hover:text-text-light"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={createAlert}
+                                className="rounded-xl bg-primary-green px-5 py-3 text-sm font-bold text-black transition-colors hover:bg-primary-green/90"
+                            >
+                                Create Alert
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

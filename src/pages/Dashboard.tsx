@@ -188,6 +188,12 @@ const getEventBadgeStyle = (eventType?: AlphaGauntletEventType) => {
     }
 };
 
+const getFeedEventLabel = (coin: MarketCoin, eventType?: AlphaGauntletEventType) => {
+    if (eventType) return eventType;
+    if (coin.signal && coin.signal !== 'None') return coin.signal;
+    return 'None';
+};
+
 export const Dashboard: React.FC<DashboardProps> = () => {
     const [timeFrame, setTimeFrame] = useState('12H');
     const [searchQuery, setSearchQuery] = useState('');
@@ -1151,7 +1157,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                     const flowColor = isPositiveFlow ? 'bg-primary-green' : 'bg-primary-red';
                                     const flowTextColor = isPositiveFlow ? 'text-primary-green' : 'text-primary-red';
                                     const event = AlphaGauntletService.qualifyToken(coin);
-                                    const topTrigger = event?.triggers[0] || coin.signal;
+                                    const eventLabel = getFeedEventLabel(coin, event?.eventType);
 
                                     return (
                                         <tr
@@ -1173,17 +1179,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                             </td>
 
                                             <td className="text-left">
-                                                <div className="flex w-[150px] max-w-[150px] flex-col items-start gap-1">
-                                                    {event?.eventType && (
-                                                        <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${getEventBadgeStyle(event.eventType)}`}>
-                                                            <span className="truncate">{event.eventType}</span>
-                                                        </span>
-                                                    )}
-                                                    {topTrigger && topTrigger !== 'None' && (
-                                                        <span className="max-w-full truncate text-[10px] font-medium text-text-dark" title={topTrigger}>
-                                                            {topTrigger}
-                                                        </span>
-                                                    )}
+                                                <div className="flex w-[150px] max-w-[150px] items-start">
+                                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${getEventBadgeStyle(event?.eventType)}`}>
+                                                        <span className="truncate" title={eventLabel}>{eventLabel}</span>
+                                                    </span>
                                                 </div>
                                             </td>
 
