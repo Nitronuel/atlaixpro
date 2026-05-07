@@ -9,8 +9,6 @@ import {
     Clock,
     Flame,
     Loader2,
-    RefreshCw,
-    Server,
     ShieldCheck,
     TrendingUp,
     Wallet,
@@ -242,7 +240,6 @@ export const SmartAlerts: React.FC = () => {
     const [setupDraft, setSetupDraft] = useState<AlertSetupDraft>(SETUP_DEFAULTS.Price);
     const [loadingAlerts, setLoadingAlerts] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [runningCheck, setRunningCheck] = useState(false);
     const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
@@ -365,25 +362,17 @@ export const SmartAlerts: React.FC = () => {
         }
     };
 
-    const runBackendCheck = async () => {
-        if (!user) {
-            requireLogin('Sign in to run and review saved alert checks.');
-            return;
-        }
+    const runBackendCheck = useCallback(async () => {
+        if (!user) return;
 
-        setRunningCheck(true);
-        setError(null);
         try {
             const response = await fetch(apiUrl('/api/smart-alerts/run'), { method: 'POST' });
-            if (!response.ok) throw new Error('Smart Alerts backend check could not run.');
+            if (!response.ok) return;
             setBackendStatus(await response.json());
-            await loadUserAlerts();
-        } catch (err: any) {
-            setError(err?.message || 'Smart Alerts backend check could not run.');
-        } finally {
-            setRunningCheck(false);
+        } catch {
+            // Backend checks are operational plumbing; keep the user flow focused on alerts.
         }
-    };
+    }, [user]);
 
     const createAlert = async () => {
         if (!setupType) return;
@@ -428,7 +417,6 @@ export const SmartAlerts: React.FC = () => {
     };
 
     const previewTrigger = setupType ? getAlertTrigger(setupType, setupDraft) : '';
-    const backendHealthy = backendStatus?.lastRunStatus !== 'error';
 
     return (
         <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-6 pb-10 animate-fade-in">
@@ -437,31 +425,6 @@ export const SmartAlerts: React.FC = () => {
                     {error}
                 </div>
             )}
-
-            <div className="flex flex-col gap-3 rounded-xl border border-border bg-card px-5 py-4 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-center gap-3">
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg border ${backendHealthy ? 'border-primary-green/30 bg-primary-green/10 text-primary-green' : 'border-primary-red/30 bg-primary-red/10 text-primary-red'}`}>
-                        <Server size={18} />
-                    </div>
-                    <div>
-                        <div className="text-sm font-bold text-text-light">
-                            {backendHealthy ? 'Persistent backend checks active' : 'Backend checks need attention'}
-                        </div>
-                        <div className="text-xs text-text-medium">
-                            Last checked: {formatRelativeTime(backendStatus?.lastRunCompletedAt)} · Rules checked: {backendStatus?.rulesChecked ?? 0} · New triggers: {backendStatus?.triggersCreated ?? 0}
-                        </div>
-                    </div>
-                </div>
-                <button
-                    type="button"
-                    onClick={runBackendCheck}
-                    disabled={runningCheck}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-main px-4 py-2 text-xs font-bold text-text-light transition-colors hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                    {runningCheck ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-                    Check now
-                </button>
-            </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <div className="flex flex-col gap-6 lg:col-span-2">

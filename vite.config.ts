@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   const heliusKey = env.HELIUS_API_KEY || '';
+  const publicSupabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || '';
+  const publicSupabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || '';
   return {
     // Production chunking for large intelligence and visualization modules.
     build: {
@@ -90,6 +92,10 @@ export default defineConfig(({ mode }) => {
           target: 'http://127.0.0.1:3101',
           changeOrigin: true
         },
+        '/api/smart-alerts': {
+          target: 'http://127.0.0.1:3101',
+          changeOrigin: true
+        },
         '/api/detection': {
           target: 'http://127.0.0.1:3101',
           changeOrigin: true
@@ -99,7 +105,13 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'process.env.VITE_SUPABASE_URL': JSON.stringify(publicSupabaseUrl),
+      'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(publicSupabaseAnonKey),
+      'process.env.SUPABASE_URL': JSON.stringify(publicSupabaseUrl),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(publicSupabaseAnonKey),
+      __ATLAIX_PUBLIC_SUPABASE_URL__: JSON.stringify(publicSupabaseUrl),
+      __ATLAIX_PUBLIC_SUPABASE_ANON_KEY__: JSON.stringify(publicSupabaseAnonKey)
     },
     resolve: {
       alias: {

@@ -2,6 +2,8 @@
 const env = ((typeof import.meta !== 'undefined' && (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env) || {}) as Record<string, string | undefined>;
 const processEnv = (typeof process !== 'undefined' ? process.env : {}) as Record<string, string | undefined>;
 const isBrowser = typeof window !== 'undefined';
+const injectedPublicSupabaseUrl = typeof __ATLAIX_PUBLIC_SUPABASE_URL__ !== 'undefined' ? __ATLAIX_PUBLIC_SUPABASE_URL__ : '';
+const injectedPublicSupabaseAnonKey = typeof __ATLAIX_PUBLIC_SUPABASE_ANON_KEY__ !== 'undefined' ? __ATLAIX_PUBLIC_SUPABASE_ANON_KEY__ : '';
 
 const readEnv = (...values: Array<string | undefined>) => {
     for (const value of values) {
@@ -24,10 +26,20 @@ export const APP_CONFIG = {
     goplusAppSecret: readBackendEnv(processEnv.GOPLUS_SECRET),
 
     // 1. SUPABASE (The Vault)
-    supabaseUrl: readEnv(env.VITE_SUPABASE_URL, processEnv.VITE_SUPABASE_URL),
+    supabaseUrl: readEnv(
+        env.VITE_SUPABASE_URL,
+        injectedPublicSupabaseUrl,
+        processEnv.VITE_SUPABASE_URL,
+        processEnv.SUPABASE_URL
+    ),
 
     // The "Public" Key (Safe for client-side reading)
-    supabaseAnonKey: readEnv(env.VITE_SUPABASE_ANON_KEY, processEnv.VITE_SUPABASE_ANON_KEY),
+    supabaseAnonKey: readEnv(
+        env.VITE_SUPABASE_ANON_KEY,
+        injectedPublicSupabaseAnonKey,
+        processEnv.VITE_SUPABASE_ANON_KEY,
+        processEnv.SUPABASE_ANON_KEY
+    ),
 
     // Optional production backend origin, e.g. https://atlaix-backend.up.railway.app
     apiBaseUrl: readUrlEnv(env.VITE_API_BASE_URL, processEnv.VITE_API_BASE_URL),
