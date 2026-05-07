@@ -8,15 +8,47 @@ create table if not exists public.alert_rules (
     chain_id text not null default 'solana',
     token_address text,
     condition text not null,
+    threshold_kind text not null default 'currency' check (threshold_kind in ('currency', 'percent', 'event', 'severity')),
     threshold text not null,
     trigger_label text not null,
     notification_channels text[] not null default array['in_app']::text[],
     cooldown_minutes integer not null default 60 check (cooldown_minutes between 1 and 10080),
     enabled boolean not null default true,
+    last_checked_at timestamptz,
     last_triggered_at timestamptz,
+    last_observed_value text,
+    last_observed_at timestamptz,
+    baseline_value numeric,
+    baseline_observed_at timestamptz,
+    trigger_count integer not null default 0,
+    last_error text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+alter table public.alert_rules
+add column if not exists threshold_kind text not null default 'currency' check (threshold_kind in ('currency', 'percent', 'event', 'severity'));
+
+alter table public.alert_rules
+add column if not exists last_checked_at timestamptz;
+
+alter table public.alert_rules
+add column if not exists last_observed_value text;
+
+alter table public.alert_rules
+add column if not exists last_observed_at timestamptz;
+
+alter table public.alert_rules
+add column if not exists baseline_value numeric;
+
+alter table public.alert_rules
+add column if not exists baseline_observed_at timestamptz;
+
+alter table public.alert_rules
+add column if not exists trigger_count integer not null default 0;
+
+alter table public.alert_rules
+add column if not exists last_error text;
 
 create table if not exists public.alert_triggers (
     id uuid primary key default gen_random_uuid(),
@@ -29,14 +61,21 @@ create table if not exists public.alert_triggers (
     threshold text,
     source text not null default 'system',
     dedupe_key text,
+    metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now()
 );
+
+alter table public.alert_triggers
+add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 create index if not exists alert_rules_user_created_idx
 on public.alert_rules (user_id, created_at desc);
 
 create index if not exists alert_rules_enabled_type_idx
 on public.alert_rules (enabled, alert_type, chain_id);
+
+create index if not exists alert_rules_enabled_checked_idx
+on public.alert_rules (enabled, last_checked_at nulls first, created_at desc);
 
 create index if not exists alert_triggers_user_created_idx
 on public.alert_triggers (user_id, created_at desc);

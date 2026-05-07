@@ -70,7 +70,9 @@ const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import(
 const { DetectionEngineRunner } = await import('./detection-engine-runner');
 const { DetectionSnapshotStore } = await import('./detection-snapshot-store');
 const { DatabaseService } = await import('../src/services/DatabaseService');
+const { SmartAlertRunner } = await import('./smart-alert-runner');
 const detectionEngine = new DetectionEngineRunner();
+const smartAlertRunner = new SmartAlertRunner();
 
 const PROVIDER_TIMEOUT_MS = 18_000;
 const PROVIDER_ALLOWED_HOSTS = new Set([
@@ -353,6 +355,7 @@ queue.start(async (tokenAddress, stage) => {
 });
 
 detectionEngine.start();
+smartAlertRunner.start();
 
 const server = createServer(async (request, response) => {
     const method = request.method || 'GET';
@@ -451,6 +454,17 @@ const server = createServer(async (request, response) => {
 
     if (method === 'GET' && requestUrl.pathname === '/api/detection/status') {
         json(response, 200, detectionEngine.getStatus());
+        return;
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/smart-alerts/status') {
+        json(response, 200, smartAlertRunner.getStatus());
+        return;
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/smart-alerts/run') {
+        const status = await smartAlertRunner.runNow();
+        json(response, 200, status);
         return;
     }
 
