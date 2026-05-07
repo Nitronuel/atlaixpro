@@ -26,6 +26,8 @@ import { EnrichedTokenData } from '../types';
 import { SolanaRpcService } from '../services/SolanaRpcService';
 import { formatCompactNumber } from '../utils/format';
 
+const MIN_DISPLAY_ACTIVITY_USD = 1000;
+
 const shortAddress = (value?: string, head = 6, tail = 5) => {
     if (!value) return 'N/A';
     if (value.length <= head + tail + 3) return value;
@@ -57,6 +59,12 @@ const getActivityAccent = (item: RealActivity) => {
     return { bg: 'bg-primary-blue/15', text: 'text-primary-blue' };
 };
 
+const parseActivityUsd = (value?: string) => {
+    if (!value) return 0;
+    const numeric = Number(value.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(numeric) ? Math.abs(numeric) : 0;
+};
+
 const getDexscreenerChartUrl = (chainId?: string, pairAddress?: string, compact = true) => {
     if (!chainId || !pairAddress) return '';
     const params = new URLSearchParams({
@@ -78,7 +86,7 @@ const buildDexAggregateActivity = (args: {
     const poolWallet = pairAddress || 'DEX Pool';
     const rows: RealActivity[] = [];
 
-    if (buyVolume >= 100) {
+    if (buyVolume >= MIN_DISPLAY_ACTIVITY_USD) {
         rows.push({
             type: 'Buy',
             val: priceUsd > 0 ? (buyVolume / priceUsd).toFixed(2) : '-',
@@ -92,7 +100,7 @@ const buildDexAggregateActivity = (args: {
         });
     }
 
-    if (sellVolume >= 100) {
+    if (sellVolume >= MIN_DISPLAY_ACTIVITY_USD) {
         rows.push({
             type: 'Sell',
             val: priceUsd > 0 ? (sellVolume / priceUsd).toFixed(2) : '-',
@@ -151,6 +159,8 @@ export const TokenDetails: React.FC = () => {
                     const isSolana = data.chainId === 'solana';
                     let holders = 0;
                     let supply = 0;
+                    let activeWallets24h = data.activeWallets24h || 0;
+                    let topHolders: EnrichedTokenData['topHolders'] = [];
 
                     const realActivity = await ChainActivityService.getTokenActivity(
                         mintAddress,
@@ -168,7 +178,11 @@ export const TokenDetails: React.FC = () => {
                         supply = s || 0;
                     } else {
                         try {
-                            const metadata = await MoralisService.getTokenMetadata(mintAddress, data.chainId);
+                            const [metadata, holderInsights, activeWalletCount] = await Promise.all([
+                                MoralisService.getTokenMetadata(mintAddress, data.chainId),
+                                MoralisService.getTokenHolderInsights(mintAddress, data.chainId),
+                                MoralisService.getTokenActiveWallets24h(mintAddress, data.chainId)
+                            ]);
                             if (metadata) {
                                 const decimals = metadata.decimals || 18;
                                 supply = parseFloat(metadata.totalSupply) / Math.pow(10, decimals);
@@ -177,8 +191,17 @@ export const TokenDetails: React.FC = () => {
                                 const fdv = data.fdv || 0;
                                 if (price > 0 && fdv > 0) supply = fdv / price;
                             }
+
+                            if (holderInsights?.holderCount) {
+                                holders = holderInsights.holderCount;
+                                topHolders = holderInsights.topHolders;
+                            }
+
+                            if (activeWalletCount !== null && activeWalletCount !== undefined) {
+                                activeWallets24h = activeWalletCount;
+                            }
                         } catch (e) {
-                            console.warn('EVM Supply Fetch Failed', e);
+                            console.warn('EVM token intelligence fetch failed', e);
                         }
                     }
 
@@ -190,7 +213,7 @@ export const TokenDetails: React.FC = () => {
                         }).catch(err => console.error('Tax Fetch Error', err));
                     });
 
-                    setEnrichedData(prev => prev ? ({ ...prev, holders, totalSupply: supply }) : null);
+                    setEnrichedData(prev => prev ? ({ ...prev, holders, totalSupply: supply, activeWallets24h, topHolders }) : null);
                     setActivityFeed(realActivity);
                     setIsRealData(true);
                 }
@@ -228,7 +251,8 @@ export const TokenDetails: React.FC = () => {
         buyVolume,
         sellVolume
     }), [buyVolume, enrichedData?.pairAddress, priceNumber, sellVolume]);
-    const displayedActivity = activityFeed.length ? activityFeed : fallbackActivity;
+    const displayedActivity = (activityFeed.length ? activityFeed : fallbackActivity)
+        .filter(item => parseActivityUsd(item.usd) >= MIN_DISPLAY_ACTIVITY_USD);
     const highSignalEvents = displayedActivity.filter(item => ['Burn', 'Whale', 'Add Liq', 'Remove Liq'].includes(item.tag || item.type));
     const visibleHighSignalEvents = highSignalEvents.length ? highSignalEvents : displayedActivity.slice(0, 6);
     const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));

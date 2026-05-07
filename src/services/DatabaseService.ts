@@ -157,6 +157,15 @@ interface Cache {
     marketData: { data: MarketCoin[]; timestamp: number; } | null;
     detectionEvents: { data: AlphaGauntletEvent[]; timestamp: number; } | null;
 }
+
+export type ChainDexVolume = {
+    chain: string;
+    chainId: string;
+    volume: number;
+    change1d: number | null;
+    source: 'defillama';
+};
+
 const cache: Cache = { marketData: null, detectionEvents: null };
 const CACHE_FRESH_DURATION = 15000; // Refresh every 15s to find new tokens continually
 const DETECTION_EVENTS_LOCAL_CACHE_KEY = 'atlaix-detection-events-cache';
@@ -1408,6 +1417,22 @@ export const DatabaseService = {
 
     checkAndTriggerIngestion: async () => {
         await DatabaseService.getMarketData(true, true);
+    },
+
+    getChainDexVolumes: async (chains: string[] = ['solana', 'ethereum', 'base', 'bsc', 'polygon', 'arbitrum']): Promise<ChainDexVolume[]> => {
+        try {
+            const query = chains
+                .map((chain) => chain.trim().toLowerCase())
+                .filter(Boolean)
+                .join(',');
+            const response = await fetch(`/api/chain-dex-volumes?chains=${encodeURIComponent(query)}`);
+            if (!response.ok) return [];
+
+            const payload = await response.json();
+            return Array.isArray(payload.volumes) ? payload.volumes : [];
+        } catch {
+            return [];
+        }
     },
 
     searchGlobalPairs: async (query: string): Promise<MarketCoin[]> => {

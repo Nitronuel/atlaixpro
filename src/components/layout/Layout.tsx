@@ -6,6 +6,7 @@ import {
   Wallet, Zap, ShieldCheck, Bell, Settings, LogOut, LogIn, Menu, User, Briefcase
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { UserProfile } from '../../services/ProfileService';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -13,6 +14,9 @@ interface LayoutProps {
   onViewChange: (view: ViewState) => void; // Kept for interface compatibility but ignored
   onLogout: () => void;
   isAuthenticated: boolean;
+  authLoading?: boolean;
+  profile?: UserProfile | null;
+  userEmail?: string;
   onLogin: () => void;
 }
 
@@ -46,11 +50,20 @@ const NavItem: React.FC<{
   </button>
 );
 
-export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthenticated, onLogin }) => {
+const getInitial = (name?: string, email?: string) => {
+  const source = (name || email || 'A').trim();
+  return source.charAt(0).toUpperCase();
+};
+
+export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthenticated, authLoading, profile, userEmail, onLogin }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const displayName = profile?.display_name || (isAuthenticated ? 'Atlaix User' : 'Guest');
+  const displayEmail = userEmail || (isAuthenticated ? 'Connected' : 'Not connected');
+  const plan = profile?.plan || 'free';
+  const initial = getInitial(displayName, userEmail);
 
   const handleNavigation = (path: string) => {
     navigate(path);
@@ -153,11 +166,11 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
             {isAuthenticated ? (
               <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-card transition-colors cursor-pointer" onClick={onLogout}>
                 <div className="w-8 h-8 rounded-full bg-primary-purple flex items-center justify-center text-xs font-bold text-white">
-                  A
+                  {initial}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-text-light truncate">Atlaix User</div>
-                  <div className="text-[10px] text-text-medium">Free Plan</div>
+                  <div className="text-sm font-semibold text-text-light truncate">{displayName}</div>
+                  <div className="text-[10px] text-text-medium capitalize">{plan} Plan</div>
                 </div>
                 <LogOut size={18} className="text-text-medium hover:text-primary-red transition-colors" />
               </div>
@@ -202,7 +215,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
               >
                 {isAuthenticated ? (
-                  <div className="w-full h-full rounded-full bg-primary-purple flex items-center justify-center text-white font-bold text-sm">A</div>
+                  <div className="w-full h-full rounded-full bg-primary-purple flex items-center justify-center text-white font-bold text-sm">{initial}</div>
                 ) : (
                   <User size={20} className="text-primary-green group-hover:scale-110 transition-transform" />
                 )}
@@ -215,21 +228,24 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                     {/* User Info Header */}
                     <div className="flex items-center gap-3 p-3 mb-1 border-b border-[#2A2E33]/50">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-base shrink-0 ${isAuthenticated ? 'bg-primary-purple' : 'bg-[#222529]'}`}>
-                        {isAuthenticated ? 'A' : <User size={20} className="text-[#8F96A3]" />}
+                        {isAuthenticated ? initial : <User size={20} className="text-[#8F96A3]" />}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-bold text-sm text-[#EAECEF] truncate">
-                          {isAuthenticated ? 'AlphaTracker AI' : 'Guest'}
+                          {authLoading ? 'Loading...' : displayName}
                         </div>
                         <div className="text-[11px] text-[#8F96A3] truncate">
-                          {isAuthenticated ? 'user@example.com' : 'Not connected'}
+                          {displayEmail}
                         </div>
                       </div>
                     </div>
 
                     {/* Menu Options */}
                     <div className="flex flex-col gap-0.5">
-                      <button className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors group">
+                      <button
+                        onClick={() => { handleNavigation('/settings'); setUserMenuOpen(false); }}
+                        className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors group"
+                      >
                         <User size={16} className="text-primary-green" />
                         Profile
                       </button>
@@ -256,7 +272,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                         className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#8F96A3] hover:text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors"
                       >
                         <LogOut size={16} />
-                        {isAuthenticated ? 'Login / Switch' : 'Log In'}
+                        {isAuthenticated ? 'Log out' : 'Log in'}
                       </button>
                     </div>
                   </div>

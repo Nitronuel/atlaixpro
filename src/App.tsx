@@ -1,8 +1,10 @@
 // Application router and lazy-loaded product surface registration.
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { AuthScreen } from './pages/Auth';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 const Dashboard = lazy(async () => ({ default: (await import('./pages/Dashboard')).Dashboard }));
 const TokenDetails = lazy(async () => ({ default: (await import('./pages/TokenDetails')).TokenDetails }));
@@ -16,6 +18,7 @@ const SmartAlerts = lazy(async () => ({ default: (await import('./pages/SmartAle
 const SmartMoney = lazy(async () => ({ default: (await import('./pages/SmartMoney')).SmartMoney }));
 const SmartWalletProfile = lazy(async () => ({ default: (await import('./pages/SmartWalletProfile')).SmartWalletProfile }));
 const TokenSmartMoney = lazy(async () => ({ default: (await import('./pages/TokenSmartMoney')).TokenSmartMoney }));
+const ProfileSettings = lazy(async () => ({ default: (await import('./pages/ProfileSettings')).ProfileSettings }));
 
 // Placeholder components for views not yet implemented
 const PlaceholderView = ({ title }: { title: string }) => (
@@ -34,84 +37,83 @@ const RouteSkeleton = () => (
     </div>
 );
 
-// We need a wrapper to hold the Auth State since BrowserRouter is at the top level
 function AppContent() {
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const { user, profile, loading, signOut } = useAuth();
     const navigate = useNavigate();
 
-    const handleLogin = () => {
-        setIsAuthenticated(true);
-        navigate('/dashboard');
-    };
-
-    const handleLogout = () => {
-        setIsAuthenticated(false);
-        navigate('/dashboard');
+    const handleLogout = async () => {
+        await signOut();
+        navigate('/login', { replace: true });
     };
 
     const handleAuthRequest = () => {
-        navigate('/auth');
+        navigate('/login');
     };
 
-    // We pass a dummy 'currentView' to Layout because we will update Layout 
-    // to ignore it and use useLocation() instead.
     return (
         <Routes>
-            <Route path="/auth" element={<AuthScreen onLogin={handleLogin} onSkip={() => navigate('/dashboard')} />} />
+            <Route path="/auth" element={<Navigate to="/login" replace />} />
+            <Route path="/login" element={<AuthScreen initialMode="login" />} />
+            <Route path="/signup" element={<AuthScreen initialMode="signup" />} />
+            <Route path="/reset-password" element={<AuthScreen initialMode="reset" />} />
 
             <Route path="/*" element={
-                <Layout
-                    isAuthenticated={isAuthenticated}
-                    onLogin={handleAuthRequest}
-                    onLogout={handleLogout}
-                    currentView="overview" // Placeholder, Layout determines active via URL
-                    onViewChange={(view) => {
-                        // Map view enum to routes for legacy generic calls if any
-                        const routes: Record<string, string> = {
-                            'overview': '/dashboard',
+                <ProtectedRoute>
+                    <Layout
+                        isAuthenticated={Boolean(user)}
+                        authLoading={loading}
+                        profile={profile}
+                        userEmail={user?.email || ''}
+                        onLogin={handleAuthRequest}
+                        onLogout={handleLogout}
+                        currentView="overview"
+                        onViewChange={(view) => {
+                            const routes: Record<string, string> = {
+                                'overview': '/dashboard',
 
-                            'heatmap': '/heatmap',
-                            'sentiment': '/sentiment',
-                            'detection': '/detection',
-                            'ai-assistant': '/ai-assistant',
-                            'wallet-tracking': '/wallet',
-                            'safe-scan': '/safe-scan',
-                            'settings': '/settings',
-                            'smart-money': '/smart-money',
-                            'smart-alerts': '/smart-alerts'
-                        };
-                        if (routes[view]) navigate(routes[view]);
-                    }}
-                >
-                    <Suspense fallback={<RouteSkeleton />}>
-                        <Routes>
-                            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                            <Route path="/dashboard" element={<Dashboard />} />
-                            <Route path="/token/:address" element={<TokenDetails />} />
+                                'heatmap': '/heatmap',
+                                'sentiment': '/sentiment',
+                                'detection': '/detection',
+                                'ai-assistant': '/ai-assistant',
+                                'wallet-tracking': '/wallet',
+                                'safe-scan': '/safe-scan',
+                                'settings': '/settings',
+                                'smart-money': '/smart-money',
+                                'smart-alerts': '/smart-alerts'
+                            };
+                            if (routes[view]) navigate(routes[view]);
+                        }}
+                    >
+                        <Suspense fallback={<RouteSkeleton />}>
+                            <Routes>
+                                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                                <Route path="/dashboard" element={<Dashboard />} />
+                                <Route path="/token/:address" element={<TokenDetails />} />
 
 
-                            <Route path="/heatmap" element={<Heatmap />} />
-                            <Route path="/sentiment" element={<PlaceholderView title="Sentiment Intelligence" />} />
+                                <Route path="/heatmap" element={<Heatmap />} />
+                                <Route path="/sentiment" element={<PlaceholderView title="Sentiment Intelligence" />} />
 
-                            <Route path="/detection" element={<Detection />} />
-                            <Route path="/detection/token/:query" element={<TokenDetection />} />
+                                <Route path="/detection" element={<Detection />} />
+                                <Route path="/detection/token/:query" element={<TokenDetection />} />
 
-                            <Route path="/ai-assistant" element={<AiAssistant />} />
+                                <Route path="/ai-assistant" element={<AiAssistant />} />
 
-                            <Route path="/wallet" element={<WalletTracking />} />
-                            <Route path="/wallet/:address" element={<WalletTracking />} />
+                                <Route path="/wallet" element={<WalletTracking />} />
+                                <Route path="/wallet/:address" element={<WalletTracking />} />
 
-                            <Route path="/safe-scan" element={<SafeScan />} />
-                            <Route path="/alchemy-hub" element={<Navigate to="/safe-scan" replace />} />
+                                <Route path="/safe-scan" element={<SafeScan />} />
+                                <Route path="/alchemy-hub" element={<Navigate to="/safe-scan" replace />} />
 
-                            <Route path="/smart-money" element={<SmartMoney />} />
-                            <Route path="/smart-money/:address" element={<SmartWalletProfile />} />
-                            <Route path="/token-smart-money/:address" element={<TokenSmartMoney />} />
-                            <Route path="/smart-alerts" element={<SmartAlerts />} />
-                            <Route path="/settings" element={<PlaceholderView title="Settings" />} />
-                        </Routes>
-                    </Suspense>
-                </Layout>
+                                <Route path="/smart-money" element={<SmartMoney />} />
+                                <Route path="/smart-money/:address" element={<SmartWalletProfile />} />
+                                <Route path="/token-smart-money/:address" element={<TokenSmartMoney />} />
+                                <Route path="/smart-alerts" element={<SmartAlerts />} />
+                                <Route path="/settings" element={<ProfileSettings />} />
+                            </Routes>
+                        </Suspense>
+                    </Layout>
+                </ProtectedRoute>
             } />
         </Routes>
     );
@@ -120,7 +122,9 @@ function AppContent() {
 export default function App() {
     return (
         <BrowserRouter>
-            <AppContent />
+            <AuthProvider>
+                <AppContent />
+            </AuthProvider>
         </BrowserRouter>
     );
 }

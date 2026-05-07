@@ -29,7 +29,7 @@ const mapChainToAlchemyNetwork = (chain: string) => {
 };
 
 const ALCHEMY_SUPPORTED_CHAINS = new Set(['ethereum', 'base', 'arbitrum', 'polygon', 'optimism']);
-const MIN_ACTIVITY_USD = 100;
+const MIN_ACTIVITY_USD = 1000;
 
 const getTimeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);

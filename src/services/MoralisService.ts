@@ -6,7 +6,7 @@ import { fetchProvider } from './ProviderGateway';
 
 // API Key from Config
 const MORALIS_API_KEY = APP_CONFIG.moralisKey;
-const MIN_ACTIVITY_USD = 100;
+const MIN_ACTIVITY_USD = 1000;
 
 interface MoralisTransfer {
     transaction_hash: string;
@@ -22,6 +22,11 @@ interface MoralisTransfer {
     to_owner?: string;
     from_owner?: string;
 }
+
+export type MoralisTokenHolderInsights = {
+    holderCount: number;
+    topHolders: Array<{ address: string; percent: number }>;
+};
 
 export interface RealActivity {
     type: 'Buy' | 'Sell' | 'Add Liq' | 'Remove Liq' | 'Transfer' | 'Burn';
@@ -119,6 +124,106 @@ export const MoralisService = {
         } catch (e) {
             console.error("Moralis Metadata Error", e);
             return null;
+        }
+    },
+
+    getTokenHolderInsights: async (tokenAddress: string, chain: string): Promise<MoralisTokenHolderInsights | null> => {
+        if (!tokenAddress || chain.toLowerCase() === 'solana') return null;
+
+        const hexChain = mapChainToMoralisEVM(chain);
+        const headers = { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY };
+
+        try {
+            const statsUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/holder-stats?chain=${hexChain}`;
+            const statsResponse = await fetchProvider('moralis', statsUrl, { headers });
+
+            if (statsResponse.ok) {
+                const stats = await statsResponse.json();
+                const holderCount = Number(
+                    stats.totalHolders ??
+                    stats.total_holders ??
+                    stats.holderCount ??
+                    stats.holder_count ??
+                    stats.holders ??
+                    0
+                );
+                const rawTopHolders = stats.topHolders || stats.top_holders || stats.holderDistribution || stats.holder_distribution || [];
+                const topHolders = Array.isArray(rawTopHolders)
+                    ? rawTopHolders.slice(0, 5).map((holder: any) => ({
+                        address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
+                        percent: Number(holder.percentage ?? holder.percent ?? holder.balance_percentage ?? 0)
+                    })).filter((holder) => holder.address)
+                    : [];
+
+                if (Number.isFinite(holderCount) && holderCount > 0) {
+                    return { holderCount, topHolders };
+                }
+            }
+
+            const ownersUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/owners?chain=${hexChain}&limit=100&order=DESC`;
+            const ownersResponse = await fetchProvider('moralis', ownersUrl, { headers });
+            if (!ownersResponse.ok) return null;
+
+            const owners = await ownersResponse.json();
+            const result = Array.isArray(owners.result) ? owners.result : Array.isArray(owners) ? owners : [];
+            const holderCount = Number(owners.total ?? owners.totalHolders ?? owners.total_holders ?? result.length);
+            const topHolders = result.slice(0, 5).map((holder: any) => ({
+                address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
+                percent: Number(holder.percentage_relative_to_total_supply ?? holder.percentage ?? holder.percent ?? 0)
+            })).filter((holder: { address: string }) => holder.address);
+
+            return holderCount > 0 ? { holderCount, topHolders } : null;
+        } catch (error) {
+            console.warn('Moralis holder insights failed', error);
+            return null;
+        }
+    },
+
+    getTokenActiveWallets24h: async (tokenAddress: string, chain: string): Promise<number | null> => {
+        if (!tokenAddress || chain.toLowerCase() === 'solana') return null;
+
+        const hexChain = mapChainToMoralisEVM(chain);
+        const since = Date.now() - 24 * 60 * 60 * 1000;
+        const wallets = new Set<string>();
+        let cursor: string | null = null;
+        let pages = 0;
+
+        try {
+            do {
+                const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+                const url = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/transfers?chain=${hexChain}&order=DESC&limit=100${cursorParam}`;
+                const response = await fetchProvider('moralis', url, {
+                    headers: { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY }
+                });
+
+                if (!response.ok) return wallets.size || null;
+
+                const payload = await response.json();
+                const transfers: MoralisTransfer[] = payload.result || [];
+                if (!transfers.length) break;
+
+                let reachedOlderTransfer = false;
+                for (const transfer of transfers) {
+                    const timestamp = new Date(transfer.block_timestamp).getTime();
+                    if (Number.isFinite(timestamp) && timestamp < since) {
+                        reachedOlderTransfer = true;
+                        continue;
+                    }
+
+                    const from = (transfer.from_address || transfer.from_owner || '').toLowerCase();
+                    const to = (transfer.to_address || transfer.to_owner || '').toLowerCase();
+                    if (from && !/^0x0{40}$/.test(from)) wallets.add(from);
+                    if (to && !/^0x0{40}$/.test(to)) wallets.add(to);
+                }
+
+                cursor = reachedOlderTransfer ? null : payload.cursor || null;
+                pages += 1;
+            } while (cursor && pages < 3);
+
+            return wallets.size;
+        } catch (error) {
+            console.warn('Moralis active wallet lookup failed', error);
+            return wallets.size || null;
         }
     },
 

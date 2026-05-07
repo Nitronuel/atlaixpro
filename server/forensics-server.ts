@@ -96,6 +96,47 @@ const PUBLIC_PROXY_ROUTES = [
     }
 ] as const;
 
+const CHAIN_DEX_VOLUME_LABELS: Record<string, string> = {
+    solana: 'Solana',
+    ethereum: 'Ethereum',
+    base: 'Base',
+    bsc: 'BSC',
+    polygon: 'Polygon',
+    arbitrum: 'Arbitrum',
+    avalanche: 'Avalanche',
+    optimism: 'OP Mainnet',
+    ton: 'TON',
+    sui: 'Sui'
+};
+
+async function fetchChainDexVolume(chain: string) {
+    const chainId = chain.toLowerCase().replace(/[^a-z0-9-]/g, '');
+    const chainLabel = CHAIN_DEX_VOLUME_LABELS[chainId];
+    if (!chainId || !chainLabel) return null;
+
+    const url = `https://api.llama.fi/overview/dexs/${encodeURIComponent(chainLabel)}?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true`;
+    const providerResponse = await fetchWithTimeout(url, {
+        headers: {
+            accept: 'application/json',
+            'user-agent': 'Atlaix/1.0'
+        }
+    }, 12_000);
+
+    if (!providerResponse.ok) return null;
+
+    const payload = await providerResponse.json() as { total24h?: number; change_1d?: number };
+    const volume = Number(payload.total24h || 0);
+    if (!Number.isFinite(volume) || volume <= 0) return null;
+
+    return {
+        chain: chainLabel,
+        chainId,
+        volume,
+        change1d: Number.isFinite(Number(payload.change_1d)) ? Number(payload.change_1d) : null,
+        source: 'defillama'
+    };
+}
+
 function json(response: import('node:http').ServerResponse, status: number, body: unknown) {
     response.writeHead(status, {
         'Content-Type': 'application/json',
@@ -320,6 +361,31 @@ const server = createServer(async (request, response) => {
     if (method === 'OPTIONS') {
         json(response, 204, {});
         return;
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/chain-dex-volumes') {
+        try {
+            const requestedChains = (requestUrl.searchParams.get('chains') || 'solana,ethereum,base,bsc,polygon,arbitrum')
+                .split(',')
+                .map((chain) => chain.trim().toLowerCase())
+                .filter(Boolean)
+                .slice(0, 10);
+            const chains = [...new Set(requestedChains)];
+            const volumes = (await Promise.all(chains.map((chain) => fetchChainDexVolume(chain))))
+                .filter((item): item is NonNullable<typeof item> => Boolean(item))
+                .sort((a, b) => b.volume - a.volume);
+
+            json(response, 200, {
+                volumes,
+                generatedAt: new Date().toISOString()
+            });
+            return;
+        } catch (error) {
+            json(response, 502, {
+                error: error instanceof Error ? error.message : 'Could not load chain DEX volumes.'
+            });
+            return;
+        }
     }
 
     const publicProxyRoute = PUBLIC_PROXY_ROUTES.find((route) => requestUrl.pathname.startsWith(route.prefix));

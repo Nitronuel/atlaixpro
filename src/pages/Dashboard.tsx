@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw, SlidersHorizontal, X, RotateCcw, BarChart3 } from 'lucide-react';
 import type { AlphaGauntletEventType, MarketCoin } from '../types';
 import { DatabaseService } from '../services/DatabaseService';
+import type { ChainDexVolume } from '../services/DatabaseService';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { useNavigate } from 'react-router-dom';
 import { isExcludedAlphaToken } from '../utils/tokenFilters';
@@ -158,6 +159,8 @@ const mergeStableFeedData = (incoming: MarketCoin[], current: MarketCoin[], pres
 const meetsFeedVolumeMinimum = (coin: MarketCoin) =>
     parseCurrency(coin.volume24h) >= MIN_FEED_VOLUME_24H_USD;
 
+const CHAIN_DEX_VOLUME_IDS = ['solana', 'ethereum', 'base', 'bsc', 'polygon', 'arbitrum'];
+
 const EVENT_FILTER_OPTIONS: Array<{ value: 'all' | AlphaGauntletEventType; label: string }> = [
     { value: 'all', label: 'All Events' },
     { value: 'Accumulation', label: 'Accumulation' },
@@ -211,6 +214,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [feedFilters, setFeedFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
     const [draftFeedFilters, setDraftFeedFilters] = useState<FeedFilters>(DEFAULT_FEED_FILTERS);
     const [chainVolumeSlide, setChainVolumeSlide] = useState(0);
+    const [chainDexVolumes, setChainDexVolumes] = useState<ChainDexVolume[]>([]);
     const [feedOrderState, setFeedOrderState] = useState<FeedOrderState>(() => loadFeedOrderState());
 
     const applyStableMarketData = (nextData: MarketCoin[], stableBase?: MarketCoin[], preserveMissing = false) => {
@@ -349,6 +353,25 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         }, 15000);
         return () => clearInterval(interval);
     }, [timeFrame]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadChainDexVolumes = async () => {
+            const volumes = await DatabaseService.getChainDexVolumes(CHAIN_DEX_VOLUME_IDS);
+            if (!cancelled && volumes.length) {
+                setChainDexVolumes(volumes);
+            }
+        };
+
+        void loadChainDexVolumes();
+        const interval = window.setInterval(loadChainDexVolumes, 5 * 60 * 1000);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(interval);
+        };
+    }, []);
 
     const handleTokenNavigation = (token: MarketCoin | string) => {
         const identifier = typeof token === 'string' ? token : (token.address || token.ticker);
@@ -584,11 +607,18 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             return chain.charAt(0).toUpperCase() + chain.slice(1);
         };
 
-        const topChainVolumes = Object.entries(chainStats)
+        const localTopChainVolumes = Object.entries(chainStats)
             .map(([chain, volume]) => ({ chain: formatChainLabel(chain), volume }))
             .filter((item) => item.volume > 0)
             .sort((a, b) => b.volume - a.volume)
             .slice(0, 6);
+
+        const topChainVolumes = chainDexVolumes.length
+            ? chainDexVolumes
+                .filter((item) => item.volume > 0)
+                .sort((a, b) => b.volume - a.volume)
+                .slice(0, 6)
+            : localTopChainVolumes;
 
         Object.entries(chainStats).forEach(([chain, vol]) => {
             if (vol > maxChainVol) {
@@ -603,12 +633,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             topInflowToken: topToken,
             bestChain,
             bestChainFlow: maxChainVol,
-            totalOnchainVolume: totalMarketVolume,
+            totalOnchainVolume: topChainVolumes.reduce((total, item) => total + item.volume, 0) || totalMarketVolume,
             topChainVolumes,
             riskCount: 0
         };
 
-    }, [marketData]);
+    }, [chainDexVolumes, marketData]);
 
     const chainVolumeSlideCount = Math.max(1, marketPulse.topChainVolumes.length);
 

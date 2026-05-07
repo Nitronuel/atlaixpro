@@ -190,4 +190,5 @@ export interface EnrichedTokenData {
     tax?: { buy: number; sell: number };
     poolCount?: number;
     activeWallets24h?: number;
+    topHolders?: Array<{ address: string; percent: number }>;
 }
