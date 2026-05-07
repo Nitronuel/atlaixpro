@@ -1144,12 +1144,16 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
                                             <td className="text-left">
                                                 <div className="flex w-[150px] max-w-[150px] flex-col items-start gap-1">
-                                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${getEventBadgeStyle(event?.eventType)}`}>
-                                                        <span className="truncate">{event?.eventType || 'Watching'}</span>
-                                                    </span>
-                                                    <span className="max-w-full truncate text-[10px] font-medium text-text-dark" title={topTrigger}>
-                                                        {topTrigger}
-                                                    </span>
+                                                    {event?.eventType && (
+                                                        <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${getEventBadgeStyle(event.eventType)}`}>
+                                                            <span className="truncate">{event.eventType}</span>
+                                                        </span>
+                                                    )}
+                                                    {topTrigger && topTrigger !== 'None' && (
+                                                        <span className="max-w-full truncate text-[10px] font-medium text-text-dark" title={topTrigger}>
+                                                            {topTrigger}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
 
