@@ -43,7 +43,7 @@ function AppContent() {
 
     const handleLogout = async () => {
         await signOut();
-        navigate('/login', { replace: true });
+        navigate('/dashboard', { replace: true });
     };
 
     const handleAuthRequest = () => {
@@ -58,62 +58,60 @@ function AppContent() {
             <Route path="/reset-password" element={<AuthScreen initialMode="reset" />} />
 
             <Route path="/*" element={
-                <ProtectedRoute>
-                    <Layout
-                        isAuthenticated={Boolean(user)}
-                        authLoading={loading}
-                        profile={profile}
-                        userEmail={user?.email || ''}
-                        onLogin={handleAuthRequest}
-                        onLogout={handleLogout}
-                        currentView="overview"
-                        onViewChange={(view) => {
-                            const routes: Record<string, string> = {
-                                'overview': '/dashboard',
+                <Layout
+                    isAuthenticated={Boolean(user)}
+                    authLoading={loading}
+                    profile={profile}
+                    userEmail={user?.email || ''}
+                    onLogin={handleAuthRequest}
+                    onLogout={handleLogout}
+                    currentView="overview"
+                    onViewChange={(view) => {
+                        const routes: Record<string, string> = {
+                            'overview': '/dashboard',
 
-                                'heatmap': '/heatmap',
-                                'sentiment': '/sentiment',
-                                'detection': '/detection',
-                                'ai-assistant': '/ai-assistant',
-                                'wallet-tracking': '/wallet',
-                                'safe-scan': '/safe-scan',
-                                'settings': '/settings',
-                                'smart-money': '/smart-money',
-                                'smart-alerts': '/smart-alerts'
-                            };
-                            if (routes[view]) navigate(routes[view]);
-                        }}
-                    >
-                        <Suspense fallback={<RouteSkeleton />}>
-                            <Routes>
-                                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                                <Route path="/dashboard" element={<Dashboard />} />
-                                <Route path="/token/:address" element={<TokenDetails />} />
+                            'heatmap': '/heatmap',
+                            'sentiment': '/sentiment',
+                            'detection': '/detection',
+                            'ai-assistant': '/ai-assistant',
+                            'wallet-tracking': '/wallet',
+                            'safe-scan': '/safe-scan',
+                            'settings': '/settings',
+                            'smart-money': '/smart-money',
+                            'smart-alerts': '/smart-alerts'
+                        };
+                        if (routes[view]) navigate(routes[view]);
+                    }}
+                >
+                    <Suspense fallback={<RouteSkeleton />}>
+                        <Routes>
+                            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                            <Route path="/dashboard" element={<Dashboard />} />
+                            <Route path="/token/:address" element={<TokenDetails />} />
 
 
-                                <Route path="/heatmap" element={<Heatmap />} />
-                                <Route path="/sentiment" element={<PlaceholderView title="Sentiment Intelligence" />} />
+                            <Route path="/heatmap" element={<Heatmap />} />
+                            <Route path="/sentiment" element={<PlaceholderView title="Sentiment Intelligence" />} />
 
-                                <Route path="/detection" element={<Detection />} />
-                                <Route path="/detection/token/:query" element={<TokenDetection />} />
+                            <Route path="/detection" element={<Detection />} />
+                            <Route path="/detection/token/:query" element={<TokenDetection />} />
 
-                                <Route path="/ai-assistant" element={<AiAssistant />} />
+                            <Route path="/ai-assistant" element={<AiAssistant />} />
 
-                                <Route path="/wallet" element={<WalletTracking />} />
-                                <Route path="/wallet/:address" element={<WalletTracking />} />
+                            <Route path="/wallet" element={<WalletTracking />} />
+                            <Route path="/wallet/:address" element={<WalletTracking />} />
 
-                                <Route path="/safe-scan" element={<SafeScan />} />
-                                <Route path="/alchemy-hub" element={<Navigate to="/safe-scan" replace />} />
+                            <Route path="/safe-scan" element={<SafeScan />} />
+                            <Route path="/alchemy-hub" element={<Navigate to="/safe-scan" replace />} />
 
-                                <Route path="/smart-money" element={<SmartMoney />} />
-                                <Route path="/smart-money/:address" element={<SmartWalletProfile />} />
-                                <Route path="/token-smart-money/:address" element={<TokenSmartMoney />} />
-                                <Route path="/smart-alerts" element={<SmartAlerts />} />
-                                <Route path="/settings" element={<ProfileSettings />} />
-                            </Routes>
-                        </Suspense>
-                    </Layout>
-                </ProtectedRoute>
+                            <Route path="/smart-money" element={<SmartMoney />} />
+                            <Route path="/smart-money/:address" element={<SmartWalletProfile />} />
+                            <Route path="/token-smart-money/:address" element={<TokenSmartMoney />} />
+                            <Route path="/smart-alerts" element={<SmartAlerts />} />
+                            <Route path="/settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+                        </Routes>
+                    </Suspense>
+                </Layout>
             } />
         </Routes>
     );
