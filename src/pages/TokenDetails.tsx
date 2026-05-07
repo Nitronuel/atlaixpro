@@ -75,47 +75,6 @@ const getDexscreenerChartUrl = (chainId?: string, pairAddress?: string, compact 
     return `https://dexscreener.com/${chainId}/${pairAddress}?${params.toString()}`;
 };
 
-const buildDexAggregateActivity = (args: {
-    pairAddress?: string;
-    priceUsd: number;
-    buyVolume: number;
-    sellVolume: number;
-}): RealActivity[] => {
-    const { pairAddress, priceUsd, buyVolume, sellVolume } = args;
-    const poolWallet = pairAddress || 'DEX Pool';
-    const rows: RealActivity[] = [];
-
-    if (buyVolume >= MIN_DISPLAY_ACTIVITY_USD) {
-        rows.push({
-            type: 'Buy',
-            val: priceUsd > 0 ? (buyVolume / priceUsd).toFixed(2) : '-',
-            desc: 'aggregate DEX buys',
-            time: '24h',
-            color: 'text-primary-green',
-            usd: `$${buyVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-            hash: `${poolWallet}:aggregate-buy`,
-            wallet: poolWallet,
-            tag: 'Buy'
-        });
-    }
-
-    if (sellVolume >= MIN_DISPLAY_ACTIVITY_USD) {
-        rows.push({
-            type: 'Sell',
-            val: priceUsd > 0 ? (sellVolume / priceUsd).toFixed(2) : '-',
-            desc: 'aggregate DEX sells',
-            time: '24h',
-            color: 'text-primary-red',
-            usd: `$${sellVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-            hash: `${poolWallet}:aggregate-sell`,
-            wallet: poolWallet,
-            tag: 'Sell'
-        });
-    }
-
-    return rows;
-};
-
 export const TokenDetails: React.FC = () => {
     const { address } = useParams<{ address: string }>();
     const navigate = useNavigate();
@@ -244,16 +203,9 @@ export const TokenDetails: React.FC = () => {
     const buyVolume = totalTxns > 0 ? volume24h * (buys / totalTxns) : volume24h / 2;
     const sellVolume = totalTxns > 0 ? volume24h * (sells / totalTxns) : volume24h / 2;
     const netVolume = buyVolume - sellVolume;
-    const fallbackActivity = useMemo(() => buildDexAggregateActivity({
-        pairAddress: enrichedData?.pairAddress,
-        priceUsd: priceNumber,
-        buyVolume,
-        sellVolume
-    }), [buyVolume, enrichedData?.pairAddress, priceNumber, sellVolume]);
-    const displayedActivity = (activityFeed.length ? activityFeed : fallbackActivity)
+    const displayedActivity = activityFeed
         .filter(item => parseActivityUsd(item.usd) >= MIN_DISPLAY_ACTIVITY_USD);
-    const highSignalEvents = displayedActivity.filter(item => ['Burn', 'Whale', 'Add Liq', 'Remove Liq'].includes(item.tag || item.type));
-    const visibleHighSignalEvents = highSignalEvents.length ? highSignalEvents : displayedActivity.slice(0, 6);
+    const visibleOnChainEvents = displayedActivity.slice(0, 7);
     const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
     const tokenIntelligencePanel = (
         <div className="rounded-lg border border-border bg-card p-5">
@@ -467,11 +419,11 @@ export const TokenDetails: React.FC = () => {
                         </div>
                     </div>
                     <div className="relative flex flex-col gap-1">
-                        {visibleHighSignalEvents.length === 0 ? (
+                        {visibleOnChainEvents.length === 0 ? (
                             <div className="rounded-lg border border-border bg-main/50 p-6 text-center text-sm text-text-medium">
-                                No major activity found yet.
+                                Activity will appear as it is detected.
                             </div>
-                        ) : visibleHighSignalEvents.slice(0, 7).map((item, index) => {
+                        ) : visibleOnChainEvents.map((item, index) => {
                             const accent = getActivityAccent(item);
                             return (
                                 <div key={`${item.hash}-${index}`} className="flex items-start justify-between gap-4 border-b border-border/50 py-3 last:border-b-0">
@@ -534,7 +486,7 @@ export const TokenDetails: React.FC = () => {
                                 {walletEvents.length === 0 ? (
                                     <tr>
                                         <td colSpan={5} className="py-8 text-center text-sm text-text-medium">
-                                            Wallet activity will appear once recent buys, sells, or transfers are detected.
+                                            Wallet activity will appear as it is detected.
                                         </td>
                                     </tr>
                                 ) : walletEvents.slice(0, visibleWalletRows).map((row, index) => (
