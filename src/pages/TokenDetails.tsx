@@ -7,7 +7,6 @@ import {
     ChevronDown,
     Copy,
     Droplets,
-    ExternalLink,
     Maximize2,
     Radar,
     RefreshCw,
@@ -443,9 +442,6 @@ export const TokenDetails: React.FC = () => {
                                 </span>
                             </button>
                         ))}
-                        <a href={enrichedData?.url} target="_blank" rel="noopener noreferrer" className="mt-1 flex items-center justify-center gap-2 rounded-lg border border-primary-green/20 bg-primary-green/10 px-4 py-3 text-sm font-bold text-primary-green transition-colors hover:bg-primary-green/20">
-                            Open Pair <ExternalLink size={15} />
-                        </a>
                     </div>
                 </div>
             </section>
