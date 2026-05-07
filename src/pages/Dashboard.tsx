@@ -171,22 +171,7 @@ const EVENT_FILTER_OPTIONS: Array<{ value: 'all' | AlphaGauntletEventType; label
     { value: 'Unusual Activity', label: 'Unusual Activity' }
 ];
 
-const getEventBadgeStyle = (eventType?: AlphaGauntletEventType) => {
-    switch (eventType) {
-        case 'Accumulation':
-            return 'border-primary-green/40 bg-primary-green/10 text-primary-green';
-        case 'Distribution':
-            return 'border-primary-red/40 bg-primary-red/10 text-primary-red';
-        case 'Market Stress':
-            return 'border-primary-yellow/40 bg-primary-yellow/10 text-primary-yellow';
-        case 'Recovery':
-            return 'border-primary-blue/40 bg-primary-blue/10 text-primary-blue';
-        case 'Liquidity Event':
-            return 'border-primary-purple/40 bg-primary-purple/10 text-primary-purple';
-        default:
-            return 'border-border bg-card-hover text-text-medium';
-    }
-};
+const EVENT_BADGE_STYLE = 'border-border bg-card-hover text-text-medium';
 
 const getFeedEventLabel = (coin: MarketCoin, eventType?: AlphaGauntletEventType) => {
     if (eventType) return eventType;
@@ -1180,7 +1165,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
                                             <td className="text-left">
                                                 <div className="flex w-[150px] max-w-[150px] items-start">
-                                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${getEventBadgeStyle(event?.eventType)}`}>
+                                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${EVENT_BADGE_STYLE}`}>
                                                         <span className="truncate" title={eventLabel}>{eventLabel}</span>
                                                     </span>
                                                 </div>
