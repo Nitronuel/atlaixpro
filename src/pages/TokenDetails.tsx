@@ -395,8 +395,7 @@ export const TokenDetails: React.FC = () => {
                         {!compactChartLoaded && (
                             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-main">
                                 <RefreshCw className="mb-3 animate-spin text-primary-green" size={24} />
-                                <div className="text-sm font-bold text-text-light">Loading Dexscreener chart...</div>
-                                <div className="mt-1 text-xs text-text-medium">Expand for the full chart workspace.</div>
+                                <div className="text-sm font-bold text-text-light">Loading chart...</div>
                             </div>
                         )}
                         {getDexscreenerChartUrl(enrichedData?.chainId, enrichedData?.pairAddress, true) ? (
@@ -404,7 +403,7 @@ export const TokenDetails: React.FC = () => {
                                 key={enrichedData?.pairAddress}
                                 src={getDexscreenerChartUrl(enrichedData?.chainId, enrichedData?.pairAddress, true)}
                                 className={`h-full w-full transition-opacity duration-300 ${compactChartLoaded ? 'opacity-100' : 'opacity-0'}`}
-                                title={`${tokenSymbol} Dexscreener chart`}
+                                title={`${tokenSymbol} token chart`}
                                 allow="clipboard-write"
                                 onLoad={() => setCompactChartLoaded(true)}
                             />
