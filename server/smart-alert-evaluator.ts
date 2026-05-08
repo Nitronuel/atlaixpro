@@ -31,6 +31,7 @@ export interface SmartAlertRuleSnapshot {
 export interface SmartAlertMarketSnapshot {
     tokenLabel?: string | null;
     tokenAddress?: string | null;
+    eventId?: string | null;
     priceUsd?: number | null;
     volume24hUsd?: number | null;
     liquidityUsd?: number | null;
@@ -247,7 +248,7 @@ export const evaluateSmartAlertRule = (
         observedValue,
         observedNumber: Number.isFinite(Number(observedNumber)) ? Number(observedNumber) : null,
         message,
-        dedupeKey: `${rule.id}:${rule.alert_type}:${bucket}:${snapshot.tokenAddress || snapshot.tokenLabel || 'market'}`,
+        dedupeKey: `${rule.id}:${rule.alert_type}:${bucket}:${snapshot.eventId || snapshot.tokenAddress || snapshot.tokenLabel || 'market'}`,
         nextBaselineValue,
         lastError
     };

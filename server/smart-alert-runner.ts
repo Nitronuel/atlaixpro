@@ -20,6 +20,7 @@ type SmartAlertRuleRow = SmartAlertRuleSnapshot & {
     trigger_count: number | null;
     metadata?: SmartAlertRuleMetadata | null;
     created_at?: string | null;
+    last_checked_at?: string | null;
 };
 
 type LinkedAlertConditionMetadata = {
@@ -68,6 +69,28 @@ type SmartAlertStatus = {
     triggersCreated: number;
 };
 
+type AlchemyAssetTransfer = {
+    hash?: string;
+    from?: string;
+    to?: string;
+    value?: number | string | null;
+    rawContract?: {
+        value?: string | null;
+        decimal?: string | number | null;
+    } | null;
+};
+
+type AlchemyRpcResponse<T> = {
+    result?: T;
+    error?: {
+        message?: string;
+    };
+};
+
+type AlchemyAssetTransferResponse = {
+    transfers?: AlchemyAssetTransfer[];
+};
+
 const ALERT_RULE_COLUMNS = [
     'id',
     'user_id',
@@ -81,6 +104,7 @@ const ALERT_RULE_COLUMNS = [
     'trigger_label',
     'cooldown_minutes',
     'enabled',
+    'last_checked_at',
     'last_triggered_at',
     'baseline_value',
     'trigger_count',
@@ -127,6 +151,47 @@ const parseMetric = (value: string | number | undefined | null) => {
 };
 
 const normalizeText = (value: string | undefined | null) => String(value || '').trim().toLowerCase();
+
+const ALCHEMY_NETWORK_BY_CHAIN: Record<string, string> = {
+    eth: 'eth-mainnet',
+    ethereum: 'eth-mainnet',
+    base: 'base-mainnet',
+    arbitrum: 'arb-mainnet',
+    polygon: 'polygon-mainnet',
+    matic: 'polygon-mainnet',
+    optimism: 'opt-mainnet',
+    opt: 'opt-mainnet'
+};
+
+const getAlchemyNetwork = (chain?: string | null) => ALCHEMY_NETWORK_BY_CHAIN[normalizeText(chain)] || '';
+
+const toHexQuantity = (value: number) => `0x${Math.max(0, Math.floor(value)).toString(16)}`;
+
+const parseHexQuantity = (value: string | undefined | null) => {
+    if (!value) return 0;
+    const parsed = Number.parseInt(value, 16);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseRawTokenDecimal = (value: string | number | null | undefined) => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 18;
+    if (!value) return 18;
+    const normalized = String(value);
+    const parsed = normalized.startsWith('0x') ? Number.parseInt(normalized, 16) : Number.parseInt(normalized, 10);
+    return Number.isFinite(parsed) ? parsed : 18;
+};
+
+const parseAlchemyTransferAmount = (transfer: AlchemyAssetTransfer) => {
+    const directValue = Number(transfer.value);
+    if (Number.isFinite(directValue) && directValue > 0) return directValue;
+
+    const rawValue = transfer.rawContract?.value;
+    if (!rawValue) return 0;
+
+    const rawAmount = Number(BigInt(rawValue));
+    const decimals = parseRawTokenDecimal(transfer.rawContract?.decimal);
+    return Number.isFinite(rawAmount) ? rawAmount / (10 ** decimals) : 0;
+};
 
 const tokenMatchesRule = (coin: MarketCoin, rule: SmartAlertRuleRow) => {
     const tokenAddress = normalizeText(rule.token_address);
@@ -175,6 +240,42 @@ const dexPairToSnapshot = (pair: any, fallbackAddress: string): SmartAlertMarket
     };
 };
 
+const getWhaleLookbackBlock = (rule: SmartAlertRuleRow, latestBlock: number) => {
+    if (!rule.last_checked_at) return Math.max(0, latestBlock - 300);
+
+    const lastCheckedAt = new Date(rule.last_checked_at).getTime();
+    if (!Number.isFinite(lastCheckedAt)) return Math.max(0, latestBlock - 300);
+
+    const elapsedSeconds = Math.max(60, (Date.now() - lastCheckedAt) / 1000);
+    const blockEstimate = Math.ceil(elapsedSeconds / 12) + 20;
+    return Math.max(0, latestBlock - Math.min(Math.max(blockEstimate, 25), 7_200));
+};
+
+const getRelevantWhaleTransfer = (
+    transfers: AlchemyAssetTransfer[],
+    pairAddress: string,
+    condition: SmartAlertCondition | string,
+    priceUsd: number
+) => {
+    const normalizedPair = normalizeText(pairAddress);
+    const normalizedCondition = normalizeSmartAlertCondition(String(condition));
+
+    return transfers
+        .map((transfer) => {
+            const fromPair = normalizeText(transfer.from) === normalizedPair;
+            const toPair = normalizeText(transfer.to) === normalizedPair;
+            const side = fromPair ? 'buy' as const : toPair ? 'sell' as const : null;
+            const amount = parseAlchemyTransferAmount(transfer);
+            const usd = amount * priceUsd;
+            return { transfer, side, usd };
+        })
+        .filter((item) => item.side && Number.isFinite(item.usd) && item.usd > 0)
+        .filter((item) => normalizedCondition === 'buy_or_sell_above' ||
+            (normalizedCondition === 'buy_above' && item.side === 'buy') ||
+            (normalizedCondition === 'sell_above' && item.side === 'sell'))
+        .sort((a, b) => b.usd - a.usd)[0] || null;
+};
+
 const fetchDexPairForAddress = async (address: string, chain?: string | null) => {
     let response: Response;
     try {
@@ -210,6 +311,65 @@ const fetchDexPairForAddress = async (address: string, chain?: string | null) =>
 
     const candidates = matchingPairs.length ? matchingPairs : pairs.filter((pair) => !normalizedChain || normalizeText(pair?.chainId) === normalizedChain);
     return candidates.sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0] || null;
+};
+
+const fetchAlchemyWhaleSnapshot = async (
+    rule: SmartAlertRuleRow,
+    pair: any,
+    tokenAddress: string
+): Promise<SmartAlertMarketSnapshot | null> => {
+    if (rule.alert_type !== 'Whale') return null;
+
+    const chain = rule.chain_id || rule.metadata?.token?.chainId || pair?.chainId;
+    if (!getAlchemyNetwork(chain)) return null;
+
+    const pairAddress = pair?.pairAddress || rule.metadata?.token?.pairAddress;
+    const priceUsd = parseMetric(pair?.priceUsd);
+    if (!pairAddress || !priceUsd) return null;
+
+    try {
+        const latestBlockHex = await fetchAlchemyRpc<string>(chain, 'eth_blockNumber', []);
+        const latestBlock = parseHexQuantity(latestBlockHex);
+        if (!latestBlock) return null;
+
+        const transferResponse = await fetchAlchemyRpc<AlchemyAssetTransferResponse>(
+            chain,
+            'alchemy_getAssetTransfers',
+            [{
+                fromBlock: toHexQuantity(getWhaleLookbackBlock(rule, latestBlock)),
+                toBlock: 'latest',
+                category: ['erc20'],
+                contractAddresses: [tokenAddress],
+                withMetadata: false,
+                excludeZeroValue: true,
+                maxCount: '0x3e8'
+            }]
+        );
+        const transfers = Array.isArray(transferResponse?.transfers) ? transferResponse.transfers : [];
+        const relevant = getRelevantWhaleTransfer(transfers, pairAddress, rule.condition, priceUsd);
+        if (!relevant) {
+            return {
+                ...dexPairToSnapshot(pair, tokenAddress),
+                whaleUsd: 0,
+                whaleSide: normalizeSmartAlertCondition(String(rule.condition)) === 'sell_above' ? 'sell' : 'buy'
+            };
+        }
+
+        return {
+            ...dexPairToSnapshot(pair, tokenAddress),
+            eventId: relevant.transfer.hash || `${normalizeText(relevant.transfer.from)}:${normalizeText(relevant.transfer.to)}:${Math.round(relevant.usd)}`,
+            whaleUsd: relevant.usd,
+            whaleSide: relevant.side
+        };
+    } catch (error) {
+        console.warn('[SmartAlerts] Alchemy whale transfer lookup failed', {
+            ruleId: rule.id,
+            tokenAddress,
+            chain,
+            error: formatRuleCheckError(error)
+        });
+        return null;
+    }
 };
 
 const eventToSnapshot = (event: AlphaGauntletEvent): SmartAlertMarketSnapshot => ({
@@ -250,15 +410,37 @@ const formatRuleCheckError = (error: unknown) => {
     return message || 'Smart Alert check failed.';
 };
 
-const fetchWithTimeout = async (url: string, timeoutMs = 8_000) => {
+const fetchWithTimeout = async (url: string, timeoutMs = 8_000, init?: RequestInit) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        return await fetch(url, { signal: controller.signal });
+        return await fetch(url, { ...init, signal: controller.signal });
     } finally {
         clearTimeout(timeout);
     }
+};
+
+const fetchAlchemyRpc = async <T>(chain: string | null | undefined, method: string, params: unknown[]): Promise<T | null> => {
+    const network = getAlchemyNetwork(chain);
+    const apiKey = readEnv('ALCHEMY_API_KEY', 'VITE_ALCHEMY_KEY', 'VITE_ALCHEMY_API_KEY');
+    if (!network || !apiKey) return null;
+
+    const response = await fetchWithTimeout(`https://${network}.g.alchemy.com/v2/${apiKey}`, 10_000, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: `smart-alert-${method}`,
+            method,
+            params
+        })
+    });
+    if (!response.ok) return null;
+
+    const payload = await response.json() as AlchemyRpcResponse<T>;
+    if (payload.error) throw new Error(payload.error.message || `Alchemy ${method} failed.`);
+    return payload.result ?? null;
 };
 
 export class SmartAlertRunner {
@@ -484,6 +666,9 @@ export class SmartAlertRunner {
                 return coinToAlphaSnapshot(coin, event);
             }
 
+            const whaleSnapshot = await fetchAlchemyWhaleSnapshot(rule, directPair, tokenAddress);
+            if (whaleSnapshot) return whaleSnapshot;
+
             return dexPairToSnapshot(directPair, tokenAddress);
         }
 
@@ -509,6 +694,9 @@ export class SmartAlertRunner {
             const event = AlphaGauntletService.qualifyToken(coin);
             return coinToAlphaSnapshot(coin, event);
         }
+
+        const whaleSnapshot = await fetchAlchemyWhaleSnapshot(rule, pair, tokenAddress);
+        if (whaleSnapshot) return whaleSnapshot;
 
         return dexPairToSnapshot(pair, tokenAddress);
     }

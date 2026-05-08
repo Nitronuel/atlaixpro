@@ -252,4 +252,111 @@ describe('SmartAlertRunner', () => {
         expect(updates.some((patch) => patch.last_checked_at && patch.last_error === null)).toBe(true);
         expect(updates.some((patch) => patch.last_error === 'No live market snapshot was available for this alert token.')).toBe(false);
     });
+
+    it('uses Alchemy transfers to infer whale buy and sell size from the DEX pair direction', async () => {
+        const previousAlchemyKey = process.env.ALCHEMY_API_KEY;
+        process.env.ALCHEMY_API_KEY = 'test-key';
+
+        const pairAddress = '0x0000000000000000000000000000000000000abc';
+        const tokenAddress = '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e';
+        const walletAddress = '0x0000000000000000000000000000000000000def';
+        vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+            if (String(url).includes('dexscreener.com')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        pairs: [{
+                            chainId: 'ethereum',
+                            pairAddress,
+                            baseToken: {
+                                address: tokenAddress,
+                                symbol: 'ELIEN',
+                                name: 'Elien Musk'
+                            },
+                            priceUsd: '10',
+                            volume: { h24: '1000' },
+                            liquidity: { usd: '10000' }
+                        }]
+                    })
+                };
+            }
+
+            const body = JSON.parse(String(init?.body || '{}'));
+            if (body.method === 'eth_blockNumber') {
+                return {
+                    ok: true,
+                    json: async () => ({ result: '0x100' })
+                };
+            }
+
+            return {
+                ok: true,
+                json: async () => ({
+                    result: {
+                        transfers: [{
+                            hash: '0xbuy',
+                            from: pairAddress,
+                            to: walletAddress,
+                            value: 250,
+                            rawContract: { decimal: '18', value: '0x0' }
+                        }, {
+                            hash: '0xsell',
+                            from: walletAddress,
+                            to: pairAddress,
+                            value: 150,
+                            rawContract: { decimal: '18', value: '0x0' }
+                        }]
+                    }
+                })
+            };
+        }));
+
+        const inserts: Record<string, unknown>[] = [];
+        const updates: Record<string, unknown>[] = [];
+        const fakeSupabase = {
+            from: () => ({
+                update: (patch: Record<string, unknown>) => {
+                    updates.push(patch);
+                    return {
+                        eq: async () => ({ error: null })
+                    };
+                },
+                insert: (patch: Record<string, unknown>) => {
+                    inserts.push(patch);
+                    return {
+                        select: async () => ({ data: [{ id: 'trigger-1' }], error: null })
+                    };
+                }
+            })
+        };
+        const runner = new SmartAlertRunner();
+        const baseRule = {
+            id: 'rule-4',
+            user_id: 'user-1',
+            alert_type: 'Whale',
+            target: 'Elien Musk',
+            chain_id: 'ethereum',
+            token_address: tokenAddress,
+            threshold_kind: 'currency',
+            threshold: '$1000',
+            trigger_label: 'Whale activity above $1000 on Elien Musk',
+            cooldown_minutes: 60,
+            enabled: true,
+            last_triggered_at: null,
+            baseline_value: null,
+            trigger_count: 0,
+            metadata: { alertMode: 'single', token: { address: tokenAddress, pairAddress, chainId: 'ethereum' } },
+            created_at: '2026-05-08T00:00:00.000Z'
+        };
+
+        await (runner as any).evaluateRule(fakeSupabase, { ...baseRule, condition: 'buy_above' }, [], []);
+        await (runner as any).evaluateRule(fakeSupabase, { ...baseRule, id: 'rule-5', condition: 'sell_above' }, [], []);
+
+        expect(inserts.some((patch) => patch.observed_value === '$2,500')).toBe(true);
+        expect(inserts.some((patch) => patch.observed_value === '$1,500')).toBe(true);
+        expect(updates.some((patch) => patch.last_observed_value === '$2,500' && patch.last_error === null)).toBe(true);
+        expect(updates.some((patch) => patch.last_observed_value === '$1,500' && patch.last_error === null)).toBe(true);
+
+        restoreEnv('ALCHEMY_API_KEY', previousAlchemyKey);
+    });
 });
