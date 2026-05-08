@@ -114,6 +114,74 @@ const saveFeedOrderState = (state: FeedOrderState) => {
     }
 };
 
+const FilterSelect = ({
+    label,
+    value,
+    onChange,
+    options
+}: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+    options: Array<{ value: string; label: string }>;
+}) => (
+    <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
+        <div className="text-sm font-bold text-text-medium">{label}</div>
+        <select
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            className="h-10 w-full appearance-none rounded-lg border border-border bg-[#111315] px-4 text-sm font-bold text-text-light outline-none transition-colors hover:border-text-medium focus:border-primary-green/50"
+        >
+            {options.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+        </select>
+    </div>
+);
+
+const FilterRange = ({
+    label,
+    minKey,
+    maxKey,
+    suffix,
+    filters,
+    onChange
+}: {
+    label: string;
+    minKey: keyof FeedFilters;
+    maxKey: keyof FeedFilters;
+    suffix: string;
+    filters: FeedFilters;
+    onChange: (key: keyof FeedFilters, value: string) => void;
+}) => (
+    <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
+        <div className="text-sm font-bold text-text-medium">{label}</div>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+            <label className="relative">
+                <input
+                    value={filters[minKey]}
+                    onChange={(event) => onChange(minKey, event.target.value)}
+                    inputMode="decimal"
+                    placeholder="Min"
+                    className="h-10 w-full rounded-lg border border-border bg-[#111315] px-4 pr-8 text-sm font-bold text-text-light outline-none placeholder-text-dark transition-colors focus:border-primary-green/50"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-text-medium">{suffix}</span>
+            </label>
+            <span className="text-text-dark">-</span>
+            <label className="relative">
+                <input
+                    value={filters[maxKey]}
+                    onChange={(event) => onChange(maxKey, event.target.value)}
+                    inputMode="decimal"
+                    placeholder="Max"
+                    className="h-10 w-full rounded-lg border border-border bg-[#111315] px-4 pr-8 text-sm font-bold text-text-light outline-none placeholder-text-dark transition-colors focus:border-primary-green/50"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-text-medium">{suffix}</span>
+            </label>
+        </div>
+    </div>
+);
+
 const registerFeedOrder = (tokens: MarketCoin[], current: FeedOrderState): FeedOrderState => {
     if (!tokens.length) return current;
 
@@ -802,70 +870,6 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         setCurrentPage(1);
     };
 
-    const FilterSelect = ({
-        label,
-        value,
-        onChange,
-        options
-    }: {
-        label: string;
-        value: string;
-        onChange: (value: string) => void;
-        options: Array<{ value: string; label: string }>;
-    }) => (
-        <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
-            <div className="text-sm font-bold text-text-medium">{label}</div>
-            <select
-                value={value}
-                onChange={(event) => onChange(event.target.value)}
-                className="h-10 w-full appearance-none rounded-lg border border-border bg-[#111315] px-4 text-sm font-bold text-text-light outline-none transition-colors hover:border-text-medium focus:border-primary-green/50"
-            >
-                {options.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-            </select>
-        </div>
-    );
-
-    const FilterRange = ({
-        label,
-        minKey,
-        maxKey,
-        suffix
-    }: {
-        label: string;
-        minKey: keyof FeedFilters;
-        maxKey: keyof FeedFilters;
-        suffix: string;
-    }) => (
-        <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
-            <div className="text-sm font-bold text-text-medium">{label}</div>
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                <label className="relative">
-                    <input
-                        value={draftFeedFilters[minKey]}
-                        onChange={(event) => updateDraftFilter(minKey, event.target.value)}
-                        inputMode="decimal"
-                        placeholder="Min"
-                        className="h-10 w-full rounded-lg border border-border bg-[#111315] px-4 pr-8 text-sm font-bold text-text-light outline-none placeholder-text-dark transition-colors focus:border-primary-green/50"
-                    />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-text-medium">{suffix}</span>
-                </label>
-                <span className="text-text-dark">-</span>
-                <label className="relative">
-                    <input
-                        value={draftFeedFilters[maxKey]}
-                        onChange={(event) => updateDraftFilter(maxKey, event.target.value)}
-                        inputMode="decimal"
-                        placeholder="Max"
-                        className="h-10 w-full rounded-lg border border-border bg-[#111315] px-4 pr-8 text-sm font-bold text-text-light outline-none placeholder-text-dark transition-colors focus:border-primary-green/50"
-                    />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-text-medium">{suffix}</span>
-                </label>
-            </div>
-        </div>
-    );
-
     const aiMarketPulseSection = (
         <section className="min-w-0 relative z-20">
             <div className="mb-2 flex items-center gap-2">
@@ -1269,10 +1273,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                     onChange={(value) => updateDraftFilter('eventType', value)}
                                     options={EVENT_FILTER_OPTIONS}
                                 />
-                                <FilterRange label="Market Cap" minKey="marketCapMin" maxKey="marketCapMax" suffix="$" />
-                                <FilterRange label="Liquidity" minKey="liquidityMin" maxKey="liquidityMax" suffix="$" />
-                                <FilterRange label="Price Change (24h)" minKey="priceChangeMin" maxKey="priceChangeMax" suffix="%" />
-                                <FilterRange label="Volume (24h)" minKey="volumeMin" maxKey="volumeMax" suffix="$" />
+                                <FilterRange label="Market Cap" minKey="marketCapMin" maxKey="marketCapMax" suffix="$" filters={draftFeedFilters} onChange={updateDraftFilter} />
+                                <FilterRange label="Liquidity" minKey="liquidityMin" maxKey="liquidityMax" suffix="$" filters={draftFeedFilters} onChange={updateDraftFilter} />
+                                <FilterRange label="Price Change (24h)" minKey="priceChangeMin" maxKey="priceChangeMax" suffix="%" filters={draftFeedFilters} onChange={updateDraftFilter} />
+                                <FilterRange label="Volume (24h)" minKey="volumeMin" maxKey="volumeMax" suffix="$" filters={draftFeedFilters} onChange={updateDraftFilter} />
                             </div>
                         </div>
 
