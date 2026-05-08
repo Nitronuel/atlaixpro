@@ -622,14 +622,12 @@ export const Detection: React.FC = () => {
                                             <col />
                                             <col className="w-[50px] 2xl:w-[76px]" />
                                             <col className="w-[76px] 2xl:w-[112px]" />
-                                            <col className="w-[64px] 2xl:w-[92px]" />
                                         </colgroup>
                                         <thead className="bg-[#111315] text-[11px] uppercase tracking-wide text-text-medium">
                                             <tr>
                                                 <th className="px-3 py-3 font-bold 2xl:px-4">Token</th>
                                                 <th className="px-2 py-3 font-bold 2xl:px-4">Score</th>
                                                 <th className="px-2 py-3 font-bold 2xl:px-4">Severity</th>
-                                                <th className="px-2 py-3 font-bold text-right 2xl:px-4">Detected</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border/70">
@@ -661,7 +659,6 @@ export const Detection: React.FC = () => {
                                                             {event.severity}
                                                         </span>
                                                     </td>
-                                                    <td className="px-2 py-4 text-right text-[11px] font-mono text-text-medium 2xl:px-4 2xl:text-xs">{getTimeAgo(event.detectedAt)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
