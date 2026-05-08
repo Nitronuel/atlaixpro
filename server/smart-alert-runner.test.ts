@@ -133,7 +133,7 @@ describe('SmartAlertRunner', () => {
                     };
                 },
                 insert: () => ({
-                    select: async () => ({ data: [], error: null })
+                    select: async () => ({ data: [{ id: 'trigger-1' }], error: null })
                 })
             })
         };
@@ -187,6 +187,7 @@ describe('SmartAlertRunner', () => {
         await (runner as any).evaluateRule(fakeSupabase, rule, [broadFeedCoin], []);
 
         expect(updates.some((patch) => patch.last_observed_value === '$5' && patch.last_error === null)).toBe(true);
+        expect(updates.some((patch) => patch.enabled === false && (patch.metadata as any)?.status === 'completed')).toBe(true);
     });
 
     it('treats a reachable token with no current Alpha event as waiting instead of failed', async () => {

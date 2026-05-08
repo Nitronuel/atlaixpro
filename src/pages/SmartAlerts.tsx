@@ -354,7 +354,9 @@ export const SmartAlerts: React.FC = () => {
         return () => window.clearInterval(interval);
     }, [authLoading, loadUserAlerts, user]);
 
-    const feedItems = useMemo(() => rules, [rules]);
+    const feedItems = useMemo(() => (
+        rules.filter((rule) => rule.metadata?.status !== 'completed' && rule.metadata?.status !== 'expired')
+    ), [rules]);
     const historyItems = useMemo(() => triggers, [triggers]);
 
     const applySelectedToken = (draft: AlertSetupDraft, token: SmartAlertTokenSnapshot | null = selectedToken) => ({
@@ -876,7 +878,6 @@ export const SmartAlerts: React.FC = () => {
                                                         <span>Last triggered: {formatRelativeTime(rule.last_triggered_at)}</span>
                                                         <span>Triggers: {rule.trigger_count}</span>
                                                         {rule.metadata?.alertMode !== 'linked' && <span>{formatExpiration(rule.metadata?.expiresAt as string | null | undefined)}</span>}
-                                                        {rule.last_observed_value && <span>Observed: {rule.last_observed_value}</span>}
                                                         {waitingState && <span className="text-text-medium sm:col-span-2">{waitingState}</span>}
                                                         {rule.last_error && <span className="text-primary-red sm:col-span-2">Latest check issue: {rule.last_error}</span>}
                                                     </div>

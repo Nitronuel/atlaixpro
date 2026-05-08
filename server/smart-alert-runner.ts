@@ -785,6 +785,14 @@ export class SmartAlertRunner {
             last_observed_value: lastObservedValue,
             last_observed_at: now.toISOString(),
             last_error: lastError || null,
+            ...(triggersCreated > 0 ? {
+                enabled: false,
+                metadata: {
+                    ...(rule.metadata || {}),
+                    status: 'completed',
+                    completedAt: now.toISOString()
+                }
+            } : {}),
             ...(nextBaselineValue !== null ? {
                 baseline_value: nextBaselineValue,
                 baseline_observed_at: now.toISOString()
@@ -929,6 +937,7 @@ export class SmartAlertRunner {
 
         await this.updateRuleEvaluation(supabase, rule, {
             last_checked_at: now.toISOString(),
+            ...(allConditionsMet ? { enabled: false } : {}),
             last_observed_value: lastObservedValue,
             last_observed_at: now.toISOString(),
             last_error: lastError || null,
