@@ -104,9 +104,12 @@ export interface SmartAlertRuleMetadata {
     token?: SmartAlertTokenSnapshot | null;
     matchLogic?: 'all';
     timeWindowMinutes?: number | null;
+    expirationMinutes?: number | null;
+    expiresAt?: string | null;
     status?: 'active' | 'paused' | 'completed' | 'expired';
     conditions?: LinkedAlertConditionMetadata[];
     completedAt?: string | null;
+    expiredAt?: string | null;
 }
 
 const ALERT_RULE_COLUMNS = [

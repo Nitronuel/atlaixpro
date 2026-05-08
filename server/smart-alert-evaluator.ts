@@ -115,13 +115,6 @@ const formatPercent = (value: number) => {
     return `${prefix}${value.toFixed(Math.abs(value) >= 10 ? 1 : 2)}%`;
 };
 
-const isCooldownActive = (rule: SmartAlertRuleSnapshot, now: Date) => {
-    if (!rule.last_triggered_at) return false;
-    const lastTriggeredAt = new Date(rule.last_triggered_at).getTime();
-    if (!Number.isFinite(lastTriggeredAt)) return false;
-    return now.getTime() - lastTriggeredAt < rule.cooldown_minutes * 60_000;
-};
-
 const compareThreshold = (
     observed: number | null | undefined,
     condition: SmartAlertCondition,
@@ -186,18 +179,6 @@ export const evaluateSmartAlertRule = (
     const thresholdKind = (rule.threshold_kind as SmartAlertThresholdKind) || getThresholdKindForCondition(rule.alert_type, condition);
     const observedNumber = getNumericObserved(rule, snapshot);
     const tokenLabel = snapshot.tokenLabel ? ` on ${snapshot.tokenLabel}` : '';
-
-    if (isCooldownActive(rule, now)) {
-        return {
-            shouldTrigger: false,
-            observedValue: formatObserved(rule, observedNumber),
-            observedNumber,
-            message: 'Alert is inside its cooldown window.',
-            dedupeKey: `${rule.id}:cooldown`,
-            nextBaselineValue: null,
-            lastError: null
-        };
-    }
 
     let matched = false;
     let observedValue: string | null = formatObserved(rule, observedNumber);

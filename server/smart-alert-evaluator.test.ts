@@ -85,7 +85,7 @@ describe('Smart Alert evaluator', () => {
         ).shouldTrigger).toBe(true);
     });
 
-    it('respects cooldown windows', () => {
+    it('does not suppress matches based on previous trigger time', () => {
         const now = new Date('2026-05-07T10:00:00.000Z');
         const result = evaluateSmartAlertRule(
             buildRule({ last_triggered_at: '2026-05-07T09:30:00.000Z', cooldown_minutes: 60 }),
@@ -93,7 +93,7 @@ describe('Smart Alert evaluator', () => {
             now
         );
 
-        expect(result.shouldTrigger).toBe(false);
-        expect(result.message).toContain('cooldown');
+        expect(result.shouldTrigger).toBe(true);
+        expect(result.message).toContain('triggered');
     });
 });

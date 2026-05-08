@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SmartAlertRunner } from './smart-alert-runner';
 
 const restoreEnv = (key: string, value: string | undefined) => {
@@ -10,6 +10,10 @@ const restoreEnv = (key: string, value: string | undefined) => {
 };
 
 describe('SmartAlertRunner', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
     it('reports a clear backend configuration error when service-role credentials are missing', async () => {
         const previousUrl = process.env.SUPABASE_URL;
         const previousViteUrl = process.env.VITE_SUPABASE_URL;
@@ -31,5 +35,221 @@ describe('SmartAlertRunner', () => {
         restoreEnv('VITE_SUPABASE_URL', previousViteUrl);
         restoreEnv('SUPABASE_SERVICE_ROLE_KEY', previousServiceRole);
         restoreEnv('SUPABASE_SERVICE_KEY', previousServiceKey);
+    });
+
+    it('clears a stale rule error after a successful market evaluation', async () => {
+        const updates: Record<string, unknown>[] = [];
+        const fakeSupabase = {
+            from: () => ({
+                update: (patch: Record<string, unknown>) => {
+                    updates.push(patch);
+                    return {
+                        eq: async () => ({ error: null })
+                    };
+                },
+                insert: () => ({
+                    select: async () => ({ data: [], error: null })
+                })
+            })
+        };
+        const runner = new SmartAlertRunner();
+        const rule = {
+            id: 'rule-1',
+            user_id: 'user-1',
+            alert_type: 'Price',
+            target: 'ELIEN',
+            chain_id: 'ethereum',
+            token_address: '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e',
+            condition: 'changes_by_percent',
+            threshold_kind: 'percent',
+            threshold: '30%',
+            trigger_label: 'Elien Musk price moves by 30%',
+            cooldown_minutes: 60,
+            enabled: true,
+            last_triggered_at: null,
+            baseline_value: 0.002239,
+            trigger_count: 0,
+            metadata: { alertMode: 'single' },
+            created_at: '2026-05-08T00:00:00.000Z'
+        };
+        const coin = {
+            id: 1,
+            name: 'Elien Musk',
+            ticker: 'ELIEN',
+            price: '$0.00245',
+            h1: '0%',
+            h24: '0%',
+            d7: '0%',
+            cap: '$0',
+            liquidity: '$100K',
+            volume24h: '$50K',
+            dexBuys: '0',
+            dexSells: '0',
+            dexFlow: 0,
+            netFlow: '$0',
+            smartMoney: '$0',
+            smartMoneySignal: 'Neutral',
+            signal: 'None',
+            riskLevel: 'Low',
+            age: '1d',
+            createdTimestamp: 0,
+            img: '',
+            trend: 'Bullish',
+            chain: 'ethereum',
+            address: '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e'
+        };
+
+        await (runner as any).evaluateRule(fakeSupabase, rule, [coin], []);
+
+        expect(updates.some((patch) => Object.prototype.hasOwnProperty.call(patch, 'last_error') && patch.last_error === null)).toBe(true);
+    });
+
+    it('prefers direct contract market data for contract-specific alerts', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                pairs: [{
+                    chainId: 'ethereum',
+                    pairAddress: '0xpair',
+                    baseToken: {
+                        address: '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e',
+                        symbol: 'ELIEN',
+                        name: 'Elien Musk'
+                    },
+                    priceUsd: '5',
+                    volume: { h24: '1000' },
+                    liquidity: { usd: '10000' }
+                }]
+            })
+        })));
+
+        const updates: Record<string, unknown>[] = [];
+        const fakeSupabase = {
+            from: () => ({
+                update: (patch: Record<string, unknown>) => {
+                    updates.push(patch);
+                    return {
+                        eq: async () => ({ error: null })
+                    };
+                },
+                insert: () => ({
+                    select: async () => ({ data: [], error: null })
+                })
+            })
+        };
+        const runner = new SmartAlertRunner();
+        const rule = {
+            id: 'rule-2',
+            user_id: 'user-1',
+            alert_type: 'Price',
+            target: 'ELIEN',
+            chain_id: 'ethereum',
+            token_address: '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e',
+            condition: 'above',
+            threshold_kind: 'currency',
+            threshold: '$2',
+            trigger_label: 'Elien Musk price above $2',
+            cooldown_minutes: 60,
+            enabled: true,
+            last_triggered_at: null,
+            baseline_value: null,
+            trigger_count: 0,
+            metadata: { alertMode: 'single' },
+            created_at: '2026-05-08T00:00:00.000Z'
+        };
+        const broadFeedCoin = {
+            id: 1,
+            name: 'Elien Musk',
+            ticker: 'ELIEN',
+            price: '$1',
+            h1: '0%',
+            h24: '0%',
+            d7: '0%',
+            cap: '$0',
+            liquidity: '$100K',
+            volume24h: '$50K',
+            dexBuys: '0',
+            dexSells: '0',
+            dexFlow: 0,
+            netFlow: '$0',
+            smartMoney: '$0',
+            smartMoneySignal: 'Neutral',
+            signal: 'None',
+            riskLevel: 'Low',
+            age: '1d',
+            createdTimestamp: 0,
+            img: '',
+            trend: 'Bullish',
+            chain: 'ethereum',
+            address: '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e'
+        };
+
+        await (runner as any).evaluateRule(fakeSupabase, rule, [broadFeedCoin], []);
+
+        expect(updates.some((patch) => patch.last_observed_value === '$5' && patch.last_error === null)).toBe(true);
+    });
+
+    it('treats a reachable token with no current Alpha event as waiting instead of failed', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                pairs: [{
+                    chainId: 'ethereum',
+                    pairAddress: '0xpair',
+                    baseToken: {
+                        address: '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e',
+                        symbol: 'ELIEN',
+                        name: 'Elien Musk'
+                    },
+                    priceUsd: '0.003',
+                    txns: { h24: { buys: 12, sells: 10 } },
+                    volume: { h24: 12000 },
+                    priceChange: { h1: 1, h6: 3, h24: 4 },
+                    liquidity: { usd: 90000 },
+                    fdv: 400000,
+                    pairCreatedAt: Date.now() - 48 * 60 * 60 * 1000
+                }]
+            })
+        })));
+
+        const updates: Record<string, unknown>[] = [];
+        const fakeSupabase = {
+            from: () => ({
+                update: (patch: Record<string, unknown>) => {
+                    updates.push(patch);
+                    return {
+                        eq: async () => ({ error: null })
+                    };
+                },
+                insert: () => ({
+                    select: async () => ({ data: [], error: null })
+                })
+            })
+        };
+        const runner = new SmartAlertRunner();
+        const rule = {
+            id: 'rule-3',
+            user_id: 'user-1',
+            alert_type: 'Alpha',
+            target: 'Elien Musk',
+            chain_id: 'ethereum',
+            token_address: '0xC7e4254a72169fdf7a2E080462724f2F642dAF7e',
+            condition: 'event_is',
+            threshold_kind: 'event',
+            threshold: 'Accumulation',
+            trigger_label: 'Elien Musk appears with Accumulation',
+            cooldown_minutes: 60,
+            enabled: true,
+            last_triggered_at: null,
+            baseline_value: null,
+            trigger_count: 0,
+            metadata: { alertMode: 'single' },
+            created_at: '2026-05-08T00:00:00.000Z'
+        };
+
+        await (runner as any).evaluateRule(fakeSupabase, rule, [], []);
+
+        expect(updates.some((patch) => patch.last_checked_at && patch.last_error === null)).toBe(true);
+        expect(updates.some((patch) => patch.last_error === 'No live market snapshot was available for this alert token.')).toBe(false);
     });
 });

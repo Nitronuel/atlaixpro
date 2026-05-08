@@ -47,9 +47,12 @@ type SmartAlertRuleMetadata = {
     } | null;
     matchLogic?: 'all';
     timeWindowMinutes?: number | null;
+    expirationMinutes?: number | null;
+    expiresAt?: string | null;
     status?: 'active' | 'paused' | 'completed' | 'expired';
     conditions?: LinkedAlertConditionMetadata[];
     completedAt?: string | null;
+    expiredAt?: string | null;
 };
 
 type SmartAlertStatus = {
@@ -157,12 +160,106 @@ const coinToSnapshot = (coin: MarketCoin): SmartAlertMarketSnapshot => {
     };
 };
 
+const dexPairToSnapshot = (pair: any, fallbackAddress: string): SmartAlertMarketSnapshot => {
+    const buyVolume = parseMetric(pair?.volume?.h24);
+
+    return {
+        tokenLabel: pair?.baseToken?.symbol || pair?.baseToken?.name || fallbackAddress,
+        tokenAddress: pair?.baseToken?.address || fallbackAddress,
+        priceUsd: parseMetric(pair?.priceUsd),
+        volume24hUsd: parseMetric(pair?.volume?.h24),
+        liquidityUsd: parseMetric(pair?.liquidity?.usd),
+        whaleUsd: buyVolume,
+        whaleSide: 'buy',
+        riskSeverity: null
+    };
+};
+
+const fetchDexPairForAddress = async (address: string, chain?: string | null) => {
+    let response: Response;
+    try {
+        response = await fetchWithTimeout(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(address)}`);
+    } catch (error) {
+        console.warn('[SmartAlerts] DexScreener token lookup failed', {
+            address,
+            chain,
+            error: formatRuleCheckError(error)
+        });
+        return null;
+    }
+
+    if (!response.ok) return null;
+
+    let payload: { pairs?: any[] };
+    try {
+        payload = await response.json() as { pairs?: any[] };
+    } catch {
+        return null;
+    }
+    const pairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+    const normalizedAddress = normalizeText(address);
+    const normalizedChain = normalizeText(chain);
+    const matchingPairs = pairs.filter((pair) => {
+        const addressMatches =
+            normalizeText(pair?.baseToken?.address) === normalizedAddress ||
+            normalizeText(pair?.quoteToken?.address) === normalizedAddress ||
+            normalizeText(pair?.pairAddress) === normalizedAddress;
+        const chainMatches = !normalizedChain || normalizeText(pair?.chainId) === normalizedChain;
+        return addressMatches && chainMatches;
+    });
+
+    const candidates = matchingPairs.length ? matchingPairs : pairs.filter((pair) => !normalizedChain || normalizeText(pair?.chainId) === normalizedChain);
+    return candidates.sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0] || null;
+};
+
 const eventToSnapshot = (event: AlphaGauntletEvent): SmartAlertMarketSnapshot => ({
     ...coinToSnapshot(event.token),
     alphaEvent: event.eventType,
     tokenLabel: event.token.ticker || event.token.name,
     tokenAddress: event.token.address || event.token.pairAddress || event.token.ticker
 });
+
+const coinToAlphaSnapshot = (coin: MarketCoin, event: AlphaGauntletEvent | null): SmartAlertMarketSnapshot => ({
+    ...coinToSnapshot(coin),
+    alphaEvent: event?.eventType || null,
+    tokenLabel: coin.ticker || coin.name,
+    tokenAddress: coin.address || coin.pairAddress || coin.ticker
+});
+
+const getMetadataExpirationTime = (metadata: SmartAlertRuleMetadata | null | undefined) => {
+    if (!metadata?.expiresAt) return null;
+    const timestamp = new Date(metadata.expiresAt).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+const formatRuleCheckError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || '');
+    const lowered = message.toLowerCase();
+
+    if (
+        lowered.includes('fetch failed') ||
+        lowered.includes('timeout') ||
+        lowered.includes('timed out') ||
+        lowered.includes('econnreset') ||
+        lowered.includes('network') ||
+        lowered.includes('aborted')
+    ) {
+        return 'Market data provider was temporarily unavailable while checking this alert.';
+    }
+
+    return message || 'Smart Alert check failed.';
+};
+
+const fetchWithTimeout = async (url: string, timeoutMs = 8_000) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
+};
 
 export class SmartAlertRunner {
     private timer: ReturnType<typeof setInterval> | null = null;
@@ -231,19 +328,56 @@ export class SmartAlertRunner {
                 return this.getStatus();
             }
 
-            const response = await DatabaseService.getMarketData(true, false);
-            const marketCoins = response.data || [];
-            const alphaEvents = AlphaGauntletService.getDetectionEvents(marketCoins);
+            let marketCoins: MarketCoin[] = [];
+            let alphaEvents: AlphaGauntletEvent[] = [];
+            let feedError = '';
+            try {
+                const response = await DatabaseService.getMarketData(true, false);
+                marketCoins = response.data || [];
+                alphaEvents = AlphaGauntletService.getDetectionEvents(marketCoins);
+            } catch (error) {
+                feedError = 'Market feed was temporarily unavailable; direct token checks continued where possible.';
+                console.warn('[SmartAlerts] market feed unavailable; falling back to direct token checks', {
+                    error: formatRuleCheckError(error)
+                });
+            }
+
             let triggersCreated = 0;
+            let failedRules = 0;
 
             for (const rule of rules) {
-                const created = await this.evaluateRule(supabase, rule, marketCoins, alphaEvents);
-                triggersCreated += created;
+                try {
+                    const created = await this.evaluateRule(supabase, rule, marketCoins, alphaEvents);
+                    triggersCreated += created;
+                } catch (error) {
+                    failedRules += 1;
+                    const message = formatRuleCheckError(error);
+                    console.warn('[SmartAlerts] rule check failed', {
+                        ruleId: rule.id,
+                        target: rule.target,
+                        error: message
+                    });
+
+                    try {
+                        await this.updateRuleEvaluation(supabase, rule, {
+                            last_checked_at: new Date().toISOString(),
+                            last_error: message
+                        });
+                    } catch (updateError) {
+                        console.warn('[SmartAlerts] failed to save rule check error', {
+                            ruleId: rule.id,
+                            error: formatRuleCheckError(updateError)
+                        });
+                    }
+                }
             }
 
             this.status.rulesChecked = rules.length;
             this.status.triggersCreated = triggersCreated;
             this.status.lastRunStatus = 'success';
+            this.status.lastError = failedRules
+                ? `${failedRules} alert${failedRules === 1 ? '' : 's'} could not be checked. Other alerts continued.`
+                : feedError;
             return this.getStatus();
         } catch (error) {
             this.status.lastRunStatus = 'error';
@@ -338,6 +472,61 @@ export class SmartAlertRunner {
         return coins.map(coinToSnapshot);
     }
 
+    private async getFallbackSnapshotForRule(rule: SmartAlertRuleRow): Promise<SmartAlertMarketSnapshot | null> {
+        const tokenAddress = rule.token_address || rule.metadata?.token?.address || '';
+        if (!tokenAddress) return null;
+
+        const directPair = await fetchDexPairForAddress(tokenAddress, rule.chain_id || rule.metadata?.token?.chainId || undefined);
+        if (directPair) {
+            if (rule.alert_type === 'Alpha') {
+                const coin = DatabaseService.transformPair(directPair);
+                const event = AlphaGauntletService.qualifyToken(coin);
+                return coinToAlphaSnapshot(coin, event);
+            }
+
+            return dexPairToSnapshot(directPair, tokenAddress);
+        }
+
+        let pair: any = null;
+        try {
+            pair = await DatabaseService.getTokenDetails(
+                tokenAddress,
+                rule.chain_id || rule.metadata?.token?.chainId || undefined,
+                rule.metadata?.token?.pairAddress || undefined
+            );
+        } catch (error) {
+            console.warn('[SmartAlerts] direct token detail lookup failed', {
+                ruleId: rule.id,
+                tokenAddress,
+                error: formatRuleCheckError(error)
+            });
+        }
+
+        if (!pair) return null;
+
+        if (rule.alert_type === 'Alpha') {
+            const coin = DatabaseService.transformPair(pair);
+            const event = AlphaGauntletService.qualifyToken(coin);
+            return coinToAlphaSnapshot(coin, event);
+        }
+
+        return dexPairToSnapshot(pair, tokenAddress);
+    }
+
+    private async getEvaluationSnapshotsForRule(
+        rule: SmartAlertRuleRow,
+        marketCoins: MarketCoin[],
+        alphaEvents: AlphaGauntletEvent[]
+    ) {
+        const directSnapshot = rule.token_address || rule.metadata?.token?.address
+            ? await this.getFallbackSnapshotForRule(rule)
+            : null;
+
+        if (directSnapshot) return [directSnapshot];
+
+        return this.getSnapshotsForRule(rule, marketCoins, alphaEvents);
+    }
+
     private async evaluateRule(
         supabase: any,
         rule: SmartAlertRuleRow,
@@ -349,12 +538,26 @@ export class SmartAlertRunner {
         }
 
         const now = new Date();
-        const snapshots = this.getSnapshotsForRule(rule, marketCoins, alphaEvents);
+        const expiresAt = getMetadataExpirationTime(rule.metadata);
+        if (rule.metadata?.status === 'expired' || (Number(rule.trigger_count || 0) === 0 && expiresAt !== null && now.getTime() >= expiresAt)) {
+            await this.updateRuleEvaluation(supabase, rule, {
+                enabled: false,
+                last_checked_at: now.toISOString(),
+                metadata: {
+                    ...(rule.metadata || {}),
+                    status: 'expired',
+                    expiredAt: (rule.metadata || {}).expiredAt || now.toISOString()
+                }
+            });
+            return 0;
+        }
 
-        if (!snapshots.length) {
+        const evaluationSnapshots = await this.getEvaluationSnapshotsForRule(rule, marketCoins, alphaEvents);
+
+        if (!evaluationSnapshots.length) {
             await this.updateRuleEvaluation(supabase, rule, {
                 last_checked_at: now.toISOString(),
-                last_error: 'No matching market snapshot was available for this alert.'
+                last_error: 'No live market snapshot was available for this alert token.'
             });
             return 0;
         }
@@ -365,7 +568,7 @@ export class SmartAlertRunner {
         let nextBaselineValue: number | null = null;
         let lastError: string | null = null;
 
-        for (const snapshot of snapshots) {
+        for (const snapshot of evaluationSnapshots) {
             const result = evaluateSmartAlertRule(rule, snapshot, now);
             lastObservedValue = result.observedValue;
             lastObservedNumber = result.observedNumber;
@@ -393,7 +596,7 @@ export class SmartAlertRunner {
             last_checked_at: now.toISOString(),
             last_observed_value: lastObservedValue,
             last_observed_at: now.toISOString(),
-            last_error: lastError,
+            last_error: lastError || null,
             ...(nextBaselineValue !== null ? {
                 baseline_value: nextBaselineValue,
                 baseline_observed_at: now.toISOString()
@@ -437,16 +640,16 @@ export class SmartAlertRunner {
             return 0;
         }
 
-        const snapshots = this.getSnapshotsForRule(rule, marketCoins, alphaEvents);
-        if (!snapshots.length) {
+        const evaluationSnapshots = await this.getEvaluationSnapshotsForRule(rule, marketCoins, alphaEvents);
+        if (!evaluationSnapshots.length) {
             await this.updateRuleEvaluation(supabase, rule, {
                 last_checked_at: now.toISOString(),
-                last_error: 'No matching market snapshot was available for this linked alert request.'
+                last_error: 'No live market snapshot was available for this linked alert token.'
             });
             return 0;
         }
 
-        const snapshot = snapshots[0];
+        const snapshot = evaluationSnapshots[0];
         let triggersCreated = 0;
         let lastObservedValue: string | null = null;
         let lastError: string | null = null;
@@ -540,7 +743,7 @@ export class SmartAlertRunner {
             last_checked_at: now.toISOString(),
             last_observed_value: lastObservedValue,
             last_observed_at: now.toISOString(),
-            last_error: lastError,
+            last_error: lastError || null,
             metadata: nextMetadata,
             ...(allConditionsMet ? {
                 last_triggered_at: now.toISOString(),
