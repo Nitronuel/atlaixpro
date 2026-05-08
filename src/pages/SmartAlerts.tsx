@@ -355,7 +355,11 @@ export const SmartAlerts: React.FC = () => {
     }, [authLoading, loadUserAlerts, user]);
 
     const feedItems = useMemo(() => (
-        rules.filter((rule) => rule.metadata?.status !== 'completed' && rule.metadata?.status !== 'expired')
+        rules.filter((rule) => {
+            if (rule.metadata?.status === 'completed' || rule.metadata?.status === 'expired') return false;
+            if (rule.metadata?.alertMode !== 'linked' && Number(rule.trigger_count || 0) > 0) return false;
+            return true;
+        })
     ), [rules]);
     const historyItems = useMemo(() => triggers, [triggers]);
 

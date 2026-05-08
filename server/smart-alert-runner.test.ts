@@ -104,6 +104,48 @@ describe('SmartAlertRunner', () => {
         expect(updates.some((patch) => Object.prototype.hasOwnProperty.call(patch, 'last_error') && patch.last_error === null)).toBe(true);
     });
 
+    it('completes older single alerts that already triggered before evaluating again', async () => {
+        const updates: Record<string, unknown>[] = [];
+        const fakeSupabase = {
+            from: () => ({
+                update: (patch: Record<string, unknown>) => {
+                    updates.push(patch);
+                    return {
+                        eq: async () => ({ error: null })
+                    };
+                },
+                insert: () => {
+                    throw new Error('Already-triggered single alerts should not create more trigger rows.');
+                }
+            })
+        };
+        const runner = new SmartAlertRunner();
+        const rule = {
+            id: 'rule-triggered',
+            user_id: 'user-1',
+            alert_type: 'Price',
+            target: 'MAXXING',
+            chain_id: 'solana',
+            token_address: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
+            condition: 'above',
+            threshold_kind: 'currency',
+            threshold: '$0.0042',
+            trigger_label: 'maxxing price above 0.0042',
+            cooldown_minutes: 60,
+            enabled: true,
+            last_triggered_at: '2026-05-08T21:30:00.000Z',
+            baseline_value: null,
+            trigger_count: 1,
+            metadata: { alertMode: 'single' },
+            created_at: '2026-05-08T00:00:00.000Z'
+        };
+
+        const created = await (runner as any).evaluateRule(fakeSupabase, rule, [], []);
+
+        expect(created).toBe(0);
+        expect(updates.some((patch) => patch.enabled === false && (patch.metadata as any)?.status === 'completed')).toBe(true);
+    });
+
     it('prefers direct contract market data for contract-specific alerts', async () => {
         vi.stubGlobal('fetch', vi.fn(async () => ({
             ok: true,

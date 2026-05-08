@@ -726,6 +726,19 @@ export class SmartAlertRunner {
         }
 
         const now = new Date();
+        if (rule.metadata?.status === 'completed' || Number(rule.trigger_count || 0) > 0) {
+            await this.updateRuleEvaluation(supabase, rule, {
+                enabled: false,
+                last_checked_at: now.toISOString(),
+                metadata: {
+                    ...(rule.metadata || {}),
+                    status: 'completed',
+                    completedAt: (rule.metadata || {}).completedAt || rule.last_triggered_at || now.toISOString()
+                }
+            });
+            return 0;
+        }
+
         const expiresAt = getMetadataExpirationTime(rule.metadata);
         if (rule.metadata?.status === 'expired' || (Number(rule.trigger_count || 0) === 0 && expiresAt !== null && now.getTime() >= expiresAt)) {
             await this.updateRuleEvaluation(supabase, rule, {
