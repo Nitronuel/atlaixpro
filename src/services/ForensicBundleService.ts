@@ -83,7 +83,7 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
         throw new Error(
             typeof payload?.error === 'string'
                 ? payload.error
-                : `Forensic backend request failed with status ${response.status}.`
+                : 'Forensic analysis could not complete right now. Please try again shortly.'
         );
     }
     return payload;
@@ -104,7 +104,7 @@ async function runBackendForensicJob(tokenAddress: string) {
 
     const jobId = startPayload.jobId;
     if (!jobId) {
-        throw new Error('Forensic backend did not return a job id.');
+        throw new Error('Forensic analysis could not start right now.');
     }
 
     const startedAt = Date.now();
@@ -121,13 +121,13 @@ async function runBackendForensicJob(tokenAddress: string) {
         }
 
         if (payload.status === 'failed') {
-            throw new Error(payload.error || 'Forensic backend job failed.');
+            throw new Error(payload.error || 'Forensic analysis could not complete right now.');
         }
 
         await wait(JOB_POLL_INTERVAL_MS);
     }
 
-    throw new Error('Forensic backend job timed out before completion.');
+    throw new Error('Forensic analysis is taking longer than expected. Please try again shortly.');
 }
 
 export { extractJitoTipTransfers, FORENSIC_MAX_TRACKED_HOPS, inferJitoLaunchSignals };

@@ -75,6 +75,12 @@ const getDexscreenerChartUrl = (chainId?: string, pairAddress?: string, compact 
     return `https://dexscreener.com/${chainId}/${pairAddress}?${params.toString()}`;
 };
 
+const getSafeScanChain = (chainId?: string) => {
+    if (!chainId) return 'solana';
+    if (chainId === 'ethereum') return 'eth';
+    return chainId;
+};
+
 export const TokenDetails: React.FC = () => {
     const { address } = useParams<{ address: string }>();
     const navigate = useNavigate();
@@ -207,6 +213,47 @@ export const TokenDetails: React.FC = () => {
         .filter(item => parseActivityUsd(item.usd) >= MIN_DISPLAY_ACTIVITY_USD);
     const visibleOnChainEvents = displayedActivity.slice(0, 7);
     const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
+    const tokenAddress = enrichedData?.baseToken.address || address || '';
+    const tokenChain = enrichedData?.chainId || preferredChain || 'solana';
+    const tokenPair = enrichedData?.pairAddress || preferredPairAddress || '';
+    const quickActions = [
+        {
+            icon: Scan,
+            title: 'Risk Scan',
+            subtitle: 'Identify threats',
+            path: `/safe-scan?${new URLSearchParams({
+                address: tokenAddress,
+                chain: getSafeScanChain(tokenChain)
+            }).toString()}`
+        },
+        {
+            icon: Radar,
+            title: 'Detection',
+            subtitle: 'AI pattern scan',
+            path: `/detection/token/${encodeURIComponent(tokenAddress)}?${new URLSearchParams({
+                chain: tokenChain,
+                ...(tokenPair ? { pair: tokenPair } : {})
+            }).toString()}`
+        },
+        {
+            icon: Wallet,
+            title: 'Tracking',
+            subtitle: 'Wallet tracking',
+            path: `/token-smart-money/${encodeURIComponent(tokenAddress)}?${new URLSearchParams({
+                chain: tokenChain,
+                ...(tokenPair ? { pair: tokenPair } : {})
+            }).toString()}`
+        },
+        {
+            icon: Bell,
+            title: 'Alerts',
+            subtitle: 'Smart alerts',
+            path: `/smart-alerts?${new URLSearchParams({
+                address: tokenAddress,
+                chain: tokenChain
+            }).toString()}`
+        }
+    ];
     const tokenIntelligencePanel = (
         <div className="rounded-lg border border-border bg-card p-5">
             <h3 className="mb-4 text-base font-bold text-text-light">Token Intelligence</h3>
@@ -378,13 +425,13 @@ export const TokenDetails: React.FC = () => {
                 <div className="rounded-lg border border-border bg-card p-5">
                     <h3 className="mb-4 text-base font-bold text-text-light">Quick Actions</h3>
                     <div className="grid gap-3">
-                        {[
-                            { icon: Scan, title: 'Risk Scan', subtitle: 'Identify threats' },
-                            { icon: Radar, title: 'Detection', subtitle: 'AI pattern scan' },
-                            { icon: Wallet, title: 'Tracking', subtitle: 'Wallet tracking' },
-                            { icon: Bell, title: 'Alerts', subtitle: 'Smart alerts' }
-                        ].map((action) => (
-                            <button key={action.title} className="flex items-center gap-3 rounded-lg border border-border bg-main/50 p-3 text-left text-primary-green transition-colors hover:border-primary-green/40 hover:bg-card-hover">
+                        {quickActions.map((action) => (
+                            <button
+                                key={action.title}
+                                onClick={() => navigate(action.path)}
+                                disabled={!tokenAddress}
+                                className="flex items-center gap-3 rounded-lg border border-border bg-main/50 p-3 text-left text-primary-green transition-colors hover:border-primary-green/40 hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-60"
+                            >
                                 <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-green/10">
                                     <action.icon size={18} />
                                 </span>

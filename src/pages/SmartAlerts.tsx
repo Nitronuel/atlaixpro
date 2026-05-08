@@ -1,6 +1,6 @@
 // Route-level product screen for the Atlaix Smart Alerts feature.
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Activity,
     AlertTriangle,
@@ -8,7 +8,10 @@ import {
     CheckCircle2,
     Clock,
     Flame,
+    Link2,
     Loader2,
+    Plus,
+    Search,
     ShieldCheck,
     TrendingUp,
     Wallet,
@@ -20,12 +23,14 @@ import {
     SmartAlertCondition,
     SmartAlertRule,
     SmartAlertService,
+    SmartAlertTokenSnapshot,
     SmartAlertThresholdKind,
     SmartAlertTrigger,
     SmartAlertType
 } from '../services/SmartAlertService';
 
 interface BasicAlertType {
+    id: string;
     title: string;
     desc: string;
     type: SmartAlertType;
@@ -43,6 +48,12 @@ interface AlertSetupDraft {
     cooldownMinutes: number;
 }
 
+interface LinkedConditionDraft extends AlertSetupDraft {
+    id: string;
+    alertType: SmartAlertType;
+    label: string;
+}
+
 interface BackendStatus {
     enabled?: boolean;
     running?: boolean;
@@ -55,27 +66,20 @@ interface BackendStatus {
 }
 
 const BASIC_ALERT_TYPES: BasicAlertType[] = [
-    { title: 'Price Target', desc: 'Token crosses above or below a selected price.', type: 'Price', icon: <TrendingUp size={18} /> },
-    { title: '24h Volume', desc: 'Volume crosses a dollar threshold or changes by a percentage.', type: 'Volume', icon: <Activity size={18} /> },
-    { title: 'Liquidity', desc: 'Liquidity crosses a dollar threshold or changes by a percentage.', type: 'Liquidity', icon: <ShieldCheck size={18} /> },
-    { title: 'Whale Flow', desc: 'Large buy or sell activity crosses a dollar threshold.', type: 'Whale', icon: <Wallet size={18} /> },
-    { title: 'Live Alpha Event', desc: 'A token appears with a selected Live Alpha event.', type: 'Alpha', icon: <Flame size={18} /> },
-    { title: 'Risk Flag', desc: 'A token receives a selected risk severity.', type: 'Risk', icon: <AlertTriangle size={18} /> }
-];
-
-const CHAIN_OPTIONS = [
-    { label: 'Solana', value: 'solana' },
-    { label: 'Ethereum', value: 'ethereum' },
-    { label: 'Base', value: 'base' },
-    { label: 'BSC', value: 'bsc' },
-    { label: 'Polygon', value: 'polygon' },
-    { label: 'Arbitrum', value: 'arbitrum' }
+    { id: 'price-target', title: 'Price Target', desc: 'Token crosses above or below a selected price.', type: 'Price', icon: <TrendingUp size={18} /> },
+    { id: 'price-move', title: '24h Price Move', desc: 'Token price moves by a selected percentage.', type: 'Price', icon: <Activity size={18} /> },
+    { id: 'volume', title: '24h Volume', desc: 'Volume crosses a dollar threshold or changes by a percentage.', type: 'Volume', icon: <Activity size={18} /> },
+    { id: 'liquidity', title: 'Liquidity', desc: 'Liquidity crosses a dollar threshold or changes by a percentage.', type: 'Liquidity', icon: <ShieldCheck size={18} /> },
+    { id: 'whale', title: 'Whale Flow', desc: 'Large buy or sell activity crosses a dollar threshold.', type: 'Whale', icon: <Wallet size={18} /> },
+    { id: 'alpha', title: 'Live Alpha Event', desc: 'A token appears with a selected Live Alpha event.', type: 'Alpha', icon: <Flame size={18} /> },
+    { id: 'risk', title: 'Risk Flag', desc: 'A token receives a selected risk severity.', type: 'Risk', icon: <AlertTriangle size={18} /> }
 ];
 
 const CONDITION_OPTIONS: Record<SmartAlertType, Array<{ value: SmartAlertCondition; label: string; thresholdKind: SmartAlertThresholdKind }>> = {
     Price: [
         { value: 'above', label: 'Price above', thresholdKind: 'currency' },
-        { value: 'below', label: 'Price below', thresholdKind: 'currency' }
+        { value: 'below', label: 'Price below', thresholdKind: 'currency' },
+        { value: 'changes_by_percent', label: 'Price moves by', thresholdKind: 'percent' }
     ],
     Volume: [
         { value: 'above', label: 'Volume above', thresholdKind: 'currency' },
@@ -114,51 +118,59 @@ const SETUP_DEFAULTS: Record<SmartAlertType, AlertSetupDraft> = {
     Risk: { target: 'Any token', chainId: 'solana', tokenAddress: '', condition: 'severity_is', thresholdKind: 'severity', threshold: 'High', notificationChannels: ['in_app'], cooldownMinutes: 360 }
 };
 
-const DEMO_ALERTS: SmartAlertRule[] = [
-    {
-        id: 'demo-price',
-        user_id: 'demo',
-        alert_type: 'Price',
-        target: 'ETH',
-        chain_id: 'ethereum',
-        token_address: null,
-        condition: 'above',
-        threshold_kind: 'currency',
-        threshold: '$3.5K',
-        trigger_label: 'ETH price above $3.5K',
-        notification_channels: ['in_app'],
-        cooldown_minutes: 60,
-        enabled: true,
-        last_checked_at: null,
-        last_triggered_at: null,
-        last_observed_value: null,
-        last_observed_at: null,
-        baseline_value: null,
-        baseline_observed_at: null,
-        trigger_count: 0,
-        last_error: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-    }
-];
-
-const DEMO_HISTORY: SmartAlertTrigger[] = [
-    {
-        id: 'demo-trigger',
-        alert_rule_id: 'demo-price',
-        user_id: 'demo',
-        alert_type: 'Price',
-        title: 'Price Alert',
-        message: 'ETH price above $3.5K triggered at $3,640.',
-        observed_value: '$3,640',
-        threshold: '$3.5K',
-        source: 'smart-alert-runner',
-        metadata: { tokenLabel: 'ETH' },
-        created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-    }
+const TIME_WINDOW_OPTIONS = [
+    { label: '1h', value: 60 },
+    { label: '24h', value: 1440 },
+    { label: '7d', value: 10080 },
+    { label: 'No limit', value: 0 }
 ];
 
 const apiUrl = (path: string) => `${APP_CONFIG.apiBaseUrl || ''}${path}`;
+
+const formatCompactUsd = (value: number | null | undefined) => {
+    if (!Number.isFinite(Number(value))) return 'N/A';
+    return `$${Number(value).toLocaleString(undefined, {
+        maximumFractionDigits: Number(value) >= 1 ? 2 : 8
+    })}`;
+};
+
+const formatCompactNumber = (value: number | null | undefined) => {
+    if (!Number.isFinite(Number(value))) return 'N/A';
+    const numeric = Number(value);
+    if (Math.abs(numeric) >= 1_000_000_000) return `$${(numeric / 1_000_000_000).toFixed(2)}B`;
+    if (Math.abs(numeric) >= 1_000_000) return `$${(numeric / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(numeric) >= 1_000) return `$${(numeric / 1_000).toFixed(2)}K`;
+    return `$${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+};
+
+const formatChange = (value: number | null | undefined) => {
+    if (!Number.isFinite(Number(value))) return 'N/A';
+    const numeric = Number(value);
+    return `${numeric > 0 ? '+' : ''}${numeric.toFixed(Math.abs(numeric) >= 10 ? 1 : 2)}%`;
+};
+
+const shortenAddress = (value: string | null | undefined) => {
+    if (!value) return 'No address';
+    if (value.length <= 14) return value;
+    return `${value.slice(0, 6)}...${value.slice(-6)}`;
+};
+
+const formatLinkedConditionStatus = (status: string | null | undefined) => {
+    if (status === 'met') return 'Met';
+    if (status === 'error') return 'Needs attention';
+    return 'Waiting';
+};
+
+const formatSmartAlertError = (value: unknown, fallback: string) => {
+    const message = value instanceof Error ? value.message : String(value || '');
+    if (!message) return fallback;
+    if (/linked smart alerts are being updated/i.test(message)) return message;
+    if (/sign in/i.test(message)) return message;
+    if (/supabase|api|provider|configured|configuration|network|fetch|server|database|endpoint|schema|migration|payload/i.test(message)) {
+        return fallback;
+    }
+    return message;
+};
 
 const formatRelativeTime = (value: string | null | undefined) => {
     if (!value) return 'Never';
@@ -232,12 +244,22 @@ const getAlertTrigger = (template: BasicAlertType, draft: AlertSetupDraft) => {
 
 export const SmartAlerts: React.FC = () => {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const linkedTokenProcessedRef = useRef('');
     const { user, loading: authLoading } = useAuth();
-    const [activeType, setActiveType] = useState<SmartAlertType>('Price');
+    const [activeTypeKey, setActiveTypeKey] = useState('price-target');
     const [rules, setRules] = useState<SmartAlertRule[]>([]);
     const [triggers, setTriggers] = useState<SmartAlertTrigger[]>([]);
     const [setupType, setSetupType] = useState<BasicAlertType | null>(null);
+    const [setupMode, setSetupMode] = useState<'single' | 'linked-condition'>('single');
     const [setupDraft, setSetupDraft] = useState<AlertSetupDraft>(SETUP_DEFAULTS.Price);
+    const [alertMode, setAlertMode] = useState<'single' | 'linked'>('single');
+    const [linkedConditions, setLinkedConditions] = useState<LinkedConditionDraft[]>([]);
+    const [timeWindowMinutes, setTimeWindowMinutes] = useState(1440);
+    const [tokenQuery, setTokenQuery] = useState('');
+    const [selectedToken, setSelectedToken] = useState<SmartAlertTokenSnapshot | null>(null);
+    const [tokenLookupLoading, setTokenLookupLoading] = useState(false);
+    const [tokenLookupError, setTokenLookupError] = useState<string | null>(null);
     const [loadingAlerts, setLoadingAlerts] = useState(false);
     const [saving, setSaving] = useState(false);
     const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
@@ -272,8 +294,8 @@ export const SmartAlerts: React.FC = () => {
             ]);
             setRules(nextRules);
             setTriggers(nextTriggers);
-        } catch (err: any) {
-            setError(err?.message || 'Could not load Smart Alerts.');
+        } catch (err) {
+            setError(formatSmartAlertError(err, 'Could not load Smart Alerts.'));
         } finally {
             setLoadingAlerts(false);
         }
@@ -287,13 +309,60 @@ export const SmartAlerts: React.FC = () => {
         loadBackendStatus();
     }, [loadBackendStatus]);
 
-    const feedItems = useMemo(() => user ? rules : DEMO_ALERTS, [rules, user]);
-    const historyItems = useMemo(() => user ? triggers : DEMO_HISTORY, [triggers, user]);
+    const feedItems = useMemo(() => rules, [rules]);
+    const historyItems = useMemo(() => triggers, [triggers]);
+
+    const applySelectedToken = (draft: AlertSetupDraft, token: SmartAlertTokenSnapshot | null = selectedToken) => ({
+        ...draft,
+        target: token?.symbol || draft.target,
+        chainId: token?.chainId || draft.chainId,
+        tokenAddress: token?.address || draft.tokenAddress
+    });
+
+    const lookupToken = async (nextAddress?: string) => {
+        const address = (nextAddress ?? tokenQuery).trim();
+        if (!address) {
+            setTokenLookupError('Enter a token contract address.');
+            return;
+        }
+
+        setTokenLookupLoading(true);
+        setTokenLookupError(null);
+        try {
+            const params = new URLSearchParams({ address });
+            const response = await fetch(apiUrl(`/api/smart-alerts/token-lookup?${params.toString()}`));
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload?.error || 'Token lookup failed.');
+            setSelectedToken(payload.token);
+            setTokenQuery(payload.token?.address || address);
+        } catch {
+            setSelectedToken(null);
+            setTokenLookupError('Could not find that token. Check the address and try again.');
+        } finally {
+            setTokenLookupLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        const linkedTokenAddress = searchParams.get('address') || searchParams.get('token') || '';
+        if (!linkedTokenAddress || linkedTokenProcessedRef.current === linkedTokenAddress) return;
+
+        linkedTokenProcessedRef.current = linkedTokenAddress;
+        setTokenQuery(linkedTokenAddress);
+        void lookupToken(linkedTokenAddress);
+    }, [searchParams]);
 
     const openSetupModal = (item: BasicAlertType) => {
-        setActiveType(item.type);
+        setActiveTypeKey(item.id);
         setSetupType(item);
-        setSetupDraft(SETUP_DEFAULTS[item.type]);
+        setSetupMode(alertMode === 'linked' ? 'linked-condition' : 'single');
+        const defaultDraft = {
+            ...SETUP_DEFAULTS[item.type],
+            condition: item.id === 'price-move' ? 'changes_by_percent' as SmartAlertCondition : SETUP_DEFAULTS[item.type].condition,
+            thresholdKind: item.id === 'price-move' ? 'percent' as SmartAlertThresholdKind : SETUP_DEFAULTS[item.type].thresholdKind,
+            threshold: item.id === 'price-move' ? '30' : SETUP_DEFAULTS[item.type].threshold
+        };
+        setSetupDraft(applySelectedToken(defaultDraft));
         setFormError(null);
         setError(null);
     };
@@ -302,6 +371,31 @@ export const SmartAlerts: React.FC = () => {
         setSetupType(null);
         setSaving(false);
         setFormError(null);
+    };
+
+    const addLinkedCondition = () => {
+        if (!setupType) return;
+        const validationError = validateDraft(setupDraft);
+        if (validationError) {
+            setFormError(validationError);
+            return;
+        }
+
+        const label = getAlertTrigger(setupType, setupDraft);
+        setLinkedConditions((current) => [
+            ...current,
+            {
+                ...setupDraft,
+                id: `${Date.now()}-${current.length}`,
+                alertType: setupType.type,
+                label
+            }
+        ]);
+        closeSetupModal();
+    };
+
+    const removeLinkedCondition = (id: string) => {
+        setLinkedConditions((current) => current.filter((condition) => condition.id !== id));
     };
 
     const updateCondition = (condition: SmartAlertCondition) => {
@@ -340,9 +434,9 @@ export const SmartAlerts: React.FC = () => {
         try {
             const updated = await SmartAlertService.setRuleEnabled(id, !rule.enabled);
             setRules((current) => current.map((item) => item.id === id ? updated : item));
-        } catch (err: any) {
+        } catch (err) {
             setRules(previousRules);
-            setError(err?.message || 'Could not update alert.');
+            setError(formatSmartAlertError(err, 'Could not update alert.'));
         }
     };
 
@@ -356,9 +450,9 @@ export const SmartAlerts: React.FC = () => {
         setRules((current) => current.filter((item) => item.id !== id));
         try {
             await SmartAlertService.deleteRule(id);
-        } catch (err: any) {
+        } catch (err) {
             setRules(previousRules);
-            setError(err?.message || 'Could not delete alert.');
+            setError(formatSmartAlertError(err, 'Could not delete alert.'));
         }
     };
 
@@ -382,8 +476,13 @@ export const SmartAlerts: React.FC = () => {
             return;
         }
 
+        if (!selectedToken) {
+            setFormError('Choose a token before saving this alert.');
+            return;
+        }
+
         if (!user) {
-            requireLogin('Sign in to save Smart Alerts. The backend will keep checking them even when you are offline.');
+            requireLogin('Sign in to save Smart Alerts.');
             return;
         }
 
@@ -404,13 +503,85 @@ export const SmartAlerts: React.FC = () => {
                     : setupDraft.threshold.trim(),
                 triggerLabel,
                 notificationChannels: setupDraft.notificationChannels,
-                cooldownMinutes: setupDraft.cooldownMinutes
+                cooldownMinutes: setupDraft.cooldownMinutes,
+                metadata: {
+                    alertMode: 'single',
+                    token: selectedToken,
+                    status: 'active'
+                }
             });
             setRules((current) => [created, ...current]);
             closeSetupModal();
             await runBackendCheck();
-        } catch (err: any) {
-            setError(err?.message || 'Could not create alert.');
+        } catch (err) {
+            setError(formatSmartAlertError(err, 'Could not create alert.'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const createLinkedAlert = async () => {
+        if (!selectedToken) {
+            setFormError('Choose a token before saving this linked alert.');
+            return;
+        }
+
+        if (linkedConditions.length < 2) {
+            setFormError('Add at least two conditions for this linked alert.');
+            return;
+        }
+
+        if (!user) {
+            requireLogin('Sign in to save linked Smart Alerts.');
+            return;
+        }
+
+        const primaryCondition = linkedConditions[0];
+        setSaving(true);
+        setError(null);
+        setFormError(null);
+        try {
+            const created = await SmartAlertService.createRule({
+                alertType: primaryCondition.alertType,
+                target: selectedToken.symbol || primaryCondition.target,
+                chainId: selectedToken.chainId || primaryCondition.chainId,
+                tokenAddress: selectedToken.address || primaryCondition.tokenAddress || null,
+                condition: primaryCondition.condition,
+                thresholdKind: primaryCondition.thresholdKind,
+                threshold: primaryCondition.thresholdKind === 'percent' && !primaryCondition.threshold.includes('%')
+                    ? `${primaryCondition.threshold}%`
+                    : primaryCondition.threshold.trim(),
+                triggerLabel: `Linked Smart Alert for ${selectedToken.symbol || selectedToken.name}: ${linkedConditions.length} conditions`,
+                notificationChannels: ['in_app'],
+                cooldownMinutes: 60,
+                metadata: {
+                    alertMode: 'linked',
+                    token: selectedToken,
+                    matchLogic: 'all',
+                    timeWindowMinutes: timeWindowMinutes || null,
+                    status: 'active',
+                    conditions: linkedConditions.map((condition) => ({
+                        id: condition.id,
+                        alertType: condition.alertType,
+                        condition: condition.condition,
+                        thresholdKind: condition.thresholdKind,
+                        threshold: condition.thresholdKind === 'percent' && !condition.threshold.includes('%')
+                            ? `${condition.threshold}%`
+                            : condition.threshold.trim(),
+                        label: condition.label,
+                        status: 'pending',
+                        metAt: null,
+                        observedValue: null,
+                        baselineValue: null,
+                        lastError: null
+                    }))
+                }
+            });
+            setRules((current) => [created, ...current]);
+            setLinkedConditions([]);
+            await runBackendCheck();
+        } catch (err) {
+            setError(formatSmartAlertError(err, 'Could not create linked alert.'));
         } finally {
             setSaving(false);
         }
@@ -425,21 +596,138 @@ export const SmartAlerts: React.FC = () => {
                     {error}
                 </div>
             )}
+            {formError && !setupType && (
+                <div className="rounded-xl border border-primary-red/30 bg-primary-red/10 px-4 py-3 text-sm text-primary-red">
+                    {formError}
+                </div>
+            )}
+
+            <div className="rounded-xl border border-border bg-card p-4">
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+                    <div className="relative">
+                        <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-dark" />
+                        <input
+                            value={tokenQuery}
+                            onChange={(event) => {
+                                setTokenQuery(event.target.value);
+                                setSelectedToken(null);
+                                setLinkedConditions([]);
+                                setTokenLookupError(null);
+                            }}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter') lookupToken();
+                            }}
+                            className="w-full rounded-xl border border-border bg-main py-3 pl-11 pr-4 font-mono text-sm text-text-light outline-none placeholder:text-text-dark focus:border-primary-green/60"
+                            placeholder="Paste token contract address"
+                        />
+                    </div>
+                    <button type="button" onClick={lookupToken} disabled={tokenLookupLoading} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-green px-5 py-3 text-sm font-bold text-black transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-60">
+                        {tokenLookupLoading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                        Search
+                    </button>
+                </div>
+                {tokenLookupError && <div className="mt-3 text-xs font-medium text-primary-red">{tokenLookupError}</div>}
+                {selectedToken && (
+                    <div className="mt-4 rounded-xl border border-primary-green/30 bg-primary-green/5 p-4">
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_repeat(4,auto)] lg:items-center">
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-base font-black text-text-light">{selectedToken.symbol}</span>
+                                    <span className="text-sm font-medium text-text-medium">{selectedToken.name}</span>
+                                    <span className="rounded border border-border bg-main px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-medium">{selectedToken.chainId}</span>
+                                </div>
+                                <div className="mt-1 font-mono text-xs text-text-dark">{shortenAddress(selectedToken.address)}</div>
+                            </div>
+                            <div className="text-xs"><span className="block text-text-dark">Price</span><span className="font-bold text-text-light">{formatCompactUsd(selectedToken.priceUsd)}</span></div>
+                            <div className="text-xs"><span className="block text-text-dark">24h</span><span className={`font-bold ${Number(selectedToken.change24h) >= 0 ? 'text-primary-green' : 'text-primary-red'}`}>{formatChange(selectedToken.change24h)}</span></div>
+                            <div className="text-xs"><span className="block text-text-dark">Volume</span><span className="font-bold text-text-light">{formatCompactNumber(selectedToken.volume24h)}</span></div>
+                            <div className="text-xs"><span className="block text-text-dark">Liquidity</span><span className="font-bold text-text-light">{formatCompactNumber(selectedToken.liquidityUsd)}</span></div>
+                        </div>
+                        <div className="mt-4 flex flex-col gap-3 border-t border-primary-green/20 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="inline-flex w-full rounded-xl border border-border bg-main p-1 sm:w-auto">
+                                {(['single', 'linked'] as const).map((mode) => (
+                                    <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() => {
+                                            setAlertMode(mode);
+                                            setFormError(null);
+                                        }}
+                                        className={`flex-1 rounded-lg px-4 py-2 text-sm font-bold transition-colors sm:flex-none ${alertMode === mode ? 'bg-primary-green text-black' : 'text-text-medium hover:text-text-light'}`}
+                                    >
+                                        {mode === 'single' ? 'Single Alert' : 'Linked Alert'}
+                                    </button>
+                                ))}
+                            </div>
+                            {alertMode === 'linked' && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-xs font-bold text-text-dark">Window</span>
+                                    {TIME_WINDOW_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setTimeWindowMinutes(option.value)}
+                                            className={`rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${timeWindowMinutes === option.value ? 'border-primary-green bg-primary-green/10 text-primary-green' : 'border-border text-text-medium hover:text-text-light'}`}
+                                        >
+                                            {option.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <div className="flex flex-col gap-6 lg:col-span-2">
+                    {selectedToken && alertMode === 'linked' && (
+                        <div className="rounded-xl border border-border bg-card p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <h3 className="flex items-center gap-2 text-lg font-bold text-text-light">
+                                    <Link2 size={18} className="text-primary-green" />
+                                    Linked Smart Alert
+                                </h3>
+                                <button type="button" onClick={createLinkedAlert} disabled={saving || linkedConditions.length < 2} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-green px-4 py-2 text-xs font-bold text-black transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-50">
+                                    {saving && <Loader2 size={14} className="animate-spin" />}
+                                    Save Alert
+                                </button>
+                            </div>
+                            <div className="mt-4 space-y-2">
+                                {linkedConditions.length ? linkedConditions.map((condition, index) => (
+                                    <div key={condition.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-main p-3">
+                                        <div className="flex min-w-0 items-center gap-3">
+                                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border text-xs font-black text-text-medium">{index + 1}</span>
+                                            <div className="min-w-0">
+                                                <div className="truncate text-sm font-bold text-text-light">{condition.label}</div>
+                                        <div className="mt-1 text-[11px] font-medium text-text-dark">Waiting for all linked conditions to match</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" onClick={() => removeLinkedCondition(condition.id)} className="rounded-lg p-2 text-text-dark transition-colors hover:bg-primary-red/10 hover:text-primary-red" aria-label="Remove linked condition">
+                                            <X size={15} />
+                                        </button>
+                                    </div>
+                                )) : (
+                                    <div className="rounded-xl border border-dashed border-border bg-main p-5 text-center text-sm font-medium text-text-medium">
+                                        Add two or more alert types below to build a linked alert.
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex flex-col gap-4">
                         <h3 className="flex items-center gap-2 text-lg font-bold text-text-light">
                             <Bell size={18} className="text-primary-green" />
-                            Basic Alert Types
+                            Alert Types
                         </h3>
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             {BASIC_ALERT_TYPES.map((item) => (
                                 <button
-                                    key={item.type}
+                                    key={item.id}
                                     type="button"
                                     onClick={() => openSetupModal(item)}
-                                    className={`group cursor-pointer rounded-xl border p-5 text-left transition-colors hover:bg-card-hover ${activeType === item.type ? 'border-primary-green/40 bg-card-hover' : 'border-border bg-card hover:border-text-dark/50'}`}
+                                    className={`group cursor-pointer rounded-xl border p-5 text-left transition-colors hover:bg-card-hover ${activeTypeKey === item.id ? 'border-primary-green/40 bg-card-hover' : 'border-border bg-card hover:border-text-dark/50'}`}
                                 >
                                     <div className="flex items-start gap-4">
                                         <div className="rounded-lg border border-border/50 bg-main p-3 text-primary-green">
@@ -448,6 +736,7 @@ export const SmartAlerts: React.FC = () => {
                                         <div>
                                             <h4 className="text-sm font-bold text-text-light group-hover:text-primary-green">{item.title}</h4>
                                             <p className="mt-1 text-xs leading-relaxed text-text-medium">{item.desc}</p>
+                                            {alertMode === 'linked' && <div className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-primary-green"><Plus size={13} /> Add condition</div>}
                                         </div>
                                     </div>
                                 </button>
@@ -459,7 +748,7 @@ export const SmartAlerts: React.FC = () => {
                         <div className="flex items-center justify-between">
                             <h3 className="flex items-center gap-2 text-lg font-bold text-text-light">
                                 <Bell size={18} />
-                                Saved Alert Rules
+                                Saved Alerts
                             </h3>
                             <button type="button" onClick={loadUserAlerts} className="text-xs font-bold text-text-dark hover:text-text-light">
                                 Refresh
@@ -471,28 +760,47 @@ export const SmartAlerts: React.FC = () => {
                                 {loadingAlerts ? (
                                     <div className="flex min-h-[180px] items-center justify-center gap-3 text-sm text-text-medium">
                                         <Loader2 size={18} className="animate-spin text-primary-green" />
-                                        Loading alerts
+                                        Loading saved alerts
                                     </div>
                                 ) : feedItems.length ? (
-                                    feedItems.map((rule) => (
+                                    feedItems.map((rule) => {
+                                        const isLinked = rule.metadata?.alertMode === 'linked';
+                                        const conditions = rule.metadata?.conditions || [];
+                                        const metCount = conditions.filter((condition) => condition.status === 'met').length;
+                                        return (
                                         <div key={rule.id} className={`flex flex-col gap-3 border-b border-border/50 p-4 last:border-0 md:flex-row md:items-center md:justify-between ${!rule.enabled ? 'opacity-60' : ''}`}>
                                             <div className="flex min-w-0 items-start gap-4">
                                                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-main text-primary-green">
-                                                    {alertIcon(rule.alert_type)}
+                                                    {isLinked ? <Link2 size={18} /> : alertIcon(rule.alert_type)}
                                                 </div>
                                                 <div className="min-w-0">
                                                     <div className="truncate text-sm font-bold text-text-light">{rule.trigger_label}</div>
                                                     <div className="mt-2 flex flex-wrap gap-2">
-                                                        <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${typeStyle(rule.alert_type)}`}>{rule.alert_type}</span>
-                                                        <span className="rounded border border-border bg-main px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-medium">{rule.enabled ? 'Active' : 'Paused'}</span>
+                                                        <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${typeStyle(rule.alert_type)}`}>{isLinked ? 'Linked' : rule.alert_type}</span>
+                                                        <span className="rounded border border-border bg-main px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-medium">{rule.metadata?.status === 'completed' ? 'Completed' : rule.metadata?.status === 'expired' ? 'Expired' : rule.enabled ? 'Active' : 'Paused'}</span>
                                                         <span className="rounded border border-border bg-main px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-medium">{rule.chain_id}</span>
+                                                        {rule.metadata?.token?.symbol && <span className="rounded border border-border bg-main px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-medium">{rule.metadata.token.symbol}</span>}
                                                     </div>
+                                                    {isLinked && (
+                                                        <div className="mt-3 space-y-2">
+                                                            <div className="text-[11px] font-bold text-text-medium">{metCount} / {conditions.length} conditions met</div>
+                                                            <div className="space-y-1">
+                                                                {conditions.map((condition) => (
+                                                                    <div key={condition.id} className="flex items-center gap-2 text-[11px] text-text-medium">
+                                                                        <span className={`h-2 w-2 shrink-0 rounded-full ${condition.status === 'met' ? 'bg-primary-green' : condition.status === 'error' ? 'bg-primary-red' : 'bg-text-dark'}`} />
+                                                                        <span className="truncate">{condition.label}</span>
+                                                                        <span className="ml-auto shrink-0 text-text-dark">{formatLinkedConditionStatus(condition.status)}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] text-text-dark sm:grid-cols-3">
                                                         <span>Last checked: {formatRelativeTime(rule.last_checked_at)}</span>
                                                         <span>Last triggered: {formatRelativeTime(rule.last_triggered_at)}</span>
                                                         <span>Triggers: {rule.trigger_count}</span>
                                                         {rule.last_observed_value && <span>Observed: {rule.last_observed_value}</span>}
-                                                        {rule.last_error && <span className="text-primary-red sm:col-span-2">{rule.last_error}</span>}
+                                                        {rule.last_error && <span className="text-primary-red sm:col-span-2">We couldn't check this alert. Try again shortly.</span>}
                                                     </div>
                                                 </div>
                                             </div>
@@ -505,12 +813,13 @@ export const SmartAlerts: React.FC = () => {
                                                 </button>
                                             </div>
                                         </div>
-                                    ))
+                                        );
+                                    })
                                 ) : (
                                     <div className="flex min-h-[200px] flex-col items-center justify-center p-6 text-center">
                                         <Bell size={24} className="mb-3 text-primary-green" />
                                         <div className="text-sm font-bold text-text-light">No saved alerts yet</div>
-                                        <div className="mt-1 max-w-sm text-xs text-text-medium">Create a rule and the backend will keep checking it while you are away.</div>
+                                        <div className="mt-1 max-w-sm text-xs text-text-medium">Create an alert and Atlaix will keep watching it while you are away.</div>
                                     </div>
                                 )}
                             </div>
@@ -536,6 +845,7 @@ export const SmartAlerts: React.FC = () => {
                                         <p className="mt-1 text-xs leading-relaxed text-text-medium">{item.message}</p>
                                         <div className="mt-2 flex flex-wrap gap-2">
                                             <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${typeStyle(item.alert_type)}`}>{item.alert_type}</span>
+                                            {typeof item.metadata?.eventType === 'string' && <span className="rounded border border-primary-green/30 bg-primary-green/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary-green">{item.metadata.eventType === 'partial_met' ? 'Condition met' : 'Completed'}</span>}
                                             {item.observed_value && <span className="rounded border border-border bg-main px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-medium">{item.observed_value}</span>}
                                         </div>
                                     </div>
@@ -543,8 +853,8 @@ export const SmartAlerts: React.FC = () => {
                             )) : (
                                 <div className="flex min-h-[240px] flex-col items-center justify-center text-center">
                                     <CheckCircle2 size={24} className="mb-3 text-text-dark" />
-                                    <div className="text-sm font-bold text-text-light">No triggers yet</div>
-                                    <p className="mt-1 text-xs text-text-medium">Backend-generated trigger events will appear here when saved rules match market data.</p>
+                                    <div className="text-sm font-bold text-text-light">No alert activity yet</div>
+                                    <p className="mt-1 text-xs text-text-medium">Alert activity will appear here when your saved conditions match market data.</p>
                                 </div>
                             )}
                         </div>
@@ -559,7 +869,7 @@ export const SmartAlerts: React.FC = () => {
                             <div className="flex items-start gap-3">
                                 <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${typeStyle(setupType.type)}`}>{setupType.icon}</div>
                                 <div>
-                                    <h3 className="text-lg font-bold text-text-light">Set {setupType.title}</h3>
+                                    <h3 className="text-lg font-bold text-text-light">{setupMode === 'linked-condition' ? 'Add' : 'Set'} {setupType.title}</h3>
                                     <p className="mt-1 text-sm text-text-medium">{setupType.desc}</p>
                                 </div>
                             </div>
@@ -573,31 +883,29 @@ export const SmartAlerts: React.FC = () => {
 
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block">
-                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">Target token or scope</span>
+                                    <span className="mb-2 block text-xs font-bold text-text-medium">Target token or scope</span>
                                     <input value={setupDraft.target} onChange={(event) => setSetupDraft((current) => ({ ...current, target: event.target.value }))} className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none placeholder:text-text-dark focus:border-primary-green/60" placeholder="SOL, ETH, Any token..." />
                                 </label>
                                 <label className="block">
-                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">Chain</span>
-                                    <select value={setupDraft.chainId} onChange={(event) => setSetupDraft((current) => ({ ...current, chainId: event.target.value }))} className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none focus:border-primary-green/60">
-                                        {CHAIN_OPTIONS.map((chain) => <option key={chain.value} value={chain.value}>{chain.label}</option>)}
-                                    </select>
+                                    <span className="mb-2 block text-xs font-bold text-text-medium">Detected chain</span>
+                                    <div className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light">{setupDraft.chainId}</div>
                                 </label>
                             </div>
 
                             <label className="block">
-                                <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">Token or pair address</span>
+                                <span className="mb-2 block text-xs font-bold text-text-medium">Token or pair address</span>
                                 <input value={setupDraft.tokenAddress} onChange={(event) => setSetupDraft((current) => ({ ...current, tokenAddress: event.target.value }))} className="w-full rounded-xl border border-border bg-main px-4 py-3 font-mono text-sm text-text-light outline-none placeholder:text-text-dark focus:border-primary-green/60" placeholder="Optional for Any token, recommended for precise alerts" />
                             </label>
 
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block">
-                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">Condition</span>
+                                    <span className="mb-2 block text-xs font-bold text-text-medium">Condition</span>
                                     <select value={setupDraft.condition} onChange={(event) => updateCondition(event.target.value as SmartAlertCondition)} className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none focus:border-primary-green/60">
                                         {CONDITION_OPTIONS[setupType.type].map((condition) => <option key={condition.value} value={condition.value}>{condition.label}</option>)}
                                     </select>
                                 </label>
                                 <label className="block">
-                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">
+                                    <span className="mb-2 block text-xs font-bold text-text-medium">
                                         {setupDraft.thresholdKind === 'percent' ? 'Percentage' : setupDraft.thresholdKind === 'event' ? 'Event' : setupDraft.thresholdKind === 'severity' ? 'Severity' : 'Threshold'}
                                     </span>
                                     {VALUE_OPTIONS[setupType.type] ? (
@@ -615,11 +923,11 @@ export const SmartAlerts: React.FC = () => {
 
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block">
-                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">Notify by</span>
+                                    <span className="mb-2 block text-xs font-bold text-text-medium">Notify by</span>
                                     <div className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light">In-app history</div>
                                 </label>
                                 <label className="block">
-                                    <span className="mb-2 block text-xs font-bold uppercase tracking-wider text-text-medium">Cooldown</span>
+                                    <span className="mb-2 block text-xs font-bold text-text-medium">Cooldown</span>
                                     <select value={setupDraft.cooldownMinutes} onChange={(event) => setSetupDraft((current) => ({ ...current, cooldownMinutes: Number(event.target.value) }))} className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none focus:border-primary-green/60">
                                         <option value={15}>15 minutes</option>
                                         <option value={60}>1 hour</option>
@@ -631,21 +939,21 @@ export const SmartAlerts: React.FC = () => {
                             </div>
 
                             <div className="rounded-xl border border-border bg-main p-4">
-                                <div className="text-xs font-bold uppercase tracking-wider text-text-dark">Preview</div>
+                                <div className="text-xs font-bold text-text-dark">Preview</div>
                                 <div className="mt-2 text-sm font-bold text-text-light">{previewTrigger}</div>
                                 <div className="mt-2 text-xs leading-relaxed text-text-medium">
                                     {setupDraft.thresholdKind === 'percent'
-                                        ? 'The first backend check establishes a baseline. Future checks trigger when the value moves by this percentage.'
-                                        : 'Saved alerts are evaluated by the backend even when you are signed out.'}
+                                        ? 'The first check establishes a baseline. Future checks trigger when the value moves by this percentage.'
+                                        : 'Saved alerts keep watching market data even when you are signed out.'}
                                 </div>
                             </div>
                         </div>
 
                         <div className="flex flex-col-reverse gap-3 border-t border-border p-5 sm:flex-row sm:justify-end">
                             <button type="button" onClick={closeSetupModal} className="rounded-xl border border-border px-5 py-3 text-sm font-bold text-text-medium transition-colors hover:bg-card-hover hover:text-text-light">Cancel</button>
-                            <button type="button" onClick={createAlert} disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-green px-5 py-3 text-sm font-bold text-black transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-60">
+                            <button type="button" onClick={setupMode === 'linked-condition' ? addLinkedCondition : createAlert} disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-green px-5 py-3 text-sm font-bold text-black transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-60">
                                 {saving && <Loader2 size={16} className="animate-spin" />}
-                                {user ? 'Create Alert' : 'Sign in to Save'}
+                                {setupMode === 'linked-condition' ? 'Add Condition' : user ? 'Create Alert' : 'Sign in to Save'}
                             </button>
                         </div>
                     </div>

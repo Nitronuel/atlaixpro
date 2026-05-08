@@ -20,11 +20,10 @@ const SmartWalletProfile = lazy(async () => ({ default: (await import('./pages/S
 const TokenSmartMoney = lazy(async () => ({ default: (await import('./pages/TokenSmartMoney')).TokenSmartMoney }));
 const ProfileSettings = lazy(async () => ({ default: (await import('./pages/ProfileSettings')).ProfileSettings }));
 
-// Placeholder components for views not yet implemented
 const PlaceholderView = ({ title }: { title: string }) => (
     <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center p-6 animate-fade-in">
         <h2 className="text-2xl font-bold mb-2 text-text-light">{title}</h2>
-        <p className="text-text-medium">This feature is coming soon.</p>
+        <p className="text-text-medium">This workspace is not available yet.</p>
     </div>
 );
 

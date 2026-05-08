@@ -246,26 +246,26 @@ export const SmartMoney: React.FC = () => {
         <div className="flex flex-col gap-6 pb-8 animate-fade-in w-full max-w-[1600px] mx-auto">
 
             {/* --- Filter Bar --- */}
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-[#111315] border border-[#2A2E33] p-4 rounded-xl shadow-md">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-card border border-border p-4 rounded-xl shadow-sm">
                 <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto no-scrollbar">
                     {/* Chain Selector */}
                     <div className="relative group shrink-0">
-                        <button className="flex items-center gap-2 bg-[#1C1F22] hover:bg-[#222529] border border-[#2A2E33] px-4 py-2 rounded-lg text-sm text-[#EAECEF] font-medium transition-colors">
+                        <button className="flex items-center gap-2 bg-main hover:bg-card-hover border border-border px-4 py-2 rounded-lg text-sm text-text-light font-medium transition-colors">
                             <Layers size={16} className="text-primary-green" />
                             All Chains
-                            <ChevronDown size={14} className="text-[#8F96A3]" />
+                            <ChevronDown size={14} className="text-text-medium" />
                         </button>
                     </div>
 
                     {/* Time Range */}
-                    <div className="flex bg-[#1C1F22] border border-[#2A2E33] rounded-lg p-1 shrink-0">
+                    <div className="flex bg-main border border-border rounded-lg p-1 shrink-0">
                         {['1h', '4h', '24h', '7d'].map((t) => (
                             <button
                                 key={t}
                                 onClick={() => setTimeRange(t)}
                                 className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${timeRange === t
-                                    ? 'bg-[#2A2E33] text-[#EAECEF] shadow-sm'
-                                    : 'text-[#8F96A3] hover:text-[#EAECEF]'
+                                    ? 'bg-card-hover text-text-light shadow-sm'
+                                    : 'text-text-medium hover:text-text-light'
                                     }`}
                             >
                                 {t}
@@ -277,16 +277,16 @@ export const SmartMoney: React.FC = () => {
                 <div className="flex items-center gap-3 w-full md:w-auto">
                     {/* Search */}
                     <div className="relative flex-1 md:w-64">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8F96A3]" size={16} />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-medium" size={16} />
                         <input
                             type="text"
                             placeholder="Search token..."
-                            className="w-full bg-[#1C1F22] border border-[#2A2E33] rounded-lg pl-10 pr-4 py-2 text-sm text-[#EAECEF] placeholder-[#5D6470] focus:border-primary-green/50 focus:outline-none transition-colors"
+                            className="w-full bg-main border border-border rounded-lg pl-10 pr-4 py-2 text-sm text-text-light placeholder-text-dark focus:border-primary-green/50 focus:outline-none transition-colors"
                         />
                     </div>
 
                     {/* Filter Button */}
-                    <button className="flex items-center gap-2 bg-[#1C1F22] hover:bg-[#222529] border border-[#2A2E33] px-3 py-2 rounded-lg text-[#EAECEF] text-sm font-medium transition-colors shrink-0">
+                    <button className="flex items-center gap-2 bg-main hover:bg-card-hover border border-border px-3 py-2 rounded-lg text-text-light text-sm font-medium transition-colors shrink-0">
                         <Filter size={16} />
                         <span className="hidden md:inline">Filters</span>
                     </button>
@@ -298,43 +298,47 @@ export const SmartMoney: React.FC = () => {
 
                 {/* --- Column 1: Trending Smart Wallets (Moved from Col 2) --- */}
                 <div className="xl:col-span-4 flex flex-col gap-6">
-                    <div className="bg-[#111315] border border-[#2A2E33] rounded-2xl overflow-hidden shadow-lg h-full">
-                        <div className="px-5 py-4 border-b border-[#2A2E33] flex items-center justify-between">
-                            <h3 className="font-bold text-[#EAECEF] flex items-center gap-2">
+                    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm h-full">
+                        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+                            <h3 className="font-bold text-text-light flex items-center gap-2">
                                 <Wallet size={18} className="text-primary-green" />
                                 Trending Smart Wallets
                             </h3>
                         </div>
                         <div className="p-2 space-y-1">
                             {loadingWallets && (
-                                <div className="p-4 text-sm text-[#8F96A3]">
-                                    Loading shared smart money wallets...
+                                <div className="flex items-center gap-3 p-4 text-sm text-text-medium">
+                                    <div className="h-4 w-4 rounded-full border-2 border-primary-green/40 border-t-primary-green animate-spin" />
+                                    Loading smart wallets
                                 </div>
                             )}
                             {!loadingWallets && smartWallets.length === 0 && (
-                                <div className="p-4 text-sm text-[#8F96A3]">
-                                    No wallets have qualified yet. Track wallets from Wallet Tracker and strong performers will appear here automatically.
+                                <div className="p-4 text-sm text-text-medium">
+                                    <div className="font-bold text-text-light">No qualified wallets yet</div>
+                                    <div className="mt-1 text-xs">Track wallets from Wallet Tracker and strong performers will appear here automatically.</div>
                                 </div>
                             )}
                             {smartWallets.map((wallet) => (
                                 <div
                                     key={wallet.addr}
                                     onClick={() => navigate(`/smart-money/${wallet.addr}`)}
-                                    className="p-3 hover:bg-[#1C1F22] rounded-xl transition-colors cursor-pointer group relative border-b border-[#2A2E33]/30 last:border-0"
+                                    className="p-3 hover:bg-card-hover/50 rounded-lg transition-colors cursor-pointer group relative border-b border-border/50 last:border-0"
                                 >
                                     {/* Header: Avatar, Badge, Address, Button */}
                                     <div className="flex items-center justify-between mb-0.5">
                                         <div className="flex items-center gap-2.5">
                                             {/* Avatar Gradient */}
-                                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-inner group-hover:scale-105 transition-transform"></div>
+                                            <div className="w-7 h-7 rounded-full bg-card-hover border border-border flex items-center justify-center text-xs font-bold text-text-light">
+                                                {wallet.name.slice(0, 1).toUpperCase()}
+                                            </div>
 
                                             <div className="flex flex-col gap-0.5">
-                                                <span className="text-sm font-bold text-[#EAECEF] tracking-tight group-hover:text-primary-green transition-colors">{wallet.name}</span>
-                                                <span className="text-[10px] text-[#8F96A3] font-mono">{wallet.addr}</span>
+                                                <span className="text-sm font-bold text-text-light tracking-tight group-hover:text-primary-green transition-colors">{wallet.name}</span>
+                                                <span className="text-xs text-text-medium font-mono">{wallet.addr}</span>
                                             </div>
                                         </div>
 
-                                        <button className="px-3 py-1 rounded-lg bg-[#1C1F22] hover:bg-[#2A2E33] border border-[#3C414A] text-[#EAECEF] text-[9px] font-bold transition-colors opacity-0 group-hover:opacity-100">
+                                        <button className="px-3 py-1 rounded-lg bg-main hover:bg-card-hover border border-border text-text-light text-xs font-bold transition-colors opacity-0 group-hover:opacity-100">
                                             View
                                         </button>
                                     </div>
@@ -342,32 +346,32 @@ export const SmartMoney: React.FC = () => {
                                     {/* Stats Grid */}
                                     <div className="flex justify-between items-start pt-0 pl-10">
                                         <div className="flex flex-col text-left">
-                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Win Rate</span>
-                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.lastWinRate || 'N/A'}</span>
+                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">Win rate</span>
+                                            <span className="text-xs font-bold text-text-light">{wallet.lastWinRate || 'No data'}</span>
                                         </div>
                                         <div className="flex flex-col text-center">
-                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Score</span>
+                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">Score</span>
                                             <span className="text-xs font-bold text-green-400">{wallet.qualification?.score || 0}/100</span>
                                         </div>
                                         <div className="flex flex-col text-center">
-                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">PnL</span>
-                                            <span className="text-xs font-bold text-green-400">{wallet.lastPnl || 'N/A'}</span>
+                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">PnL</span>
+                                            <span className="text-xs font-bold text-green-400">{wallet.lastPnl || 'No data'}</span>
                                         </div>
                                         <div className="flex flex-col text-right">
-                                            <span className="text-[9px] text-[#8F96A3] font-medium mb-0.5 whitespace-nowrap">Balance</span>
-                                            <span className="text-xs font-bold text-[#EAECEF]">{wallet.lastBalance || 'N/A'}</span>
+                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">Balance</span>
+                                            <span className="text-xs font-bold text-text-light">{wallet.lastBalance || 'No data'}</span>
                                         </div>
                                     </div>
                                     {wallet.qualification?.reasons?.[0] && (
-                                        <div className="pl-10 pt-2 text-[10px] text-[#8F96A3]">
+                                        <div className="pl-10 pt-2 text-xs text-text-medium">
                                             {wallet.qualification.reasons[0]}
                                         </div>
                                     )}
                                 </div>
                             ))}
                         </div>
-                        <div className="p-3 border-t border-[#2A2E33] bg-[#1C1F22]/50">
-                            <button className="w-full py-2 text-xs font-bold text-[#8F96A3] hover:text-[#EAECEF] transition-colors border border-dashed border-[#2A2E33] hover:border-[#5D6470] rounded-lg">
+                        <div className="p-3 border-t border-border bg-main/30">
+                            <button className="w-full py-2 text-xs font-bold text-text-medium hover:text-text-light transition-colors border border-dashed border-border hover:border-text-medium rounded-lg">
                                 View Leaderboard
                             </button>
                         </div>
@@ -376,25 +380,26 @@ export const SmartMoney: React.FC = () => {
 
                 {/* --- Column 2: Recent Events Feed (Moved from Col 3) --- */}
                 <div className="xl:col-span-4 flex flex-col gap-6">
-                    <div className="bg-[#111315] border border-[#2A2E33] rounded-2xl overflow-hidden shadow-lg h-full">
-                        <div className="px-5 py-4 border-b border-[#2A2E33] flex items-center justify-between">
-                            <h3 className="font-bold text-[#EAECEF] flex items-center gap-2">
+                    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm h-full">
+                        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+                            <h3 className="font-bold text-text-light flex items-center gap-2">
                                 <Activity size={18} className="text-primary-green" />
                                 Smart Money Events
                             </h3>
-                            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
+                            <span className="text-xs text-text-medium">Updates as wallets move</span>
                         </div>
                         <div className="p-2 space-y-1">
                             {!loadingWallets && recentEvents.length === 0 && (
-                                <div className="p-4 text-sm text-[#8F96A3]">
-                                    No recent buy or sell activity has been confirmed from the current smart-wallet set yet.
+                                <div className="p-4 text-sm text-text-medium">
+                                    <div className="font-bold text-text-light">No recent activity</div>
+                                    <div className="mt-1 text-xs">Buy and sell activity from qualified wallets will appear here.</div>
                                 </div>
                             )}
                             {recentEvents.map((event, i) => (
                                 <div
                                     key={i}
                                     onClick={() => navigate(`/token-smart-money/${event.token}`)}
-                                    className="p-3 hover:bg-[#1C1F22] rounded-xl transition-colors cursor-pointer group relative"
+                                    className="p-3 hover:bg-card-hover/50 rounded-lg transition-colors cursor-pointer group relative"
                                 >
                                     <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-full ${event.type === 'buy' ? 'bg-green-500' : 'bg-red-500'}`}></div>
 
@@ -402,26 +407,26 @@ export const SmartMoney: React.FC = () => {
                                         {/* Top Row: Tag + Token + Time */}
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2">
-                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${event.type === 'buy' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                                                <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${event.type === 'buy' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
                                                     }`}>
-                                                    {event.type === 'buy' ? 'BUY' : 'SELL'}
+                                                    {event.type === 'buy' ? 'Buy' : 'Sell'}
                                                 </span>
-                                                <span className="text-xs font-bold text-[#EAECEF]">{event.token}</span>
+                                                <span className="text-xs font-bold text-text-light">{event.token}</span>
                                             </div>
-                                            <span className="text-xs text-[#5D6470]">{event.time}</span>
+                                            <span className="text-xs text-text-dark">{event.time}</span>
                                         </div>
 
                                         {/* Bottom Row: Wallet + Amount */}
                                         <div className="flex items-center justify-between">
-                                            <span className="text-xs text-[#8F96A3]">{event.wallet}</span>
-                                            <span className="text-xs font-bold text-[#EAECEF]">{event.amount}</span>
+                                            <span className="text-xs text-text-medium">{event.wallet}</span>
+                                            <span className="text-xs font-bold text-text-light">{event.amount}</span>
                                         </div>
                                     </div>
                                 </div>
                             ))}
                         </div>
-                        <div className="p-3 border-t border-[#2A2E33] bg-[#1C1F22]/50">
-                            <button className="w-full py-2 text-xs font-bold text-[#8F96A3] hover:text-[#EAECEF] transition-colors border border-dashed border-[#2A2E33] hover:border-[#5D6470] rounded-lg">
+                        <div className="p-3 border-t border-border bg-main/30">
+                            <button className="w-full py-2 text-xs font-bold text-text-medium hover:text-text-light transition-colors border border-dashed border-border hover:border-text-medium rounded-lg">
                                 View All Events
                             </button>
                         </div>
@@ -431,34 +436,35 @@ export const SmartMoney: React.FC = () => {
                 {/* --- Column 3: Inflows & Outflows (Moved from Col 1) --- */}
                 <div className="sm:col-span-2 xl:col-span-4 grid grid-cols-1 sm:grid-cols-2 xl:flex xl:flex-col gap-6">
                     {/* Top Inflows */}
-                    <section className="bg-[#111315] border border-[#2A2E33] rounded-2xl overflow-hidden flex flex-col">
-                        <div className="px-6 py-4 border-b border-[#2A2E33] flex items-center justify-between">
-                            <h2 className="font-bold text-[#EAECEF]">Smart Money Top Inflows</h2>
+                    <section className="bg-card border border-border rounded-xl overflow-hidden flex flex-col shadow-sm">
+                        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                            <h2 className="font-bold text-text-light">Smart Money Top Inflows</h2>
                         </div>
 
                         <div className="p-4 flex flex-col gap-2">
                             {!loadingWallets && topInflows.length === 0 && (
-                                <div className="text-sm text-[#8F96A3]">
-                                    Smart-money inflows will appear here once qualified wallets build overlapping token positions.
+                                <div className="text-sm text-text-medium">
+                                    <div className="font-bold text-text-light">No inflows yet</div>
+                                    <div className="mt-1 text-xs">Overlapping positions from qualified wallets will appear here.</div>
                                 </div>
                             )}
                             {topInflows.map((token) => (
-                                <div key={token.id} className="bg-[#1C1F22] border border-[#2A2E33] hover:border-green-500/30 px-3 py-2.5 rounded-xl transition-all cursor-pointer group flex items-center justify-between h-[64px]">
+                                <div key={token.id} className="bg-main border border-border hover:border-green-500/30 px-3 py-2.5 rounded-lg transition-all cursor-pointer group flex items-center justify-between h-[64px]">
                                     {/* Left: Token Info */}
                                     <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-[#2A2E33] flex items-center justify-center overflow-hidden border border-[#363B41]">
+                                        <div className="w-8 h-8 rounded-full bg-card-hover flex items-center justify-center overflow-hidden border border-border">
                                             <img src={token.image} alt={token.ticker} className="w-full h-full object-cover" />
                                         </div>
                                         <div className="flex flex-col">
-                                            <div className="font-bold text-[#EAECEF] text-xs leading-none group-hover:text-green-400 transition-colors mb-1">{token.ticker}</div>
-                                            <div className="text-[10px] text-[#8F96A3] uppercase tracking-wider font-semibold whitespace-nowrap">Net Inflow</div>
+                                            <div className="font-bold text-text-light text-xs leading-none group-hover:text-green-400 transition-colors mb-1">{token.ticker}</div>
+                                            <div className="text-xs text-text-medium font-semibold whitespace-nowrap">Net inflow</div>
                                         </div>
                                     </div>
 
                                     {/* Center: Amount & Wallets */}
                                     <div className="flex flex-col items-end mr-3 gap-0.5">
-                                        <div className="font-bold text-[#EAECEF] text-xs leading-none">{token.amount}</div>
-                                        <div className="text-[10px] text-[#8F96A3] whitespace-nowrap"><span className="text-white font-medium">{token.count}</span> smart wallets</div>
+                                        <div className="font-bold text-text-light text-xs leading-none">{token.amount}</div>
+                                        <div className="text-xs text-text-medium whitespace-nowrap"><span className="text-text-light font-medium">{token.count}</span> smart wallets</div>
                                     </div>
                                 </div>
                             ))}
@@ -466,34 +472,35 @@ export const SmartMoney: React.FC = () => {
                     </section>
 
                     {/* Top Outflows */}
-                    <section className="bg-[#111315] border border-[#2A2E33] rounded-2xl overflow-hidden flex flex-col">
-                        <div className="px-6 py-4 border-b border-[#2A2E33] flex items-center justify-between">
-                            <h2 className="font-bold text-[#EAECEF]">Smart Money Selling / Outflow</h2>
+                    <section className="bg-card border border-border rounded-xl overflow-hidden flex flex-col shadow-sm">
+                        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                            <h2 className="font-bold text-text-light">Smart Money Selling / Outflow</h2>
                         </div>
 
                         <div className="p-4 flex flex-col gap-2">
                             {!loadingWallets && topOutflows.length === 0 && (
-                                <div className="text-sm text-[#8F96A3]">
-                                    No recent smart-money sell pressure has been confirmed yet.
+                                <div className="text-sm text-text-medium">
+                                    <div className="font-bold text-text-light">No sell pressure yet</div>
+                                    <div className="mt-1 text-xs">Confirmed selling from qualified wallets will appear here.</div>
                                 </div>
                             )}
                             {topOutflows.map((token) => (
-                                <div key={token.id} className="bg-[#1C1F22] border border-[#2A2E33] hover:border-red-500/30 px-3 py-2.5 rounded-xl transition-all cursor-pointer group flex items-center justify-between h-[64px]">
+                                <div key={token.id} className="bg-main border border-border hover:border-red-500/30 px-3 py-2.5 rounded-lg transition-all cursor-pointer group flex items-center justify-between h-[64px]">
                                     {/* Left: Token Info */}
                                     <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-[#2A2E33] flex items-center justify-center overflow-hidden border border-[#363B41]">
+                                        <div className="w-8 h-8 rounded-full bg-card-hover flex items-center justify-center overflow-hidden border border-border">
                                             <img src={token.image} alt={token.ticker} className="w-full h-full object-cover" />
                                         </div>
                                         <div className="flex flex-col">
-                                            <div className="font-bold text-[#EAECEF] text-xs leading-none group-hover:text-red-400 transition-colors mb-1">{token.ticker}</div>
-                                            <div className="text-[10px] text-[#8F96A3] uppercase tracking-wider font-semibold whitespace-nowrap">Net Outflow</div>
+                                            <div className="font-bold text-text-light text-xs leading-none group-hover:text-red-400 transition-colors mb-1">{token.ticker}</div>
+                                            <div className="text-xs text-text-medium font-semibold whitespace-nowrap">Net outflow</div>
                                         </div>
                                     </div>
 
                                     {/* Center: Amount & Wallets */}
                                     <div className="flex flex-col items-end mr-3 gap-0.5">
-                                        <div className="font-bold text-[#EAECEF] text-xs leading-none">{token.amount}</div>
-                                        <div className="text-[10px] text-[#8F96A3] whitespace-nowrap"><span className="text-white font-medium">{token.count}</span> smart wallets</div>
+                                        <div className="font-bold text-text-light text-xs leading-none">{token.amount}</div>
+                                        <div className="text-xs text-text-medium whitespace-nowrap"><span className="text-text-light font-medium">{token.count}</span> smart wallets</div>
                                     </div>
                                 </div>
                             ))}

@@ -37,7 +37,7 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
 
             <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                    <thead className="bg-card-hover/50 text-xs text-text-dark uppercase font-bold">
+                    <thead className="bg-card-hover/50 text-xs text-text-dark font-bold">
                         <tr>
                             <th className="px-6 py-3 text-left">Asset</th>
                             <th className="px-6 py-3 text-right">Balance</th>
@@ -53,13 +53,16 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                                 <td colSpan={5} className="py-12 text-center text-text-medium">
                                     <div className="flex flex-col items-center gap-3">
                                         <RefreshCw className="animate-spin text-primary-green" size={24} />
-                                        <span>Scanning Blockchain...</span>
+                                        <span>Loading wallet holdings...</span>
                                     </div>
                                 </td>
                             </tr>
                         ) : !portfolioData || portfolioData.assets.length === 0 ? (
                             <tr>
-                                <td colSpan={5} className="py-12 text-center text-text-medium">No assets found on this chain.</td>
+                                <td colSpan={5} className="py-12 text-center text-text-medium">
+                                    <div className="font-bold text-text-light">No assets found</div>
+                                    <div className="mt-1 text-xs text-text-medium">This wallet has no visible holdings on the selected chain.</div>
+                                </td>
                             </tr>
                         ) : (
                             visibleAssets.map((asset, i) => {
@@ -98,7 +101,7 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                                                     <div>
                                                         <div className="flex items-center gap-2">
                                                             <div className="font-bold text-text-light group-hover:text-primary-green transition-colors">{asset.symbol}</div>
-                                                            {isNew && <span className="text-[9px] bg-primary-green text-main font-bold px-1.5 py-0.5 rounded animate-pulse">NEW</span>}
+                                                            {isNew && <span className="text-[10px] bg-primary-green text-main font-bold px-1.5 py-0.5 rounded">New</span>}
                                                         </div>
                                                         <div className="text-[10px] text-text-medium flex gap-1">
                                                             {asset.chain || chain}
@@ -113,7 +116,7 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                                                     <span className="text-text-dark text-xs">N/A</span>
                                                 ) : asset.pnl === 'Loading...' ? (
                                                     <span className="text-text-medium text-xs flex items-center justify-end gap-1">
-                                                        <RefreshCw size={10} className="animate-spin" /> Calc...
+                                                        <RefreshCw size={10} className="animate-spin" /> Calculating
                                                     </span>
                                                 ) : asset.pnl === 'N/A' ? (
                                                     <span className="text-text-dark text-xs">N/A</span>
@@ -129,7 +132,7 @@ export const HoldingsTable: React.FC<HoldingsTableProps> = ({ portfolioData, loa
                                                         )}
                                                     </div>
                                                 ) : (
-                                                    <span className="text-text-dark text-xs">Simulated</span>
+                                                    <span className="text-text-dark text-xs">Unavailable</span>
                                                 )}
 
                                             </td>

@@ -22,6 +22,7 @@ create table if not exists public.alert_rules (
     baseline_observed_at timestamptz,
     trigger_count integer not null default 0,
     last_error text,
+    metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -49,6 +50,9 @@ add column if not exists trigger_count integer not null default 0;
 
 alter table public.alert_rules
 add column if not exists last_error text;
+
+alter table public.alert_rules
+add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 create table if not exists public.alert_triggers (
     id uuid primary key default gen_random_uuid(),

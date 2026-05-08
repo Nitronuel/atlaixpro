@@ -18,6 +18,38 @@ type SmartAlertRuleRow = SmartAlertRuleSnapshot & {
     threshold_kind: SmartAlertThresholdKind | string | null;
     enabled: boolean;
     trigger_count: number | null;
+    metadata?: SmartAlertRuleMetadata | null;
+    created_at?: string | null;
+};
+
+type LinkedAlertConditionMetadata = {
+    id: string;
+    alertType: SmartAlertType;
+    condition: SmartAlertCondition;
+    thresholdKind: SmartAlertThresholdKind;
+    threshold: string;
+    label: string;
+    status?: 'pending' | 'met' | 'expired' | 'error';
+    metAt?: string | null;
+    observedValue?: string | null;
+    baselineValue?: number | null;
+    lastError?: string | null;
+};
+
+type SmartAlertRuleMetadata = {
+    alertMode?: 'single' | 'linked';
+    token?: {
+        address?: string;
+        pairAddress?: string | null;
+        chainId?: string;
+        name?: string;
+        symbol?: string;
+    } | null;
+    matchLogic?: 'all';
+    timeWindowMinutes?: number | null;
+    status?: 'active' | 'paused' | 'completed' | 'expired';
+    conditions?: LinkedAlertConditionMetadata[];
+    completedAt?: string | null;
 };
 
 type SmartAlertStatus = {
@@ -48,8 +80,15 @@ const ALERT_RULE_COLUMNS = [
     'enabled',
     'last_triggered_at',
     'baseline_value',
-    'trigger_count'
+    'trigger_count',
+    'metadata',
+    'created_at'
 ].join(',');
+
+const LEGACY_ALERT_RULE_COLUMNS = ALERT_RULE_COLUMNS
+    .split(',')
+    .filter((column) => column !== 'metadata')
+    .join(',');
 
 const readEnv = (...keys: string[]) => {
     for (const key of keys) {
@@ -248,12 +287,21 @@ export class SmartAlertRunner {
     }
 
     private async loadEnabledRules(supabase: any): Promise<SmartAlertRuleRow[]> {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('alert_rules')
             .select(ALERT_RULE_COLUMNS)
             .eq('enabled', true)
             .order('last_checked_at', { ascending: true, nullsFirst: true })
             .limit(this.status.batchSize);
+
+        if (error?.code === '42703') {
+            ({ data, error } = await supabase
+                .from('alert_rules')
+                .select(LEGACY_ALERT_RULE_COLUMNS)
+                .eq('enabled', true)
+                .order('last_checked_at', { ascending: true, nullsFirst: true })
+                .limit(this.status.batchSize));
+        }
 
         if (error) throw error;
 
@@ -296,6 +344,10 @@ export class SmartAlertRunner {
         marketCoins: MarketCoin[],
         alphaEvents: AlphaGauntletEvent[]
     ) {
+        if (rule.metadata?.alertMode === 'linked') {
+            return this.evaluateLinkedRule(supabase, rule, marketCoins, alphaEvents);
+        }
+
         const now = new Date();
         const snapshots = this.getSnapshotsForRule(rule, marketCoins, alphaEvents);
 
@@ -355,6 +407,152 @@ export class SmartAlertRunner {
         return triggersCreated;
     }
 
+    private async evaluateLinkedRule(
+        supabase: any,
+        rule: SmartAlertRuleRow,
+        marketCoins: MarketCoin[],
+        alphaEvents: AlphaGauntletEvent[]
+    ) {
+        const now = new Date();
+        const metadata = rule.metadata || {};
+        const conditions = Array.isArray(metadata.conditions) ? metadata.conditions : [];
+
+        if (!conditions.length || metadata.status === 'completed' || metadata.status === 'expired') {
+            await this.updateRuleEvaluation(supabase, rule, {
+                last_checked_at: now.toISOString()
+            });
+            return 0;
+        }
+
+        const createdAt = new Date((rule as any).created_at || now.toISOString()).getTime();
+        if (metadata.timeWindowMinutes && Number.isFinite(createdAt) && now.getTime() - createdAt > metadata.timeWindowMinutes * 60_000) {
+            await this.updateRuleEvaluation(supabase, rule, {
+                last_checked_at: now.toISOString(),
+                metadata: {
+                    ...metadata,
+                    status: 'expired',
+                    conditions: conditions.map((condition) => condition.status === 'met' ? condition : { ...condition, status: 'expired' })
+                }
+            });
+            return 0;
+        }
+
+        const snapshots = this.getSnapshotsForRule(rule, marketCoins, alphaEvents);
+        if (!snapshots.length) {
+            await this.updateRuleEvaluation(supabase, rule, {
+                last_checked_at: now.toISOString(),
+                last_error: 'No matching market snapshot was available for this linked alert request.'
+            });
+            return 0;
+        }
+
+        const snapshot = snapshots[0];
+        let triggersCreated = 0;
+        let lastObservedValue: string | null = null;
+        let lastError: string | null = null;
+
+        const nextConditions = [];
+        for (const condition of conditions) {
+            if (condition.status === 'met') {
+                nextConditions.push(condition);
+                continue;
+            }
+
+            const conditionRule: SmartAlertRuleSnapshot = {
+                id: `${rule.id}:${condition.id}`,
+                user_id: rule.user_id,
+                alert_type: condition.alertType,
+                target: rule.target,
+                chain_id: rule.chain_id,
+                condition: condition.condition,
+                threshold_kind: condition.thresholdKind,
+                threshold: condition.threshold,
+                trigger_label: condition.label,
+                cooldown_minutes: rule.cooldown_minutes,
+                last_triggered_at: null,
+                baseline_value: condition.baselineValue ?? null
+            };
+            const result = evaluateSmartAlertRule(conditionRule, snapshot, now);
+            lastObservedValue = result.observedValue;
+            lastError = result.lastError;
+
+            const nextCondition: LinkedAlertConditionMetadata = {
+                ...condition,
+                observedValue: result.observedValue,
+                lastError: result.lastError,
+                ...(result.nextBaselineValue !== null ? { baselineValue: result.nextBaselineValue } : {})
+            };
+
+            if (result.shouldTrigger) {
+                nextCondition.status = 'met';
+                nextCondition.metAt = now.toISOString();
+                const inserted = await this.insertLinkedTrigger(supabase, rule, snapshot, {
+                    title: 'Partial target met',
+                    message: `${condition.label} met for ${snapshot.tokenLabel || rule.target}.`,
+                    observedValue: result.observedValue,
+                    threshold: condition.threshold,
+                    dedupeKey: `${rule.id}:${condition.id}:partial`,
+                    metadata: {
+                        eventType: 'partial_met',
+                        conditionId: condition.id,
+                        tokenLabel: snapshot.tokenLabel || null,
+                        tokenAddress: snapshot.tokenAddress || null,
+                        completedConditions: nextConditions.filter((item) => item.status === 'met').length + 1,
+                        totalConditions: conditions.length,
+                        evaluatedAt: now.toISOString()
+                    }
+                }, now);
+                if (inserted) triggersCreated += 1;
+            }
+
+            nextConditions.push(nextCondition);
+        }
+
+        const completedConditions = nextConditions.filter((condition) => condition.status === 'met').length;
+        const allConditionsMet = completedConditions === nextConditions.length;
+        let nextMetadata: SmartAlertRuleMetadata = {
+            ...metadata,
+            status: allConditionsMet ? 'completed' : 'active',
+            conditions: nextConditions,
+            ...(allConditionsMet ? { completedAt: now.toISOString() } : {})
+        };
+
+        if (allConditionsMet) {
+            const inserted = await this.insertLinkedTrigger(supabase, rule, snapshot, {
+                title: 'Linked alert triggered',
+                message: `All ${nextConditions.length} linked conditions were met for ${snapshot.tokenLabel || rule.target}.`,
+                observedValue: lastObservedValue,
+                threshold: `${nextConditions.length} conditions`,
+                dedupeKey: `${rule.id}:linked-complete`,
+                metadata: {
+                    eventType: 'linked_triggered',
+                    tokenLabel: snapshot.tokenLabel || null,
+                    tokenAddress: snapshot.tokenAddress || null,
+                    completedConditions,
+                    totalConditions: nextConditions.length,
+                    evaluatedAt: now.toISOString()
+                }
+            }, now);
+            if (inserted) triggersCreated += 1;
+        }
+
+        await this.updateRuleEvaluation(supabase, rule, {
+            last_checked_at: now.toISOString(),
+            last_observed_value: lastObservedValue,
+            last_observed_at: now.toISOString(),
+            last_error: lastError,
+            metadata: nextMetadata,
+            ...(allConditionsMet ? {
+                last_triggered_at: now.toISOString(),
+                trigger_count: Number(rule.trigger_count || 0) + triggersCreated
+            } : triggersCreated ? {
+                trigger_count: Number(rule.trigger_count || 0) + triggersCreated
+            } : {})
+        });
+
+        return triggersCreated;
+    }
+
     private async insertTrigger(
         supabase: any,
         rule: SmartAlertRuleRow,
@@ -381,6 +579,42 @@ export class SmartAlertRunner {
                     thresholdKind: rule.threshold_kind,
                     evaluatedAt: now.toISOString()
                 },
+                created_at: now.toISOString()
+            })
+            .select('id');
+
+        if (error?.code === '23505') return false;
+        if (error) throw error;
+        return Boolean(data && data.length > 0);
+    }
+
+    private async insertLinkedTrigger(
+        supabase: any,
+        rule: SmartAlertRuleRow,
+        snapshot: SmartAlertMarketSnapshot,
+        event: {
+            title: string;
+            message: string;
+            observedValue: string | null;
+            threshold: string | null;
+            dedupeKey: string;
+            metadata: Record<string, unknown>;
+        },
+        now: Date
+    ) {
+        const { data, error } = await supabase
+            .from('alert_triggers')
+            .insert({
+                alert_rule_id: rule.id,
+                user_id: rule.user_id,
+                alert_type: rule.alert_type,
+                title: event.title,
+                message: event.message,
+                observed_value: event.observedValue,
+                threshold: event.threshold,
+                source: 'smart-alert-runner',
+                dedupe_key: event.dedupeKey,
+                metadata: event.metadata,
                 created_at: now.toISOString()
             })
             .select('id');

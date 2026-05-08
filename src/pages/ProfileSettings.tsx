@@ -10,6 +10,14 @@ const CHAIN_OPTIONS = [
     { value: 'bsc', label: 'BSC' }
 ];
 
+const formatProfileError = (value: unknown, fallback = 'Profile data could not be loaded right now.') => {
+    const message = value instanceof Error ? value.message : String(value || '');
+    if (/supabase|api|provider|configured|configuration|network|fetch|server|database|endpoint|schema/i.test(message)) {
+        return fallback;
+    }
+    return message || fallback;
+};
+
 export const ProfileSettings: React.FC = () => {
     const { user, profile, profileError, updateProfile, refreshProfile } = useAuth();
     const [displayName, setDisplayName] = useState('');
@@ -35,8 +43,8 @@ export const ProfileSettings: React.FC = () => {
                 preferred_chain: preferredChain
             });
             setStatus('Profile updated.');
-        } catch (err: any) {
-            setError(err?.message || 'Could not update profile.');
+        } catch (err) {
+            setError(formatProfileError(err, 'Profile changes could not be saved. Please try again.'));
         } finally {
             setSaving(false);
         }
@@ -49,7 +57,7 @@ export const ProfileSettings: React.FC = () => {
                     <AlertCircle size={18} className="mt-0.5 shrink-0" />
                     <div>
                         <div className="font-bold text-text-light">Profile storage needs attention</div>
-                        <div className="mt-1 text-primary-yellow">{profileError}</div>
+                        <div className="mt-1 text-primary-yellow">{formatProfileError(profileError)}</div>
                     </div>
                 </div>
             )}
@@ -151,7 +159,7 @@ export const ProfileSettings: React.FC = () => {
                             <h2 className="text-lg font-bold text-text-light">Next Personalization</h2>
                         </div>
                         <div className="space-y-2 text-sm text-text-medium">
-                            <div>Watchlists, saved filters, alerts, tracked wallets, and recent tokens now have a database schema ready for user-owned storage.</div>
+                            <div>Your saved alerts, wallets, filters, and recent tokens are tied to your account.</div>
                         </div>
                     </div>
                 </aside>
@@ -159,4 +167,3 @@ export const ProfileSettings: React.FC = () => {
         </div>
     );
 };
-

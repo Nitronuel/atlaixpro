@@ -9,7 +9,7 @@ export const Heatmap: React.FC = () => {
                 <Activity size={32} />
             </div>
             <h2 className="text-2xl font-bold mb-2 text-text-light">Token Heatmap</h2>
-            <p className="text-text-medium max-w-xs leading-relaxed">This feature is currently under construction and will be available in the next update.</p>
+            <p className="text-text-medium max-w-xs leading-relaxed">Token Heatmap is not available yet.</p>
         </div>
     );
 };

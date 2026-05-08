@@ -23,7 +23,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const requireSupabase = () => {
     if (!authSupabase) {
-        throw new Error('Supabase auth is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+        throw new Error('Sign in is temporarily unavailable. Please try again later.');
     }
     return authSupabase;
 };
@@ -152,7 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         session,
         profile,
         loading,
-        profileError: hasAuthSupabaseConfig ? profileError : 'Supabase auth is not configured.',
+        profileError: hasAuthSupabaseConfig ? profileError : 'Account access is temporarily unavailable.',
         signIn,
         signUp,
         signInWithGoogle,
@@ -170,4 +170,3 @@ export const useAuth = () => {
     if (!context) throw new Error('useAuth must be used inside AuthProvider');
     return context;
 };
-

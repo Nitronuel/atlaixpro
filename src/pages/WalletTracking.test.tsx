@@ -72,7 +72,7 @@ describe('WalletTracking page', () => {
         expect(screen.getByText(/valid EVM or Solana wallet address/i)).toBeInTheDocument();
     });
 
-    it('hides simulated trending wallet cards', () => {
+    it('does not render placeholder trending wallet cards', () => {
         render(
             <MemoryRouter initialEntries={['/wallet']}>
                 <Routes>
@@ -81,7 +81,7 @@ describe('WalletTracking page', () => {
             </MemoryRouter>
         );
 
-        expect(screen.getByText(/temporarily hidden until it is backed by real wallet telemetry/i)).toBeInTheDocument();
+        expect(screen.queryByText(/Trending Wallets/i)).not.toBeInTheDocument();
     });
 
     it('tracks a Solana wallet from search and lands on the Solana profile route', async () => {

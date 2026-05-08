@@ -397,7 +397,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         if (suggestions.length > 0) {
             handleTokenNavigation(suggestions[0]);
         } else {
-            setSearchError("Token not available");
+            setSearchError("No matching token found.");
         }
     };
 
@@ -1061,10 +1061,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                         <div className="flex items-center justify-between gap-3">
                             <h3 className="font-bold text-lg flex items-center gap-2">
                                 Live Alpha Feed
-                                <span className="relative flex h-2.5 w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-green opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary-green"></span>
-                                </span>
+                                <span className="rounded border border-primary-green/20 bg-primary-green/10 px-2 py-0.5 text-xs font-bold text-primary-green">Live</span>
                             </h3>
                             <button
                                 onClick={() => loadData(true)}
@@ -1109,7 +1106,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     {isLoading && marketData.length === 0 ? (
                         <div className="w-full h-[400px] flex items-center justify-center flex-col gap-3">
                             <div className="w-8 h-8 border-2 border-primary-green border-t-transparent rounded-full animate-spin"></div>
-                            <div className="text-sm font-bold text-text-medium">Scanning for Alpha Signals...</div>
+                            <div className="text-sm font-bold text-text-medium">Loading detected tokens...</div>
                         </div>
                     ) : (
                         <table className="data-table">

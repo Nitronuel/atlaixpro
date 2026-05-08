@@ -7,7 +7,7 @@ const AuthLoading = () => (
     <div className="flex min-h-screen items-center justify-center bg-main text-text-light">
         <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-8 py-10">
             <div className="h-10 w-10 rounded-full border-2 border-primary-green/40 border-t-primary-green animate-spin" />
-            <div className="text-sm font-semibold uppercase tracking-[0.22em] text-text-medium">Checking session</div>
+            <div className="text-sm font-semibold text-text-medium">Opening your workspace</div>
         </div>
     </div>
 );
@@ -21,4 +21,3 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
 
     return <>{children}</>;
 };
-

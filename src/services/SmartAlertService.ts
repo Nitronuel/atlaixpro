@@ -37,6 +37,7 @@ export interface SmartAlertRule {
     baseline_observed_at: string | null;
     trigger_count: number;
     last_error: string | null;
+    metadata: SmartAlertRuleMetadata;
     created_at: string;
     updated_at: string;
 }
@@ -66,6 +67,46 @@ export interface SmartAlertRuleInput {
     triggerLabel: string;
     notificationChannels: string[];
     cooldownMinutes: number;
+    metadata?: SmartAlertRuleMetadata;
+}
+
+export interface SmartAlertTokenSnapshot {
+    address: string;
+    pairAddress: string | null;
+    chainId: string;
+    name: string;
+    symbol: string;
+    priceUsd: number | null;
+    change24h: number | null;
+    volume24h: number | null;
+    liquidityUsd: number | null;
+    riskLevel: string | null;
+    imageUrl?: string | null;
+    source?: string;
+}
+
+export interface LinkedAlertConditionMetadata {
+    id: string;
+    alertType: SmartAlertType;
+    condition: SmartAlertCondition;
+    thresholdKind: SmartAlertThresholdKind;
+    threshold: string;
+    label: string;
+    status?: 'pending' | 'met' | 'expired' | 'error';
+    metAt?: string | null;
+    observedValue?: string | null;
+    baselineValue?: number | null;
+    lastError?: string | null;
+}
+
+export interface SmartAlertRuleMetadata {
+    alertMode?: 'single' | 'linked';
+    token?: SmartAlertTokenSnapshot | null;
+    matchLogic?: 'all';
+    timeWindowMinutes?: number | null;
+    status?: 'active' | 'paused' | 'completed' | 'expired';
+    conditions?: LinkedAlertConditionMetadata[];
+    completedAt?: string | null;
 }
 
 const ALERT_RULE_COLUMNS = [
@@ -90,9 +131,15 @@ const ALERT_RULE_COLUMNS = [
     'baseline_observed_at',
     'trigger_count',
     'last_error',
+    'metadata',
     'created_at',
     'updated_at'
 ].join(',');
+
+const LEGACY_ALERT_RULE_COLUMNS = ALERT_RULE_COLUMNS
+    .split(',')
+    .filter((column) => column !== 'metadata')
+    .join(',');
 
 const ALERT_TRIGGER_COLUMNS = [
     'id',
@@ -110,7 +157,7 @@ const ALERT_TRIGGER_COLUMNS = [
 
 const requireSupabase = () => {
     if (!authSupabase) {
-        throw new Error('Supabase is not configured for Smart Alerts.');
+        throw new Error('Smart Alerts are temporarily unavailable.');
     }
     return authSupabase;
 };
@@ -143,6 +190,7 @@ const normalizeRule = (row: any): SmartAlertRule => ({
     baseline_observed_at: row.baseline_observed_at || null,
     trigger_count: Number(row.trigger_count || 0),
     last_error: row.last_error || null,
+    metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
     created_at: row.created_at || new Date().toISOString(),
     updated_at: row.updated_at || new Date().toISOString()
 });
@@ -164,11 +212,19 @@ const normalizeTrigger = (row: any): SmartAlertTrigger => ({
 export const SmartAlertService = {
     listRules: async (userId: string): Promise<SmartAlertRule[]> => {
         const supabase = requireSupabase();
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('alert_rules')
             .select(ALERT_RULE_COLUMNS)
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
+
+        if (error?.code === '42703') {
+            ({ data, error } = await supabase
+                .from('alert_rules')
+                .select(LEGACY_ALERT_RULE_COLUMNS)
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false }));
+        }
 
         if (error) throw error;
         return (data || []).map(normalizeRule);
@@ -181,7 +237,7 @@ export const SmartAlertService = {
         const userId = userData.user?.id;
         if (!userId) throw new Error('You need to be signed in to save Smart Alerts.');
 
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('alert_rules')
             .insert({
                 user_id: userId,
@@ -195,10 +251,36 @@ export const SmartAlertService = {
                 trigger_label: input.triggerLabel,
                 notification_channels: input.notificationChannels.length ? input.notificationChannels : ['in_app'],
                 cooldown_minutes: input.cooldownMinutes || 60,
-                enabled: true
+                enabled: true,
+                metadata: input.metadata || {}
             })
             .select(ALERT_RULE_COLUMNS)
             .single();
+
+        if (error?.code === '42703') {
+            if (input.metadata?.alertMode === 'linked') {
+                throw new Error('Linked Smart Alerts are being updated. Please try again shortly.');
+            }
+
+            ({ data, error } = await supabase
+                .from('alert_rules')
+                .insert({
+                    user_id: userId,
+                    alert_type: input.alertType,
+                    target: input.target || 'Any token',
+                    chain_id: input.chainId || 'solana',
+                    token_address: input.tokenAddress || null,
+                    condition: input.condition,
+                    threshold_kind: input.thresholdKind,
+                    threshold: input.threshold,
+                    trigger_label: input.triggerLabel,
+                    notification_channels: input.notificationChannels.length ? input.notificationChannels : ['in_app'],
+                    cooldown_minutes: input.cooldownMinutes || 60,
+                    enabled: true
+                })
+                .select(LEGACY_ALERT_RULE_COLUMNS)
+                .single());
+        }
 
         if (error) throw error;
         return normalizeRule(data);
@@ -206,12 +288,21 @@ export const SmartAlertService = {
 
     setRuleEnabled: async (ruleId: string, enabled: boolean): Promise<SmartAlertRule> => {
         const supabase = requireSupabase();
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('alert_rules')
             .update({ enabled })
             .eq('id', ruleId)
             .select(ALERT_RULE_COLUMNS)
             .single();
+
+        if (error?.code === '42703') {
+            ({ data, error } = await supabase
+                .from('alert_rules')
+                .update({ enabled })
+                .eq('id', ruleId)
+                .select(LEGACY_ALERT_RULE_COLUMNS)
+                .single());
+        }
 
         if (error) throw error;
         return normalizeRule(data);

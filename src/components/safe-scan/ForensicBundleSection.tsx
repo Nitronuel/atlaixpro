@@ -79,12 +79,16 @@ const formatTokenAmount = (
 const shortenAddress = (value: string) => `${value.slice(0, 4)}...${value.slice(-4)}`;
 
 const formatForensicError = (value: string) => {
+    if (/backend|api key|not configured|alchemy|supabase|database|job id|migration/i.test(value)) {
+        return 'Forensic analysis could not complete right now. Please try again shortly.';
+    }
+
     if (/\b429\b|too many requests|compute units per second/i.test(value)) {
-        return 'Solana forensic providers are rate-limiting this scan right now. Retry in a moment and the reduced-mode safeguards should keep the report from hard-failing.';
+        return 'Solana forensic providers are rate-limiting this scan right now. Retry in a moment and we will use a lighter analysis path if needed.';
     }
 
     if (/\b503\b|unable to complete request at this time|temporarily unavailable/i.test(value)) {
-        return 'The Solana forensic providers were temporarily unavailable during this scan. Retry shortly and the engine will resume the deeper launch-window checks.';
+        return 'The Solana forensic providers were temporarily unavailable during this scan. Retry shortly to continue the deeper launch-window checks.';
     }
 
     return value;
@@ -529,9 +533,9 @@ export const ForensicBundleSection: React.FC<Props> = ({
                         <Clock3 size={20} />
                     </div>
                     <div>
-                        <div className="text-text-light font-bold mb-1">This feature is coming soon</div>
+                        <div className="text-text-light font-bold mb-1">Advanced analysis is not available for this network yet</div>
                         <p className="text-sm text-text-medium leading-relaxed">
-                            Advanced forensic bundle analysis will be added for non-Solana assets in a later release. Current Safe Scan checks still ran normally for <span className="font-mono text-text-light">{contract}</span>.
+                            Current Safe Scan checks still ran normally for <span className="font-mono text-text-light">{contract}</span>.
                         </p>
                     </div>
                 </div>

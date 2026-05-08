@@ -1,9 +1,10 @@
 // Route-level product screen for the Atlaix application.
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Copy, Loader2, ShieldCheck } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { ForensicBundleSection } from '../components/safe-scan/ForensicBundleSection';
 import { SafeScanService, type AlchemyHubChain, type ForensicBundleReport } from '../services/SafeScanService';
-import { ALCHEMY_HUB_CHAINS } from '../services/forensics/alchemy-hub-chains';
+import { ALCHEMY_HUB_CHAINS, getAlchemyHubChain } from '../services/forensics/alchemy-hub-chains';
 import { GoPlusService, type SecurityReport } from '../services/GoPlusService';
 
 const shortenAddress = (value: string) => `${value.slice(0, 4)}...${value.slice(-4)}`;
@@ -25,6 +26,22 @@ const formatPct = (value: number | null | undefined) => {
 const scanSecurityChain = (chain: AlchemyHubChain) => {
     if (chain === 'eth') return 'ethereum';
     return chain;
+};
+
+const normalizeSafeScanChain = (value: string | null | undefined): AlchemyHubChain => {
+    if (!value) return 'solana';
+    const normalized = value === 'ethereum' ? 'eth' : value;
+    return getAlchemyHubChain(normalized).id;
+};
+
+const formatSafeScanError = (value: unknown) => {
+    const message = value instanceof Error ? value.message : String(value || '');
+    if (!message) return 'Safe Scan analysis failed.';
+    if (/valid Solana token address|valid 0x token contract address/i.test(message)) return message;
+    if (/backend|api|provider|rpc|alchemy|moralis|goplus|configured|configuration|server|database|endpoint|job|payload|fetch/i.test(message)) {
+        return 'Safe Scan could not complete right now. Please try again shortly.';
+    }
+    return message;
 };
 
 const statusTone = (safe: boolean | null) => {
@@ -202,12 +219,24 @@ const SafeScanSummary: React.FC<{
 };
 
 export const SafeScan: React.FC = () => {
-    const [contract, setContract] = useState('');
+    const [searchParams] = useSearchParams();
+    const requestedAddress = useMemo(() => searchParams.get('address') || searchParams.get('token') || '', [searchParams]);
+    const requestedChain = useMemo(() => normalizeSafeScanChain(searchParams.get('chain')), [searchParams]);
+    const [contract, setContract] = useState(requestedAddress);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [report, setReport] = useState<ForensicBundleReport | null>(null);
     const [securityReport, setSecurityReport] = useState<SecurityReport | null>(null);
-    const [chain, setChain] = useState<AlchemyHubChain>('solana');
+    const [chain, setChain] = useState<AlchemyHubChain>(requestedChain);
+
+    useEffect(() => {
+        if (!requestedAddress) return;
+        setContract(requestedAddress);
+        setChain(requestedChain);
+        setError(null);
+        setReport(null);
+        setSecurityReport(null);
+    }, [requestedAddress, requestedChain]);
 
     const normalizedContract = contract.trim();
     const isSupported = SafeScanService.isSupported(normalizedContract, chain);
@@ -230,7 +259,7 @@ export const SafeScan: React.FC = () => {
             setReport(nextReport);
             setSecurityReport(nextSecurity);
         } catch (nextError) {
-            setError(nextError instanceof Error ? nextError.message : 'Safe Scan analysis failed.');
+            setError(formatSafeScanError(nextError));
         } finally {
             setLoading(false);
         }

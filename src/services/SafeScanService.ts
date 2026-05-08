@@ -60,7 +60,7 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
         throw new Error(
             typeof payload?.error === 'string'
                 ? payload.error
-                : `Safe Scan backend request failed with status ${response.status}.`
+                : 'Safe Scan could not complete right now. Please try again shortly.'
         );
     }
     return payload;
@@ -102,7 +102,7 @@ export const SafeScanService = {
             .then((payload) => {
                 const report = payload.report as ForensicBundleReport | undefined;
                 if (!report) {
-                    throw new Error('Safe Scan backend did not return a report.');
+                    throw new Error('Safe Scan could not generate a report for this token.');
                 }
                 writeCachedReport(normalizedAddress, selectedChain, report);
                 return report;

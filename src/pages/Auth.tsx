@@ -10,6 +10,16 @@ interface AuthScreenProps {
     initialMode?: AuthMode;
 }
 
+const formatAuthError = (value: unknown, fallback = 'Authentication could not complete. Please try again.') => {
+    const message = value instanceof Error ? value.message : String(value || '');
+    if (!message) return fallback;
+    if (/invalid login|invalid credentials|email.*password|password.*email/i.test(message)) return 'Email or password is incorrect.';
+    if (/already registered|already exists|user already/i.test(message)) return 'An account already exists for this email.';
+    if (/rate limit|too many|over email send rate/i.test(message)) return 'Too many attempts. Please wait a moment and try again.';
+    if (/supabase|api|provider|configured|configuration|network|fetch|server|database|endpoint/i.test(message)) return fallback;
+    return message;
+};
+
 export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' }) => {
     const [mode, setMode] = useState<AuthMode>(initialMode);
     const [email, setEmail] = useState('');
@@ -64,8 +74,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
 
             await signIn(email.trim(), password);
             navigate(from, { replace: true });
-        } catch (err: any) {
-            setError(err?.message || 'Authentication failed.');
+        } catch (err) {
+            setError(formatAuthError(err));
         } finally {
             setSubmitting(false);
         }
@@ -76,13 +86,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
         setError(null);
         try {
             await signInWithGoogle();
-        } catch (err: any) {
-            setError(err?.message || 'Google login could not start.');
+        } catch (err) {
+            setError(formatAuthError(err, 'Google sign-in could not start. Please try again.'));
             setSubmitting(false);
         }
     };
 
-    const title = mode === 'login' ? 'Welcome Back' : mode === 'signup' ? 'Create Account' : 'Reset Password';
+    const title = mode === 'login' ? 'Welcome back' : mode === 'signup' ? 'Create account' : 'Reset password';
     const buttonText = mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create account' : 'Send reset email';
 
     return (
@@ -104,14 +114,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                     className={`flex-1 border-b-2 pb-4 text-sm font-semibold transition-colors ${mode === 'login' ? 'border-primary-green text-text-light' : 'border-transparent text-text-dark hover:text-text-medium'}`}
                     onClick={() => setMode('login')}
                 >
-                    Log In
+                    Sign in
                 </button>
                 <button
                     type="button"
                     className={`flex-1 border-b-2 pb-4 text-sm font-semibold transition-colors ${mode === 'signup' ? 'border-primary-green text-text-light' : 'border-transparent text-text-dark hover:text-text-medium'}`}
                     onClick={() => setMode('signup')}
                 >
-                    Sign Up
+                    Create account
                 </button>
             </div>
 
@@ -205,7 +215,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                                 className="font-semibold text-primary-green-light hover:underline"
                                 onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
                             >
-                                {mode === 'login' ? 'Register' : 'Login here'}
+                                {mode === 'login' ? 'Create account' : 'Sign in instead'}
                             </button>
                         )}
                     </span>

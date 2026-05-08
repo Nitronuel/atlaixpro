@@ -153,6 +153,66 @@ function normalizeAddress(value: string) {
     return value.trim();
 }
 
+function normalizeText(value: string | undefined | null) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function compactMetric(value: string | number | undefined | null) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    const raw = String(value || '').replace(/[$,%+\s]/g, '').toUpperCase();
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return null;
+    const signed = raw.startsWith('-') ? -Math.abs(parsed) : parsed;
+    if (raw.includes('T')) return signed * 1e12;
+    if (raw.includes('B')) return signed * 1e9;
+    if (raw.includes('M')) return signed * 1e6;
+    if (raw.includes('K')) return signed * 1e3;
+    return signed;
+}
+
+function normalizeTokenLookup(coin: any, source = 'market-cache') {
+    return {
+        address: coin.address || coin.pairAddress || '',
+        pairAddress: coin.pairAddress || null,
+        chainId: String(coin.chain || '').toLowerCase(),
+        name: coin.name || coin.ticker || 'Unknown token',
+        symbol: coin.ticker || coin.name || 'TOKEN',
+        priceUsd: compactMetric(coin.price),
+        change24h: compactMetric(coin.h24),
+        volume24h: compactMetric(coin.volume24h),
+        liquidityUsd: compactMetric(coin.liquidity),
+        riskLevel: coin.riskLevel || null,
+        imageUrl: coin.img || null,
+        source
+    };
+}
+
+async function lookupDexscreenerToken(address: string, chain: string) {
+    const providerResponse = await fetchWithTimeout(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(address)}`, {}, 10_000);
+    if (!providerResponse.ok) return null;
+    const payload = await providerResponse.json() as { pairs?: any[] };
+    const pairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+    const selectedPair = chain
+        ? pairs.find((pair) => normalizeText(pair.chainId) === normalizeText(chain)) || pairs[0]
+        : pairs[0];
+    if (!selectedPair) return null;
+    const base = selectedPair.baseToken || {};
+    return {
+        address: base.address || address,
+        pairAddress: selectedPair.pairAddress || null,
+        chainId: selectedPair.chainId || chain || '',
+        name: base.name || base.symbol || 'Unknown token',
+        symbol: base.symbol || base.name || 'TOKEN',
+        priceUsd: compactMetric(selectedPair.priceUsd),
+        change24h: compactMetric(selectedPair.priceChange?.h24),
+        volume24h: compactMetric(selectedPair.volume?.h24),
+        liquidityUsd: compactMetric(selectedPair.liquidity?.usd),
+        riskLevel: null,
+        imageUrl: selectedPair.info?.imageUrl || null,
+        source: 'dexscreener'
+    };
+}
+
 async function readJsonBody(request: import('node:http').IncomingMessage) {
     const chunks: Buffer[] = [];
     for await (const chunk of request) {
@@ -466,6 +526,46 @@ const server = createServer(async (request, response) => {
         const status = await smartAlertRunner.runNow();
         json(response, 200, status);
         return;
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/smart-alerts/token-lookup') {
+        try {
+            const address = normalizeAddress(requestUrl.searchParams.get('address') || '');
+            const chain = normalizeText(requestUrl.searchParams.get('chain') || '');
+
+            if (!address) {
+                json(response, 400, { error: 'Enter a token contract address.' });
+                return;
+            }
+
+            const providerToken = await lookupDexscreenerToken(address, chain);
+            if (providerToken) {
+                json(response, 200, { token: providerToken });
+                return;
+            }
+
+            const marketResponse = await DatabaseService.getMarketData(true, false);
+            const marketCoins = marketResponse.data || [];
+            const cachedMatch = marketCoins.find((coin: any) => {
+                const addressMatches = normalizeText(coin.address) === normalizeText(address) ||
+                    normalizeText(coin.pairAddress) === normalizeText(address);
+                const chainMatches = !chain || normalizeText(coin.chain) === chain;
+                return addressMatches && chainMatches;
+            });
+
+            if (cachedMatch) {
+                json(response, 200, { token: normalizeTokenLookup(cachedMatch) });
+                return;
+            }
+
+            json(response, 404, { error: 'Token was not found in the current market feed or Dexscreener.' });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'Could not look up token.'
+            });
+            return;
+        }
     }
 
     if (method === 'GET' && requestUrl.pathname === '/api/detection/feed') {

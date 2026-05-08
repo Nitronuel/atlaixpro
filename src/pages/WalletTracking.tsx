@@ -351,12 +351,6 @@ export const WalletTracking: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="mt-8">
-                        <h2 className="text-lg font-bold text-text-light mb-4">Trending Wallets</h2>
-                        <div className="bg-card border border-border rounded-xl p-5 text-sm text-text-medium">
-                            Trending wallet discovery is temporarily hidden until it is backed by real wallet telemetry.
-                        </div>
-                    </div>
                 </>
             ) : (
                 <>

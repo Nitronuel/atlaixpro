@@ -566,7 +566,7 @@ export const TokenDetection: React.FC = () => {
                     await registerWatch(
                         resolved,
                         initialWatchTtlMs,
-                        initialWatchTtlMs === ONE_DAY_MS ? 'Webhook watch: 24h high-severity detection token' : 'Webhook watch: 1h token scan'
+                        initialWatchTtlMs === ONE_DAY_MS ? 'Tracking for 24 hours.' : 'Tracking this token for new activity.'
                     );
 
                     const recentEvents = await withTimeout(
@@ -705,7 +705,6 @@ export const TokenDetection: React.FC = () => {
                             <div className="h-1 w-1 rounded-full bg-border"></div>
                             <div className="flex items-center gap-2 px-2 py-0.5 rounded border border-primary-green/20 bg-primary-green/5">
                                 <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-green opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-green"></span>
                                 </span>
                                 <span className="text-[10px] font-bold uppercase tracking-wide text-primary-green">Live Data</span>
@@ -757,13 +756,13 @@ export const TokenDetection: React.FC = () => {
                 <div className="bg-card border border-border rounded-2xl p-6">
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-lg">Token Detection Chart</h3>
-                        <span className="text-xs font-bold uppercase tracking-wide text-text-medium">Preview</span>
+                        <span className="text-xs font-bold uppercase tracking-wide text-text-medium">Market Chart</span>
                     </div>
                     <div className="w-full min-h-[350px] rounded-xl border border-dashed border-border bg-main/40 flex items-center justify-center text-center p-8">
                         <div>
                             <Search size={28} className="mx-auto mb-3 text-text-medium" />
                             <p className="text-text-light font-bold">Chart not available</p>
-                            <p className="text-text-medium text-sm mt-1">Real chart data can be connected here later.</p>
+                            <p className="text-text-medium text-sm mt-1">Chart data is unavailable for this token.</p>
                         </div>
                     </div>
                 </div>
@@ -772,7 +771,7 @@ export const TokenDetection: React.FC = () => {
                     <h3 className="font-bold text-lg mb-6">Token Actions</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
                         <button
-                            onClick={() => token && registerWatch(token, TWO_HOURS_MS, 'Webhook watch: 2h tracked token')}
+                            onClick={() => token && registerWatch(token, TWO_HOURS_MS, 'Tracking for 2 hours.')}
                             className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-primary-green rounded-xl transition-all group text-left"
                         >
                             <Check size={20} className="text-primary-green" />
@@ -843,8 +842,8 @@ export const TokenDetection: React.FC = () => {
                 ) : (
                     <div className="bg-card border border-border rounded-xl p-6 text-text-medium">
                         {activityLoading
-                            ? 'Loading cached impact data and updating recent activity...'
-                            : 'No impactful activity was found in the cached timeline yet. Live webhook-qualified events will appear here when they pass the impact gate.'}
+                            ? 'Loading recent token activity...'
+                            : 'No major activity has been detected yet. New major activity will appear here as it is found.'}
                     </div>
                 )}
             </div>
