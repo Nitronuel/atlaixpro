@@ -6,7 +6,7 @@ import { fetchProvider } from './ProviderGateway';
 
 // API Key from Config
 const MORALIS_API_KEY = APP_CONFIG.moralisKey;
-const MIN_ACTIVITY_USD = 25;
+const MIN_ACTIVITY_USD = 1000;
 
 interface MoralisTransfer {
     transaction_hash: string;

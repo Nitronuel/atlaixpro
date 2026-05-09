@@ -1,5 +1,5 @@
 // Route-level product screen for the Atlaix application.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Activity,
     ArrowLeft,
@@ -24,7 +24,7 @@ import { EnrichedTokenData } from '../types';
 import { SolanaRpcService } from '../services/SolanaRpcService';
 import { formatCompactNumber } from '../utils/format';
 
-const MIN_DISPLAY_ACTIVITY_USD = 25;
+const MIN_DISPLAY_ACTIVITY_USD = 1000;
 
 const shortAddress = (value?: string, head = 6, tail = 5) => {
     if (!value) return 'N/A';
@@ -96,15 +96,48 @@ export const TokenDetails: React.FC = () => {
     const [showAllActivity, setShowAllActivity] = useState(false);
     const [compactChartLoaded, setCompactChartLoaded] = useState(false);
     const [activityRefreshing, setActivityRefreshing] = useState(false);
+    const lastActivityLoadKeyRef = useRef('');
 
     const onBack = () => {
         navigate(-1);
     };
 
+    const loadTokenActivity = useCallback(async (tokenData: EnrichedTokenData) => {
+        const activityKey = [
+            tokenData.chainId,
+            tokenData.baseToken.address,
+            tokenData.pairAddress || '',
+            tokenData.priceUsd || ''
+        ].join(':').toLowerCase();
+
+        setActivityRefreshing(true);
+
+        try {
+            const latestActivity = await ChainActivityService.getTokenActivity(
+                tokenData.baseToken.address,
+                tokenData.chainId,
+                parseFloat(tokenData.priceUsd) || 0,
+                tokenData.pairAddress
+            );
+            setActivityFeed(latestActivity);
+            setVisibleWalletRows(8);
+            setIsRealData(true);
+            lastActivityLoadKeyRef.current = activityKey;
+        } catch (error) {
+            console.error('Failed to load token activity', error);
+        } finally {
+            setActivityRefreshing(false);
+        }
+    }, []);
+
     useEffect(() => {
         const fetchData = async () => {
             if (!address) return;
             setLoading(true);
+            setActivityFeed([]);
+            setVisibleWalletRows(8);
+            setShowAllActivity(false);
+            lastActivityLoadKeyRef.current = '';
 
             try {
                 const data = await DatabaseService.getTokenDetails(address, preferredChain, preferredPairAddress);
@@ -125,13 +158,6 @@ export const TokenDetails: React.FC = () => {
                     let supply = 0;
                     let activeWallets24h = data.activeWallets24h || 0;
                     let topHolders: EnrichedTokenData['topHolders'] = [];
-
-                    const realActivity = await ChainActivityService.getTokenActivity(
-                        mintAddress,
-                        data.chainId,
-                        parseFloat(data.priceUsd) || 0,
-                        data.pairAddress
-                    );
 
                     if (isSolana) {
                         const [h, s] = await Promise.all([
@@ -178,8 +204,6 @@ export const TokenDetails: React.FC = () => {
                     });
 
                     setEnrichedData(prev => prev ? ({ ...prev, holders, totalSupply: supply, activeWallets24h, topHolders }) : null);
-                    setActivityFeed(realActivity);
-                    setIsRealData(true);
                 }
             } catch (e) {
                 console.error('Failed to fetch details', e);
@@ -194,6 +218,20 @@ export const TokenDetails: React.FC = () => {
     useEffect(() => {
         setCompactChartLoaded(false);
     }, [enrichedData?.pairAddress]);
+
+    useEffect(() => {
+        if (!enrichedData?.baseToken.address) return;
+
+        const activityKey = [
+            enrichedData.chainId,
+            enrichedData.baseToken.address,
+            enrichedData.pairAddress || '',
+            enrichedData.priceUsd || ''
+        ].join(':').toLowerCase();
+
+        if (lastActivityLoadKeyRef.current === activityKey) return;
+        void loadTokenActivity(enrichedData);
+    }, [enrichedData?.baseToken.address, enrichedData?.chainId, enrichedData?.pairAddress, enrichedData?.priceUsd, loadTokenActivity]);
 
     const tokenSymbol = enrichedData?.baseToken.symbol || 'TOKEN';
     const imageUrl = enrichedData?.info?.imageUrl || `https://ui-avatars.com/api/?name=${tokenSymbol}&background=042f2e&color=fff`;
@@ -289,23 +327,8 @@ export const TokenDetails: React.FC = () => {
 
     const refreshActivity = async () => {
         if (!enrichedData?.baseToken.address) return;
-        setActivityRefreshing(true);
-
-        try {
-            const latestActivity = await ChainActivityService.getTokenActivity(
-                enrichedData.baseToken.address,
-                enrichedData.chainId,
-                priceNumber,
-                enrichedData.pairAddress
-            );
-            setActivityFeed(latestActivity);
-            setVisibleWalletRows(8);
-            setIsRealData(true);
-        } catch (error) {
-            console.error('Failed to refresh token activity', error);
-        } finally {
-            setActivityRefreshing(false);
-        }
+        lastActivityLoadKeyRef.current = '';
+        await loadTokenActivity(enrichedData);
     };
 
     if (loading && !enrichedData) {
@@ -459,7 +482,7 @@ export const TokenDetails: React.FC = () => {
                     <div className="relative flex flex-col gap-1">
                         {visibleOnChainEvents.length === 0 ? (
                             <div className="rounded-lg border border-border bg-main/50 p-6 text-center text-sm text-text-medium">
-                                Activity will appear as it is detected.
+                                {activityRefreshing ? 'Loading on-chain activity...' : 'Activity will appear as it is detected.'}
                             </div>
                         ) : visibleOnChainEvents.map((item, index) => {
                             const accent = getActivityAccent(item);
@@ -529,7 +552,7 @@ export const TokenDetails: React.FC = () => {
                                 {walletEvents.length === 0 ? (
                                     <tr>
                                         <td colSpan={5} className="py-8 text-center text-sm text-text-medium">
-                                            Wallet activity will appear as it is detected.
+                                            {activityRefreshing ? 'Loading wallet activity...' : 'Wallet activity will appear as it is detected.'}
                                         </td>
                                     </tr>
                                 ) : walletEvents.slice(0, visibleWalletRows).map((row, index) => (

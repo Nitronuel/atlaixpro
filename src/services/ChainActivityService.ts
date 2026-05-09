@@ -1,6 +1,6 @@
 // Intelligence service module for Atlaix data workflows.
 
-import { SolanaProvider } from './SolanaProvider';
+import { SolanaProvider, type ParsedAddressTransaction } from './SolanaProvider';
 import { fetchAlchemyRpc } from './ProviderGateway';
 import { MoralisService } from './MoralisService';
 
@@ -31,7 +31,8 @@ const mapChainToAlchemyNetwork = (chain: string) => {
 };
 
 const ALCHEMY_SUPPORTED_CHAINS = new Set(['ethereum', 'base', 'bsc', 'bnb', 'arbitrum', 'polygon', 'optimism']);
-const MIN_ACTIVITY_USD = 25;
+const MIN_ACTIVITY_USD = 1000;
+const SOLANA_ACTIVITY_PAGES = 4;
 
 const getTimeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -191,12 +192,29 @@ export const ChainActivityService = {
     getSolanaActivity: async (mint: string, priceUsd: number, pairAddress?: string): Promise<RealActivity[]> => {
         try {
             const sources = [mint, ...(pairAddress ? [pairAddress] : [])];
-            const settledTransactions = await Promise.allSettled(
-                sources.map((address) => SolanaProvider.getParsedAddressTransactions(address))
-            );
-            const transactions = settledTransactions.flatMap((result) =>
-                result.status === 'fulfilled' ? result.value : []
-            );
+            const transactionsBySignature = new Map<string, ParsedAddressTransaction>();
+
+            await Promise.allSettled(sources.map(async (address) => {
+                let beforeSignature: string | undefined;
+
+                for (let page = 0; page < SOLANA_ACTIVITY_PAGES; page += 1) {
+                    const pageTransactions = await SolanaProvider.getParsedAddressTransactions(address, beforeSignature, 100);
+                    if (!pageTransactions.length) break;
+
+                    pageTransactions.forEach((transaction) => {
+                        if (transaction.signature) {
+                            transactionsBySignature.set(transaction.signature, transaction);
+                        }
+                    });
+
+                    beforeSignature = pageTransactions[pageTransactions.length - 1]?.signature;
+                    if (!beforeSignature) break;
+                }
+            }));
+
+            const transactions = [...transactionsBySignature.values()]
+                .sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0));
+
             if (!Array.isArray(transactions)) {
                 return MoralisService.getTokenActivity(mint, 'solana', '', priceUsd);
             }
