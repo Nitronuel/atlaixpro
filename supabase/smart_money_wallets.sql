@@ -10,26 +10,44 @@ create table if not exists public.smart_money_wallets (
     last_pnl text,
     smart_money_score integer not null default 0,
     qualification jsonb,
-    source text not null default 'wallet-tracking',
+    source text not null default 'wallet-tracking-global',
+    promotion_scope text not null default 'global',
+    last_verified_at timestamptz,
     created_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.smart_money_wallets
+    add column if not exists promotion_scope text not null default 'global';
+
+alter table public.smart_money_wallets
+    add column if not exists last_verified_at timestamptz;
+
+alter table public.smart_money_wallets
+    alter column source set default 'wallet-tracking-global';
+
+update public.smart_money_wallets
+set promotion_scope = 'global'
+where promotion_scope is null or promotion_scope = '';
 
 create index if not exists smart_money_wallets_score_idx
     on public.smart_money_wallets (smart_money_score desc, updated_at desc);
 
 alter table public.smart_money_wallets enable row level security;
 
+drop policy if exists "Public can read smart money wallets" on public.smart_money_wallets;
 create policy "Public can read smart money wallets"
     on public.smart_money_wallets
     for select
     using (true);
 
+drop policy if exists "Public can insert smart money wallets" on public.smart_money_wallets;
 create policy "Public can insert smart money wallets"
     on public.smart_money_wallets
     for insert
     with check (true);
 
+drop policy if exists "Public can update smart money wallets" on public.smart_money_wallets;
 create policy "Public can update smart money wallets"
     on public.smart_money_wallets
     for update

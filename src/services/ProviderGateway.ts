@@ -39,7 +39,7 @@ function apiUrl(path: string) {
 }
 
 export function getBackendAlchemyKey() {
-    return readProcessEnv('ALCHEMY_API_KEY');
+    return readProcessEnv('ALCHEMY_API_KEY', 'VITE_ALCHEMY_KEY', 'VITE_ALCHEMY_API_KEY');
 }
 
 export async function fetchProvider(provider: ProviderName, url: string, init: ProviderFetchInit = {}) {

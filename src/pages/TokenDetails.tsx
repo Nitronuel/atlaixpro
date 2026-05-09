@@ -13,7 +13,6 @@ import {
     Scan,
     Shield,
     Users,
-    Wallet,
     X,
     Zap
 } from 'lucide-react';
@@ -25,7 +24,7 @@ import { EnrichedTokenData } from '../types';
 import { SolanaRpcService } from '../services/SolanaRpcService';
 import { formatCompactNumber } from '../utils/format';
 
-const MIN_DISPLAY_ACTIVITY_USD = 1000;
+const MIN_DISPLAY_ACTIVITY_USD = 25;
 
 const shortAddress = (value?: string, head = 6, tail = 5) => {
     if (!value) return 'N/A';
@@ -94,6 +93,7 @@ export const TokenDetails: React.FC = () => {
     const [copied, setCopied] = useState(false);
     const [chartExpanded, setChartExpanded] = useState(false);
     const [visibleWalletRows, setVisibleWalletRows] = useState(8);
+    const [showAllActivity, setShowAllActivity] = useState(false);
     const [compactChartLoaded, setCompactChartLoaded] = useState(false);
     const [activityRefreshing, setActivityRefreshing] = useState(false);
 
@@ -211,7 +211,7 @@ export const TokenDetails: React.FC = () => {
     const netVolume = buyVolume - sellVolume;
     const displayedActivity = activityFeed
         .filter(item => parseActivityUsd(item.usd) >= MIN_DISPLAY_ACTIVITY_USD);
-    const visibleOnChainEvents = displayedActivity.slice(0, 7);
+    const visibleOnChainEvents = showAllActivity ? displayedActivity : displayedActivity.slice(0, 7);
     const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
     const tokenAddress = enrichedData?.baseToken.address || address || '';
     const tokenChain = enrichedData?.chainId || preferredChain || 'solana';
@@ -231,15 +231,6 @@ export const TokenDetails: React.FC = () => {
             title: 'Detection',
             subtitle: 'AI pattern scan',
             path: `/detection/token/${encodeURIComponent(tokenAddress)}?${new URLSearchParams({
-                chain: tokenChain,
-                ...(tokenPair ? { pair: tokenPair } : {})
-            }).toString()}`
-        },
-        {
-            icon: Wallet,
-            title: 'Tracking',
-            subtitle: 'Wallet tracking',
-            path: `/token-smart-money/${encodeURIComponent(tokenAddress)}?${new URLSearchParams({
                 chain: tokenChain,
                 ...(tokenPair ? { pair: tokenPair } : {})
             }).toString()}`
@@ -460,9 +451,9 @@ export const TokenDetails: React.FC = () => {
                             >
                                 <RefreshCw size={14} className={activityRefreshing ? 'animate-spin' : ''} />
                             </button>
-                            <button className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
-                                All Events <ChevronDown size={14} />
-                            </button>
+                            <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
+                                All Events
+                            </span>
                         </div>
                     </div>
                     <div className="relative flex flex-col gap-1">
@@ -493,9 +484,14 @@ export const TokenDetails: React.FC = () => {
                             );
                         })}
                     </div>
-                    <button className="mt-4 w-full rounded-lg border border-border bg-main/60 py-2.5 text-sm font-bold text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green">
-                        View All Activity
-                    </button>
+                    {displayedActivity.length > 7 && (
+                        <button
+                            onClick={() => setShowAllActivity((current) => !current)}
+                            className="mt-4 w-full rounded-lg border border-border bg-main/60 py-2.5 text-sm font-bold text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green"
+                        >
+                            {showAllActivity ? 'Show Less Activity' : 'View All Activity'}
+                        </button>
+                    )}
                 </div>
 
                 <div className="rounded-lg border border-border bg-card p-5">
@@ -510,12 +506,12 @@ export const TokenDetails: React.FC = () => {
                             >
                                 <RefreshCw size={14} className={activityRefreshing ? 'animate-spin' : ''} />
                             </button>
-                            <button className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
-                                All Actions <ChevronDown size={14} />
-                            </button>
-                            <button className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
-                                24H <ChevronDown size={14} />
-                            </button>
+                            <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
+                                All Actions
+                            </span>
+                            <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
+                                24H
+                            </span>
                         </div>
                     </div>
                     <div className="overflow-x-auto">
@@ -547,7 +543,10 @@ export const TokenDetails: React.FC = () => {
                                         <td className="py-3 text-xs text-text-medium">{row.time}</td>
                                         <td className="py-3 font-mono text-xs text-primary-blue">{shortAddress(row.wallet)}</td>
                                         <td className="py-3 text-right">
-                                            <button className="rounded-md border border-border px-3 py-1 text-xs font-bold text-text-light transition-colors hover:border-primary-green/40 hover:text-primary-green">
+                                            <button
+                                                onClick={() => navigate(`/wallet/${encodeURIComponent(row.wallet)}?chain=${encodeURIComponent(tokenChain)}`)}
+                                                className="rounded-md border border-border px-3 py-1 text-xs font-bold text-text-light transition-colors hover:border-primary-green/40 hover:text-primary-green"
+                                            >
                                                 View
                                             </button>
                                         </td>

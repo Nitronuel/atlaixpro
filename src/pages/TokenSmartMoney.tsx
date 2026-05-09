@@ -178,6 +178,12 @@ const InteractiveSmartMoneyChart = () => {
 export const TokenSmartMoney: React.FC = () => {
     const { address } = useParams();
     const navigate = useNavigate();
+    const tokenAddress = address || '';
+    const smartAlertUrl = `/smart-alerts?${new URLSearchParams({
+        ...(tokenAddress ? { address: tokenAddress } : {}),
+        chain: 'solana'
+    }).toString()}`;
+    const isNavigableWallet = (value: string) => Boolean(value && !value.includes('...'));
 
     return (
         <div className="flex flex-col gap-6 pb-12 animate-fade-in w-full max-w-[1600px] mx-auto p-4 sm:p-6">
@@ -251,7 +257,12 @@ export const TokenSmartMoney: React.FC = () => {
                                         <td className="px-6 py-4 text-right text-[#8F96A3] font-mono">{h.entry}</td>
                                         <td className="px-6 py-4 text-right text-[#EAECEF] font-mono text-sm">{h.time}</td>
                                         <td className="px-6 py-4 text-right">
-                                            <button className="text-xs border border-[#2A2E33] text-[#8F96A3] hover:text-[#EAECEF] hover:border-[#8F96A3] px-3 py-1.5 rounded transition-all">
+                                            <button
+                                                onClick={() => isNavigableWallet(h.address) && navigate(`/wallet/${encodeURIComponent(h.address)}`)}
+                                                disabled={!isNavigableWallet(h.address)}
+                                                title={isNavigableWallet(h.address) ? 'Open this wallet in Wallet Tracker' : 'Wallet details are not available yet'}
+                                                className="text-xs border border-[#2A2E33] text-[#8F96A3] hover:text-[#EAECEF] hover:border-[#8F96A3] px-3 py-1.5 rounded transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
                                                 View Wallet
                                             </button>
                                         </td>
@@ -266,15 +277,15 @@ export const TokenSmartMoney: React.FC = () => {
                 <div className="xl:col-span-3 bg-[#111315] border border-[#2A2E33] rounded-xl p-6 flex flex-col gap-4 h-fit">
                     <h2 className="font-bold text-[#EAECEF] mb-2">Smart Money Alerts</h2>
 
-                    <button className="w-full bg-[#1C1F22] hover:bg-[#2A2E33] border border-[#2A2E33] text-[#EAECEF] py-3 rounded-lg transition-colors text-sm text-center">
+                    <button onClick={() => navigate(smartAlertUrl)} className="w-full bg-[#1C1F22] hover:bg-[#2A2E33] border border-[#2A2E33] text-[#EAECEF] py-3 rounded-lg transition-colors text-sm text-center">
                         Alert me when smart money buys this token
                     </button>
-                    <button className="w-full bg-[#1C1F22] hover:bg-[#2A2E33] border border-[#2A2E33] text-[#EAECEF] py-3 rounded-lg transition-colors text-sm text-center">
-                        Alert me when $ wallets enter at once
+                    <button onClick={() => navigate(smartAlertUrl)} className="w-full bg-[#1C1F22] hover:bg-[#2A2E33] border border-[#2A2E33] text-[#EAECEF] py-3 rounded-lg transition-colors text-sm text-center">
+                        Alert me when multiple wallets enter at once
                     </button>
 
                     {/* Featured Alert Button */}
-                    <button className="w-full bg-gradient-to-r from-gray-800 to-gray-900 border border-[#2A2E33] text-[#EAECEF] py-4 rounded-lg transition-colors text-sm text-center">
+                    <button onClick={() => navigate(smartAlertUrl)} className="w-full bg-gradient-to-r from-gray-800 to-gray-900 border border-[#2A2E33] text-[#EAECEF] py-4 rounded-lg transition-colors text-sm text-center">
                         Alert me when inflow spikes
                     </button>
                 </div>

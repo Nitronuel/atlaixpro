@@ -1,5 +1,5 @@
 // Intelligence service module for Atlaix data workflows.
-import { AlphaGauntletEvent, MarketCoin, SavedWallet } from '../types';
+import { AlphaGauntletEvent, MarketCoin, SavedWallet, WalletCategory } from '../types';
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from '../config';
 import { filterAlphaTokens, isExcludedAlphaToken } from '../utils/tokenFilters';
@@ -58,19 +58,21 @@ const DEXSCREENER_PAIRS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/pairs`;
 const DEXSCREENER_TOKENS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/tokens`;
 const SMART_MONEY_TABLE = 'smart_money_wallets';
 const DETECTION_EVENTS_TABLE = 'detection_engine_events';
+const GLOBAL_SMART_MONEY_SOURCE = 'wallet-tracking-global';
 const apiUrl = (path: string) => APP_CONFIG.apiBaseUrl
     ? `${APP_CONFIG.apiBaseUrl.replace(/\/$/, '')}${path}`
     : path;
 
 const MIN_FEED_VOLUME_24H_USD = 100000;
+const MIN_FEED_LIQUIDITY_USD = 100000;
 
 // --- REQUIREMENTS ---
 // Broaden discovery intake, then rank for quality before surfacing to the feed.
 const REQUIREMENTS = {
-    DISCOVERY_MIN_LIQUIDITY_USD: 50000,
+    DISCOVERY_MIN_LIQUIDITY_USD: MIN_FEED_LIQUIDITY_USD,
     DISCOVERY_MIN_VOLUME_24H: MIN_FEED_VOLUME_24H_USD,
     DISCOVERY_MIN_TXNS_24H: 25,
-    RETENTION_MIN_LIQUIDITY_USD: 40000,
+    RETENTION_MIN_LIQUIDITY_USD: MIN_FEED_LIQUIDITY_USD,
     RETENTION_MIN_VOLUME_24H: MIN_FEED_VOLUME_24H_USD,
     FEED_MIN_SCORE: 32,
     TARGET_LIST_SIZE: 1000
@@ -281,6 +283,9 @@ const mapSmartMoneyRowToWallet = (row: any): SavedWallet => ({
     autoPromotedToSmartMoney: true
 });
 
+const isGlobalSmartMoneyCandidate = (wallet: SavedWallet) =>
+    Boolean(wallet.addr?.trim() && wallet.qualification?.qualified && wallet.qualification.score >= 65);
+
 const getChainId = (chainId: string) => {
     if (chainId === 'solana') return 'solana';
     if (chainId === 'ethereum') return 'ethereum';
@@ -335,6 +340,31 @@ const purgeExcludedSupabaseRows = async (rows: any[]) => {
         if (error) {
             if (/row-level security|permission|not allowed|forbidden/i.test(error.message)) return;
             warnSupabaseOnce(`Supabase Excluded Token Purge Warning: ${error.message}`);
+            if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
+                supabaseAvailable = false;
+            }
+            return;
+        }
+    }
+};
+
+const purgeSupabaseTokenKeys = async (keys: string[], label = 'Ineligible Token Purge') => {
+    if (!keys.length || !supabase || !supabaseAvailable) return;
+
+    const addresses = [...new Set(keys
+        .map((key) => key.split(':')[1])
+        .filter(Boolean))];
+
+    for (let i = 0; i < addresses.length; i += 50) {
+        const chunk = addresses.slice(i, i + 50);
+        const { error } = await supabase
+            .from('discovered_tokens')
+            .delete()
+            .in('address', chunk);
+
+        if (error) {
+            if (/row-level security|permission|not allowed|forbidden/i.test(error.message)) return;
+            warnSupabaseOnce(`Supabase ${label} Warning: ${error.message}`);
             if (/Failed to fetch|fetch failed|network/i.test(error.message)) {
                 supabaseAvailable = false;
             }
@@ -848,6 +878,7 @@ export const DatabaseService = {
             const allFetchedPairs = mergeFetchedPairs([...newPairs, ...updatedPairs], existingAddressKeys);
             const tokenMap = new Map<string, MarketCoin>();
             const pairScores = new Map<string, number>();
+            const refreshedIneligibleKeys = new Set<string>();
 
             // Fill map with existing DB data first
             currentList.forEach(t => {
@@ -865,7 +896,15 @@ export const DatabaseService = {
 
                 if (!isExisting && !meetsDiscoveryThresholds(p)) continue;
 
-                tokenMap.set(addressKey, DatabaseService.transformPair(p));
+                const transformed = DatabaseService.transformPair(p);
+                if (isExisting && !shouldRetainCoin(transformed)) {
+                    tokenMap.delete(addressKey);
+                    pairScores.delete(addressKey);
+                    refreshedIneligibleKeys.add(addressKey);
+                    continue;
+                }
+
+                tokenMap.set(addressKey, transformed);
                 pairScores.set(addressKey, candidateScore);
             }
 
@@ -895,6 +934,7 @@ export const DatabaseService = {
             // Persist accepted feed tokens before returning so reloads hydrate the same set.
             if (newPairs.length > 0 || updatedPairs.length > 0) {
                 await DatabaseService.syncToSupabase(finalData);
+                await purgeSupabaseTokenKeys([...refreshedIneligibleKeys], 'Below-Liquidity');
             }
 
             setCachedMarketData(finalData);
@@ -1289,24 +1329,37 @@ export const DatabaseService = {
     upsertSmartMoneyWallet: async (wallet: SavedWallet) => {
         try {
             if (!supabase || !supabaseAvailable || !smartMoneyWalletTableAvailable) return;
-            if (!wallet.qualification?.qualified) return;
+            if (!isGlobalSmartMoneyCandidate(wallet)) return;
+
+            const categories = new Set<WalletCategory>(wallet.categories?.length ? wallet.categories : []);
+            categories.add('Smart Money');
 
             const payload = {
                 wallet_address: wallet.addr,
                 name: wallet.name,
-                categories: wallet.categories?.length ? wallet.categories : ['Smart Money'],
+                categories: [...categories],
                 last_balance: wallet.lastBalance || null,
                 last_win_rate: wallet.lastWinRate || null,
                 last_pnl: wallet.lastPnl || null,
                 qualification: wallet.qualification,
                 smart_money_score: wallet.qualification.score,
-                source: 'wallet-tracking',
+                source: GLOBAL_SMART_MONEY_SOURCE,
+                promotion_scope: 'global',
+                last_verified_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             };
 
-            const { error } = await supabase
+            let { error } = await supabase
                 .from(SMART_MONEY_TABLE)
                 .upsert(payload, { onConflict: 'wallet_address' });
+
+            if (error && /promotion_scope|last_verified_at|schema cache|column/i.test(error.message)) {
+                const { promotion_scope, last_verified_at, ...legacyPayload } = payload;
+                const retry = await supabase
+                    .from(SMART_MONEY_TABLE)
+                    .upsert(legacyPayload, { onConflict: 'wallet_address' });
+                error = retry.error;
+            }
 
             if (error) {
                 warnSmartMoneyTableOnce(`Supabase Smart Money Sync Warning: ${error.message}`);

@@ -1,6 +1,7 @@
 // Reusable interface component for Atlaix product workflows.
 import React, { useState } from 'react';
-import { Copy, Globe, ExternalLink, Scan, Zap, Wallet, Bell, Radar } from 'lucide-react';
+import { Copy, Globe, ExternalLink, Scan, Bell, Radar } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { EnrichedTokenData } from '../../types';
 import { formatCompactNumber } from '../../utils/format';
 
@@ -44,6 +45,7 @@ const SocialIcon = ({ type }: { type: string }) => {
 };
 
 export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, className }) => {
+    const navigate = useNavigate();
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -74,6 +76,34 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
     const liq = data ? `$${(data.liquidity?.usd || 0).toLocaleString()}` : 'N/A';
     const vol = data ? `$${(data.volume?.h24 || 0).toLocaleString()}` : 'N/A';
     const imageUrl = data?.info?.imageUrl || `https://ui-avatars.com/api/?name=${data.baseToken.symbol}&background=random`;
+    const tokenAddress = data.baseToken.address;
+    const tokenChain = data.chainId || 'solana';
+    const tokenPair = data.pairAddress || '';
+    const safeScanChain = tokenChain === 'ethereum' ? 'eth' : tokenChain;
+    const tokenParams = {
+        chain: tokenChain,
+        ...(tokenPair ? { pair: tokenPair } : {})
+    };
+    const quickActions = [
+        {
+            icon: Scan,
+            label: 'Risk Scan',
+            iconClass: 'group-hover:text-primary-green',
+            path: `/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: safeScanChain }).toString()}`
+        },
+        {
+            icon: Radar,
+            label: 'Detection',
+            iconClass: 'group-hover:text-primary-yellow',
+            path: `/detection/token/${encodeURIComponent(tokenAddress)}?${new URLSearchParams(tokenParams).toString()}`
+        },
+        {
+            icon: Bell,
+            label: 'Alerts',
+            iconClass: 'group-hover:text-primary-red',
+            path: `/smart-alerts?${new URLSearchParams({ address: tokenAddress, chain: tokenChain }).toString()}`
+        }
+    ];
 
     return (
         <div className={`contents lg:flex lg:flex-col gap-4 h-full ${className || ''}`}>
@@ -207,22 +237,16 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
             <div className="bg-card border border-border rounded-xl p-5 flex flex-col shrink-0 order-5 lg:order-none">
                 <div className="text-[10px] font-bold text-text-medium uppercase tracking-wider mb-3">Quick Actions</div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-3">
-                    <button className="aspect-square bg-card-hover hover:bg-border border border-border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-colors group">
-                        <Scan size={24} className="text-text-medium group-hover:text-primary-green transition-colors" />
-                        <span className="text-[10px] font-bold text-text-light">Risk Scan</span>
-                    </button>
-                    <button className="aspect-square bg-card-hover hover:bg-border border border-border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-colors group">
-                        <Radar size={24} className="text-text-medium group-hover:text-primary-yellow transition-colors" />
-                        <span className="text-[10px] font-bold text-text-light">Detection</span>
-                    </button>
-                    <button className="aspect-square bg-card-hover hover:bg-border border border-border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-colors group">
-                        <Wallet size={24} className="text-text-medium group-hover:text-primary-blue transition-colors" />
-                        <span className="text-[10px] font-bold text-text-light">Tracking</span>
-                    </button>
-                    <button className="aspect-square bg-card-hover hover:bg-border border border-border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-colors group">
-                        <Bell size={24} className="text-text-medium group-hover:text-primary-red transition-colors" />
-                        <span className="text-[10px] font-bold text-text-light">Alerts</span>
-                    </button>
+                    {quickActions.map((action) => (
+                        <button
+                            key={action.label}
+                            onClick={() => navigate(action.path)}
+                            className="aspect-square bg-card-hover hover:bg-border border border-border rounded-xl p-3 flex flex-col items-center justify-center gap-2 transition-colors group"
+                        >
+                            <action.icon size={24} className={`text-text-medium ${action.iconClass} transition-colors`} />
+                            <span className="text-[10px] font-bold text-text-light">{action.label}</span>
+                        </button>
+                    ))}
                 </div>
 
                 <a

@@ -20,13 +20,16 @@ interface SmartTokenAggregate {
     amount: string;
     count: number;
     image: string;
+    chain?: string;
 }
 
 interface SmartWalletEvent {
     id: string;
     type: 'buy' | 'sell';
     wallet: string;
+    walletAddress: string;
     token: string;
+    tokenAddress: string;
     amount: string;
     time: string;
 }
@@ -56,6 +59,48 @@ const getEventAgeSeconds = (timeLabel: string) => {
     return value * 86400;
 };
 
+const CHAIN_FILTERS = [
+    { id: 'all', label: 'All Chains' },
+    { id: 'solana', label: 'Solana' },
+    { id: 'ethereum', label: 'Ethereum' },
+    { id: 'base', label: 'Base' }
+];
+
+export const mergeSmartMoneyWallets = (sharedWallets: SavedWallet[], localWallets: SavedWallet[]) => {
+    const byAddress = new Map<string, SavedWallet>();
+
+    [...sharedWallets, ...localWallets].forEach((wallet) => {
+        const key = wallet.addr.toLowerCase();
+        const existing = byAddress.get(key);
+        if (!existing) {
+            byAddress.set(key, wallet);
+            return;
+        }
+
+        const existingScore = existing.qualification?.score || 0;
+        const incomingScore = wallet.qualification?.score || 0;
+        const bestQualification = incomingScore > existingScore ? wallet.qualification : existing.qualification;
+        const categories = Array.from(new Set([...(existing.categories || []), ...(wallet.categories || [])]));
+
+        byAddress.set(key, {
+            ...existing,
+            ...wallet,
+            name: existing.name || wallet.name,
+            categories,
+            lastBalance: wallet.lastBalance || existing.lastBalance,
+            lastWinRate: wallet.lastWinRate || existing.lastWinRate,
+            lastPnl: wallet.lastPnl || existing.lastPnl,
+            qualification: bestQualification,
+            timestamp: Math.min(existing.timestamp || Date.now(), wallet.timestamp || Date.now()),
+            autoPromotedToSmartMoney: existing.autoPromotedToSmartMoney || wallet.autoPromotedToSmartMoney
+        });
+    });
+
+    return Array.from(byAddress.values())
+        .filter((wallet) => wallet.qualification?.qualified || wallet.categories.includes('Smart Money'))
+        .sort((a, b) => (b.qualification?.score || 0) - (a.qualification?.score || 0));
+};
+
 export const SmartMoney: React.FC = () => {
     const navigate = useNavigate();
     const [timeRange, setTimeRange] = useState('24h');
@@ -69,8 +114,11 @@ export const SmartMoney: React.FC = () => {
     useEffect(() => {
         const loadWallets = async () => {
             setLoadingWallets(true);
-            const sharedWallets = await DatabaseService.fetchSmartMoneyWallets();
-            const nextWallets = sharedWallets.length ? sharedWallets : SavedWalletService.getSmartMoneyWallets();
+            const [sharedWallets, localWallets] = await Promise.all([
+                DatabaseService.fetchSmartMoneyWallets(),
+                Promise.resolve(SavedWalletService.getSmartMoneyWallets())
+            ]);
+            const nextWallets = mergeSmartMoneyWallets(sharedWallets, localWallets);
             setSmartWallets(nextWallets);
             setLoadingWallets(false);
         };
@@ -120,7 +168,7 @@ export const SmartMoney: React.FC = () => {
 
             validPortfolios.forEach(({ wallet, portfolio }) => {
                 portfolio.assets
-                    .filter((asset) => asset.rawValue > 25)
+                    .filter((asset) => asset.rawValue > 25 && (chain === 'all' || (asset.chain || '').toLowerCase() === chain))
                     .slice(0, 8)
                     .forEach((asset) => {
                         const key = `${(asset.chain || 'unknown').toLowerCase()}:${asset.address.toLowerCase()}`;
@@ -157,7 +205,8 @@ export const SmartMoney: React.FC = () => {
                     name: token.name,
                     amount: formatCompactNumber(token.totalUsd, '$', 1),
                     count: token.walletSet.size,
-                    image: token.image
+                    image: token.image,
+                    chain: token.chain
                 })));
 
             const activityResults = await Promise.all(tokenCandidates.map(async (token) => {
@@ -192,7 +241,9 @@ export const SmartMoney: React.FC = () => {
                         id: `${token.address}-${event.hash}-${index}`,
                         type: event.type === 'Buy' ? 'buy' : 'sell',
                         wallet: shortenWallet(event.wallet),
+                        walletAddress: event.wallet,
                         token: token.ticker,
+                        tokenAddress: token.address,
                         amount: event.usd,
                         time: event.time
                     }))
@@ -207,6 +258,7 @@ export const SmartMoney: React.FC = () => {
                 totalUsd: number;
                 walletSet: Set<string>;
                 image: string;
+                chain: string;
             }>();
 
             activityResults.forEach(({ token, smartEvents }) => {
@@ -220,7 +272,8 @@ export const SmartMoney: React.FC = () => {
                     name: token.name,
                     totalUsd,
                     walletSet: sellWallets,
-                    image: token.image
+                    image: token.image,
+                    chain: token.chain
                 });
             });
 
@@ -228,12 +281,13 @@ export const SmartMoney: React.FC = () => {
                 .sort((a, b) => b.totalUsd - a.totalUsd)
                 .slice(0, 4)
                 .map((token) => ({
-                    id: token.ticker,
+                    id: token.address,
                     ticker: token.ticker,
                     name: token.name,
                     amount: formatCompactNumber(token.totalUsd, '$', 1),
                     count: token.walletSet.size,
-                    image: token.image
+                    image: token.image,
+                    chain: token.chain
                 }));
 
             setTopOutflows(resolvedOutflows);
@@ -250,9 +304,15 @@ export const SmartMoney: React.FC = () => {
                 <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto no-scrollbar">
                     {/* Chain Selector */}
                     <div className="relative group shrink-0">
-                        <button className="flex items-center gap-2 bg-main hover:bg-card-hover border border-border px-4 py-2 rounded-lg text-sm text-text-light font-medium transition-colors">
+                        <button
+                            onClick={() => {
+                                const currentIndex = CHAIN_FILTERS.findIndex((item) => item.id === chain);
+                                setChain(CHAIN_FILTERS[(currentIndex + 1) % CHAIN_FILTERS.length].id);
+                            }}
+                            className="flex items-center gap-2 bg-main hover:bg-card-hover border border-border px-4 py-2 rounded-lg text-sm text-text-light font-medium transition-colors"
+                        >
                             <Layers size={16} className="text-primary-green" />
-                            All Chains
+                            {CHAIN_FILTERS.find((item) => item.id === chain)?.label || 'All Chains'}
                             <ChevronDown size={14} className="text-text-medium" />
                         </button>
                     </div>
@@ -286,9 +346,15 @@ export const SmartMoney: React.FC = () => {
                     </div>
 
                     {/* Filter Button */}
-                    <button className="flex items-center gap-2 bg-main hover:bg-card-hover border border-border px-3 py-2 rounded-lg text-text-light text-sm font-medium transition-colors shrink-0">
+                    <button
+                        onClick={() => {
+                            setChain('all');
+                            setTimeRange('24h');
+                        }}
+                        className="flex items-center gap-2 bg-main hover:bg-card-hover border border-border px-3 py-2 rounded-lg text-text-light text-sm font-medium transition-colors shrink-0"
+                    >
                         <Filter size={16} />
-                        <span className="hidden md:inline">Filters</span>
+                        <span className="hidden md:inline">Reset</span>
                     </button>
                 </div>
             </div>
@@ -338,7 +404,13 @@ export const SmartMoney: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        <button className="px-3 py-1 rounded-lg bg-main hover:bg-card-hover border border-border text-text-light text-xs font-bold transition-colors opacity-0 group-hover:opacity-100">
+                                        <button
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                navigate(`/smart-money/${wallet.addr}`);
+                                            }}
+                                            className="px-3 py-1 rounded-lg bg-main hover:bg-card-hover border border-border text-text-light text-xs font-bold transition-colors opacity-0 group-hover:opacity-100"
+                                        >
                                             View
                                         </button>
                                     </div>
@@ -371,8 +443,8 @@ export const SmartMoney: React.FC = () => {
                             ))}
                         </div>
                         <div className="p-3 border-t border-border bg-main/30">
-                            <button className="w-full py-2 text-xs font-bold text-text-medium hover:text-text-light transition-colors border border-dashed border-border hover:border-text-medium rounded-lg">
-                                View Leaderboard
+                            <button onClick={() => navigate('/wallet')} className="w-full py-2 text-xs font-bold text-text-medium hover:text-text-light transition-colors border border-dashed border-border hover:border-text-medium rounded-lg">
+                                View Wallet Tracker
                             </button>
                         </div>
                     </div>
@@ -398,7 +470,7 @@ export const SmartMoney: React.FC = () => {
                             {recentEvents.map((event, i) => (
                                 <div
                                     key={i}
-                                    onClick={() => navigate(`/token-smart-money/${event.token}`)}
+                                    onClick={() => navigate(`/token-smart-money/${event.tokenAddress}`)}
                                     className="p-3 hover:bg-card-hover/50 rounded-lg transition-colors cursor-pointer group relative"
                                 >
                                     <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-full ${event.type === 'buy' ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -426,8 +498,8 @@ export const SmartMoney: React.FC = () => {
                             ))}
                         </div>
                         <div className="p-3 border-t border-border bg-main/30">
-                            <button className="w-full py-2 text-xs font-bold text-text-medium hover:text-text-light transition-colors border border-dashed border-border hover:border-text-medium rounded-lg">
-                                View All Events
+                            <button onClick={() => navigate('/wallet')} className="w-full py-2 text-xs font-bold text-text-medium hover:text-text-light transition-colors border border-dashed border-border hover:border-text-medium rounded-lg">
+                                View Wallet Activity
                             </button>
                         </div>
                     </div>
@@ -449,7 +521,7 @@ export const SmartMoney: React.FC = () => {
                                 </div>
                             )}
                             {topInflows.map((token) => (
-                                <div key={token.id} className="bg-main border border-border hover:border-green-500/30 px-3 py-2.5 rounded-lg transition-all cursor-pointer group flex items-center justify-between h-[64px]">
+                                <div key={token.id} onClick={() => navigate(`/token-smart-money/${token.id}`)} className="bg-main border border-border hover:border-green-500/30 px-3 py-2.5 rounded-lg transition-all cursor-pointer group flex items-center justify-between h-[64px]">
                                     {/* Left: Token Info */}
                                     <div className="flex items-center gap-3">
                                         <div className="w-8 h-8 rounded-full bg-card-hover flex items-center justify-center overflow-hidden border border-border">
@@ -485,7 +557,7 @@ export const SmartMoney: React.FC = () => {
                                 </div>
                             )}
                             {topOutflows.map((token) => (
-                                <div key={token.id} className="bg-main border border-border hover:border-red-500/30 px-3 py-2.5 rounded-lg transition-all cursor-pointer group flex items-center justify-between h-[64px]">
+                                <div key={token.id} onClick={() => navigate(`/token-smart-money/${token.id}`)} className="bg-main border border-border hover:border-red-500/30 px-3 py-2.5 rounded-lg transition-all cursor-pointer group flex items-center justify-between h-[64px]">
                                     {/* Left: Token Info */}
                                     <div className="flex items-center gap-3">
                                         <div className="w-8 h-8 rounded-full bg-card-hover flex items-center justify-center overflow-hidden border border-border">

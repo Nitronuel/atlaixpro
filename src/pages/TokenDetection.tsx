@@ -98,6 +98,12 @@ const parsePrice = (price: string) => {
     return Number(price.replace(/[$,]/g, '')) || 0;
 };
 
+const getSafeScanChain = (chain?: string) => {
+    if (!chain) return 'solana';
+    if (chain === 'ethereum') return 'eth';
+    return chain;
+};
+
 const parseMarketValue = (value: string | number | undefined) => {
     if (typeof value === 'number') return value;
     if (!value) return 0;
@@ -660,6 +666,13 @@ export const TokenDetection: React.FC = () => {
     ];
     const visibleActivity = activity.slice(0, visibleActivityCount);
     const hasMoreActivity = visibleActivityCount < activity.length;
+    const tokenAddress = token?.address || '';
+    const tokenChain = token?.chain || searchParams.get('chain') || 'solana';
+    const trackedWalletAddress = activity.find((item) => {
+        const wallet = item.wallet?.trim();
+        if (!wallet) return false;
+        return wallet !== token?.address && wallet !== token?.pairAddress;
+    })?.wallet || '';
 
     return (
         <div className="space-y-6 pb-10">
@@ -772,20 +785,34 @@ export const TokenDetection: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
                         <button
                             onClick={() => token && registerWatch(token, TWO_HOURS_MS, 'Tracking for 2 hours.')}
-                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-primary-green rounded-xl transition-all group text-left"
+                            disabled={!token?.address}
+                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-primary-green rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <Check size={20} className="text-primary-green" />
                             <span className="font-bold text-sm text-text-light group-hover:text-primary-green">Track This Token</span>
                         </button>
-                        <button className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left">
+                        <button
+                            onClick={() => trackedWalletAddress && navigate(`/wallet/${encodeURIComponent(trackedWalletAddress)}`)}
+                            disabled={!trackedWalletAddress}
+                            title={trackedWalletAddress ? 'Open this wallet in Wallet Tracker' : 'Creator wallet is not available for this token yet'}
+                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                             <Wallet size={20} className="text-text-medium group-hover:text-text-light" />
                             <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Track Creator Wallet</span>
                         </button>
-                        <button className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left">
+                        <button
+                            onClick={() => navigate(`/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: getSafeScanChain(tokenChain) }).toString()}`)}
+                            disabled={!tokenAddress}
+                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                             <Shield size={20} className="text-text-medium group-hover:text-text-light" />
                             <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Run SafeScan</span>
                         </button>
-                        <button className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left">
+                        <button
+                            onClick={() => navigate(`/smart-alerts?${new URLSearchParams({ address: tokenAddress, chain: tokenChain }).toString()}`)}
+                            disabled={!tokenAddress}
+                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
+                        >
                             <Bell size={20} className="text-text-medium group-hover:text-text-light" />
                             <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Create Alerts</span>
                         </button>

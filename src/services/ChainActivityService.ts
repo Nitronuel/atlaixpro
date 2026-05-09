@@ -21,6 +21,8 @@ const mapChainToAlchemyNetwork = (chain: string) => {
     switch (chain.toLowerCase()) {
         case 'ethereum': return 'eth-mainnet';
         case 'base': return 'base-mainnet';
+        case 'bsc': return 'bnb-mainnet';
+        case 'bnb': return 'bnb-mainnet';
         case 'arbitrum': return 'arb-mainnet';
         case 'polygon': return 'polygon-mainnet';
         case 'optimism': return 'opt-mainnet';
@@ -28,8 +30,8 @@ const mapChainToAlchemyNetwork = (chain: string) => {
     }
 };
 
-const ALCHEMY_SUPPORTED_CHAINS = new Set(['ethereum', 'base', 'arbitrum', 'polygon', 'optimism']);
-const MIN_ACTIVITY_USD = 1000;
+const ALCHEMY_SUPPORTED_CHAINS = new Set(['ethereum', 'base', 'bsc', 'bnb', 'arbitrum', 'polygon', 'optimism']);
+const MIN_ACTIVITY_USD = 25;
 
 const getTimeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -77,7 +79,7 @@ export const ChainActivityService = {
                             fromBlock: "0x0",
                             toBlock: "latest",
                             contractAddresses: [tokenAddress],
-                            category: ["external", "erc20"],
+                            category: ["erc20"],
                             withMetadata: true,
                             excludeZeroValue: true,
                             maxCount: "0x64", // Limit 100

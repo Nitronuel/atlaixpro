@@ -63,6 +63,7 @@ const DEFAULT_FEED_FILTERS: FeedFilters = {
 };
 
 const MIN_FEED_VOLUME_24H_USD = 100000;
+const MIN_FEED_LIQUIDITY_USD = 100000;
 const FEED_ORDER_STORAGE_KEY = 'atlaix-live-alpha-feed-order-v1';
 
 type FeedOrderState = {
@@ -227,6 +228,14 @@ const mergeStableFeedData = (incoming: MarketCoin[], current: MarketCoin[], pres
 const meetsFeedVolumeMinimum = (coin: MarketCoin) =>
     parseCurrency(coin.volume24h) >= MIN_FEED_VOLUME_24H_USD;
 
+const meetsFeedLiquidityMinimum = (coin: MarketCoin) =>
+    parseCurrency(coin.liquidity) >= MIN_FEED_LIQUIDITY_USD;
+
+const isLiveAlphaEligible = (coin: MarketCoin) =>
+    !isExcludedAlphaToken(coin) &&
+    meetsFeedVolumeMinimum(coin) &&
+    meetsFeedLiquidityMinimum(coin);
+
 const CHAIN_DEX_VOLUME_IDS = ['solana', 'ethereum', 'base', 'bsc', 'polygon', 'arbitrum'];
 
 const EVENT_FILTER_OPTIONS: Array<{ value: 'all' | AlphaGauntletEventType; label: string }> = [
@@ -279,7 +288,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const applyStableMarketData = (nextData: MarketCoin[], stableBase?: MarketCoin[], preserveMissing = false) => {
         setMarketData((current) => {
             const base = stableBase || current;
-            const merged = mergeStableFeedData(nextData, base, preserveMissing);
+            const merged = mergeStableFeedData(nextData, base, preserveMissing).filter(isLiveAlphaEligible);
 
             setFeedOrderState((currentOrder) => {
                 const nextOrder = registerFeedOrder(merged, currentOrder);
@@ -304,8 +313,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
         // 1. Instant Local Search from Market Data
         const localMatches = marketData ? marketData.filter(coin =>
-            !isExcludedAlphaToken(coin) &&
-            meetsFeedVolumeMinimum(coin) &&
+            isLiveAlphaEligible(coin) &&
             (
                 coin.ticker.toLowerCase().includes(query) ||
                 coin.name.toLowerCase().includes(query) ||
@@ -327,8 +335,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 const existingPairs = new Set(localMatches.map(c => (c.pairAddress || c.address || '').toLowerCase()));
                 const uniqueGlobal = globalResults.filter(c =>
                     !existingPairs.has((c.pairAddress || c.address || '').toLowerCase()) &&
-                    !isExcludedAlphaToken(c) &&
-                    meetsFeedVolumeMinimum(c)
+                    isLiveAlphaEligible(c)
                 );
 
                 // Combine
@@ -503,8 +510,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
     const filteredData = useMemo(() => {
         return marketData.filter((coin) => {
-            if (isExcludedAlphaToken(coin)) return false;
-            if (!meetsFeedVolumeMinimum(coin)) return false;
+            if (!isLiveAlphaEligible(coin)) return false;
             if (feedFilters.chain !== 'all' && coin.chain !== feedFilters.chain) return false;
 
             if (feedFilters.eventType !== 'all') {
@@ -615,7 +621,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             riskCount: 0
         };
 
-        const alphaMarketData = marketData.filter((coin) => !isExcludedAlphaToken(coin) && meetsFeedVolumeMinimum(coin));
+        const alphaMarketData = marketData.filter(isLiveAlphaEligible);
         let bullishCount = 0;
         let totalProcessed = 0;
         let totalMarketVolume = 0;

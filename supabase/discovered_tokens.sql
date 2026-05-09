@@ -29,6 +29,54 @@ create index if not exists discovered_tokens_ticker_idx
 create unique index if not exists discovered_tokens_address_chain_unique_idx
     on public.discovered_tokens (address, chain);
 
+create or replace function public.alpha_compact_usd_to_numeric(value text)
+returns numeric
+language plpgsql
+immutable
+as $$
+declare
+    cleaned text;
+    multiplier numeric := 1;
+    parsed numeric;
+begin
+    if value is null or btrim(value) = '' then
+        return 0;
+    end if;
+
+    cleaned := upper(regexp_replace(value, '[$,%\s,]', '', 'g'));
+
+    if cleaned like '%T' then
+        multiplier := 1000000000000;
+    elsif cleaned like '%B' then
+        multiplier := 1000000000;
+    elsif cleaned like '%M' then
+        multiplier := 1000000;
+    elsif cleaned like '%K' then
+        multiplier := 1000;
+    end if;
+
+    cleaned := regexp_replace(cleaned, '[TBMK]', '', 'g');
+
+    begin
+        parsed := cleaned::numeric;
+    exception when others then
+        return 0;
+    end;
+
+    return parsed * multiplier;
+end;
+$$;
+
+delete from public.discovered_tokens
+where public.alpha_compact_usd_to_numeric(liquidity) < 100000;
+
+alter table public.discovered_tokens
+    drop constraint if exists discovered_tokens_min_liquidity_check;
+
+alter table public.discovered_tokens
+    add constraint discovered_tokens_min_liquidity_check
+    check (public.alpha_compact_usd_to_numeric(liquidity) >= 100000);
+
 alter table public.discovered_tokens
     add column if not exists created_at timestamptz not null default timezone('utc', now());
 

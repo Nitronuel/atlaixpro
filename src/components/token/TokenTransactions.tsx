@@ -1,5 +1,6 @@
 // Reusable interface component for Atlaix product workflows.
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { RealActivity } from '../../services/ChainActivityService';
 import { EnrichedTokenData } from '../../types';
 
@@ -10,6 +11,7 @@ interface TokenTransactionsProps {
 }
 
 export const TokenTransactions: React.FC<TokenTransactionsProps> = ({ activityFeed, enrichedData, isRealData }) => {
+    const navigate = useNavigate();
     // Left Col: High Signal Only
     const highSignalEvents = activityFeed.filter(a => ['Burn', 'Whale', 'Add Liq', 'Remove Liq'].includes(a.tag || a.type));
 
@@ -88,7 +90,11 @@ export const TokenTransactions: React.FC<TokenTransactionsProps> = ({ activityFe
                                         </div>
                                     </td>
                                     <td className="py-4 text-right pr-2">
-                                        <button className="px-3 py-1 bg-card border border-border text-text-medium text-[10px] font-bold rounded hover:bg-card-hover hover:text-text-light transition-all uppercase">
+                                        <button
+                                            onClick={() => row.wallet && navigate(`/wallet/${encodeURIComponent(row.wallet)}`)}
+                                            disabled={!row.wallet}
+                                            className="px-3 py-1 bg-card border border-border text-text-medium text-[10px] font-bold rounded hover:bg-card-hover hover:text-text-light transition-all uppercase disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
                                             View
                                         </button>
                                     </td>

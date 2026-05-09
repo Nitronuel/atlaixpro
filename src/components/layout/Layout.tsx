@@ -249,7 +249,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                         <User size={16} className="text-primary-green" />
                         Profile
                       </button>
-                      <button className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#8F96A3] hover:text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors">
+                      <button
+                        onClick={() => { handleNavigation('/settings'); setUserMenuOpen(false); }}
+                        className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#8F96A3] hover:text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors"
+                      >
                         <Briefcase size={16} />
                         Plan & Billing
                       </button>

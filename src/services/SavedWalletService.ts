@@ -19,6 +19,14 @@ const withLegacyMigration = (wallet: any): SavedWallet => ({
 
 const buildAutoTrackedName = (addr: string) => `Tracked ${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
+const syncQualifiedWalletToGlobalSmartMoney = (wallet: SavedWallet) => {
+    if (!wallet.qualification?.qualified) return;
+
+    DatabaseService.upsertSmartMoneyWallet(wallet).catch((error) => {
+        console.warn('Global smart money sync skipped:', error instanceof Error ? error.message : error);
+    });
+};
+
 export const SavedWalletService = {
     getWallets: (): SavedWallet[] => {
         try {
@@ -56,6 +64,7 @@ export const SavedWalletService = {
             }
 
             persistWallets(wallets);
+            syncQualifiedWalletToGlobalSmartMoney(newWallet);
             return newWallet;
         } catch (e) {
             console.error("Failed to save wallet", e);
@@ -122,6 +131,7 @@ export const SavedWalletService = {
                     (qualification?.qualified ? true : wallets[index].autoPromotedToSmartMoney) !== wallets[index].autoPromotedToSmartMoney;
 
                 if (!hasChanged) {
+                    syncQualifiedWalletToGlobalSmartMoney(wallets[index]);
                     return false;
                 }
 
@@ -135,12 +145,7 @@ export const SavedWalletService = {
                     autoPromotedToSmartMoney: qualification?.qualified ? true : wallets[index].autoPromotedToSmartMoney
                 };
                 persistWallets(wallets);
-
-                if (qualification?.qualified) {
-                    DatabaseService.upsertSmartMoneyWallet(wallets[index]).catch((error) => {
-                        console.warn('Smart money sync skipped:', error instanceof Error ? error.message : error);
-                    });
-                }
+                syncQualifiedWalletToGlobalSmartMoney(wallets[index]);
 
                 return true;
             }
