@@ -1,9 +1,10 @@
 // Route-level token scan screen for the Atlaix application.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Activity, AlertTriangle, ArrowLeft, Bell, Check, Copy, RefreshCw, Search, Shield, Wallet } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, Bell, Copy, RefreshCw, Search, Shield } from 'lucide-react';
 import { ChainActivityService } from '../services/ChainActivityService';
 import { DatabaseService } from '../services/DatabaseService';
+import { enrichDetectionEvent } from '../services/detection/DetectionEventPresenter';
 import { ImpactfulActivity, ImpactfulActivityService } from '../services/ImpactfulActivityService';
 import { AlphaGauntletEvent, MarketCoin } from '../types';
 
@@ -206,7 +207,8 @@ const findStoredDetectionCoin = async (query: string): Promise<{ coin: MarketCoi
         return normalizedQuery === address || normalizedQuery === ticker || normalizedQuery === pairAddress;
     });
 
-    return event ? { coin: event.token, event } : null;
+    const enriched = event ? enrichDetectionEvent(event) : null;
+    return enriched ? { coin: enriched.token, event: enriched } : null;
 };
 
 const toMarketCoinFromSnapshot = (snapshot: TokenSnapshot): MarketCoin => {
@@ -308,7 +310,7 @@ const buildDetectionContextActivities = (
     if (resolved.pairCreatedAt) {
         activities.push({
             id: `timeline-pair-created-${resolved.address}`,
-            type: 'Liquidity Added',
+            type: 'Liquidity Event',
             severity: 'Signal',
             title: 'Trading Pair Created',
             description: `${resolved.symbol} became tradable on ${normalizeChain(resolved.chain)}${resolved.dex ? ` via ${resolved.dex}` : ''} on ${formatDateTime(resolved.pairCreatedAt)}.`,
@@ -324,7 +326,7 @@ const buildDetectionContextActivities = (
     if (resolved.liquidity > 0) {
         activities.push({
             id: `timeline-liquidity-established-${resolved.address}`,
-            type: 'Liquidity Added',
+            type: 'Liquidity Event',
             severity: resolved.liquidity >= 100_000 ? 'High' : 'Signal',
             title: 'Liquidity Established',
             description: `${formatCurrency(resolved.liquidity)} current liquidity is available across ${resolved.poolCount.toLocaleString()} tracked pool${resolved.poolCount === 1 ? '' : 's'}.`,
@@ -344,7 +346,7 @@ const buildDetectionContextActivities = (
             type: input.eventType,
             severity: severity === 'Medium' ? 'High' : severity,
             title: `${input.eventType} Admission`,
-            description: `${resolved.symbol} entered the Detection Engine as ${input.eventType}${score ? ` with score ${score}` : ''}.`,
+            description: `${resolved.symbol} entered the Detection Engine as ${input.eventType}${score ? ` with activity score ${score}` : ''}.`,
             usdValue: valueBasis,
             tokenAmount: 0,
             wallet: resolved.pairAddress || resolved.address,
@@ -360,7 +362,7 @@ const buildDetectionContextActivities = (
             id: txHash,
             type: 'Whale Buy',
             severity: buyRatio >= 0.75 ? 'High' : 'Signal',
-            title: 'Qualified Buy Pressure',
+            title: 'Buyer Dominance',
             description: `${resolved.buys24h.toLocaleString()} buys vs ${resolved.sells24h.toLocaleString()} sells in the latest 24h market data.`,
             usdValue: resolved.volume24h * buyRatio,
             tokenAmount: 0,
@@ -377,7 +379,7 @@ const buildDetectionContextActivities = (
             id: txHash,
             type: 'Whale Sell',
             severity: sellRatio >= 0.75 ? 'Critical' : 'High',
-            title: 'Qualified Sell Pressure',
+            title: 'Seller Dominance',
             description: `${resolved.sells24h.toLocaleString()} sells vs ${resolved.buys24h.toLocaleString()} buys in the latest 24h market data.`,
             usdValue: resolved.volume24h * sellRatio,
             tokenAmount: 0,
@@ -395,7 +397,7 @@ const buildDetectionContextActivities = (
             id: txHash,
             type: positive ? 'Whale Buy' : 'Whale Sell',
             severity: Math.abs(resolved.priceChange24h) >= 25 ? 'High' : 'Signal',
-            title: positive ? 'Major Pump Event' : 'Major Dump Event',
+            title: positive ? 'Momentum Expansion' : 'Price Breakdown',
             description: `${resolved.symbol} moved ${formatPercent(resolved.priceChange24h)} over 24h with ${formatCurrency(resolved.volume24h)} volume.`,
             usdValue: resolved.volume24h,
             tokenAmount: 0,
@@ -412,7 +414,7 @@ const buildDetectionContextActivities = (
             id: txHash,
             type: 'Whale Transfer',
             severity: resolved.volume24h >= 250_000 ? 'High' : 'Signal',
-            title: 'Major Volume Event',
+            title: 'Volume Expansion',
             description: `${resolved.symbol} produced ${formatCurrency(resolved.volume24h)} in 24h volume after launching ${getAge(resolved.pairCreatedAt)} ago.`,
             usdValue: resolved.volume24h,
             tokenAmount: 0,
@@ -427,7 +429,7 @@ const buildDetectionContextActivities = (
         const txHash = `derived-liquidity-turnover-${resolved.address}-${detectedAt}`;
         activities.push({
             id: txHash,
-            type: 'Liquidity Added',
+            type: 'Liquidity Event',
             severity: resolved.volume24h / resolved.liquidity >= 5 ? 'High' : 'Signal',
             title: 'High Liquidity Turnover',
             description: `24h volume is ${(resolved.volume24h / resolved.liquidity).toFixed(1)}x current liquidity, indicating meaningful pool activity.`,
@@ -444,7 +446,6 @@ const buildDetectionContextActivities = (
 };
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
-const TWO_HOURS_MS = 2 * ONE_HOUR_MS;
 const ONE_DAY_MS = 24 * ONE_HOUR_MS;
 const RECENT_ACTIVITY_TIMEOUT_MS = 18_000;
 const TIMELINE_PAGE_SIZE = 9;
@@ -483,6 +484,7 @@ export const TokenDetection: React.FC = () => {
     const [activityLoading, setActivityLoading] = useState(false);
     const [watchStatus, setWatchStatus] = useState('');
     const [error, setError] = useState('');
+    const [detectionEvent, setDetectionEvent] = useState<AlphaGauntletEvent | null>(null);
 
     const registerWatch = async (resolved: TokenSnapshot, ttlMs: number, label: string) => {
         if (!resolved.address) return;
@@ -503,6 +505,7 @@ export const TokenDetection: React.FC = () => {
         setActivityLoading(true);
         setError('');
         setActivity([]);
+        setDetectionEvent(null);
         setVisibleActivityCount(TIMELINE_PAGE_SIZE);
 
         try {
@@ -513,6 +516,7 @@ export const TokenDetection: React.FC = () => {
             }
 
             const storedDetection = isDetectionToken ? await findStoredDetectionCoin(tokenQuery) : null;
+            if (storedDetection?.event) setDetectionEvent(storedDetection.event);
             let fallbackCoin: MarketCoin | null = storedDetection?.coin || null;
             let pair = fallbackCoin
                 ? await withTimeout(
@@ -668,11 +672,6 @@ export const TokenDetection: React.FC = () => {
     const hasMoreActivity = visibleActivityCount < activity.length;
     const tokenAddress = token?.address || '';
     const tokenChain = token?.chain || searchParams.get('chain') || 'solana';
-    const trackedWalletAddress = activity.find((item) => {
-        const wallet = item.wallet?.trim();
-        if (!wallet) return false;
-        return wallet !== token?.address && wallet !== token?.pairAddress;
-    })?.wallet || '';
 
     return (
         <div className="space-y-6 pb-10">
@@ -726,7 +725,7 @@ export const TokenDetection: React.FC = () => {
                                 <>
                                     <div className="h-1 w-1 rounded-full bg-border"></div>
                                     <span className="rounded border border-border bg-card/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-text-medium">
-                                        Admitted as {detectionEventType}
+                                        Admitted as {detectionEvent?.lane || detectionEventType}
                                     </span>
                                 </>
                             )}
@@ -765,6 +764,58 @@ export const TokenDetection: React.FC = () => {
                 ))}
             </div>
 
+            {detectionEvent && (
+                <section className="grid gap-4 lg:grid-cols-4">
+                    <div className="rounded-xl border border-border bg-card p-4">
+                        <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Why Detected</div>
+                        <div className="mt-3 flex flex-col gap-2">
+                            {(detectionEvent.whyDetected || []).slice(0, 3).map((reason, index) => (
+                                <div key={index} className="text-sm font-semibold leading-snug text-text-light">{reason}</div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-card p-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Confidence</div>
+                            <span className="rounded border border-primary-green/30 bg-primary-green/10 px-2 py-0.5 text-xs font-bold text-primary-green">
+                                {detectionEvent.confidence?.label || 'Medium'}
+                            </span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-text-light">{detectionEvent.confidence?.score ?? detectionEvent.score}</div>
+                        <div className="mt-2 text-xs font-semibold leading-relaxed text-text-medium">
+                            {(detectionEvent.confidence?.reasons || ['Market signal only. Contract safety is not verified.']).slice(0, 2).join(' ')}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-card p-4">
+                        <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Snapshot Deltas</div>
+                        <div className="mt-3 flex flex-col gap-2">
+                            {(detectionEvent.snapshotDeltas || []).slice(0, 3).map((delta) => (
+                                <div key={delta.window} className="rounded-lg border border-border/60 bg-main/30 p-2">
+                                    <div className="text-xs font-black text-text-light">{delta.window}</div>
+                                    <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] font-semibold text-text-medium">
+                                        <span>Liq {formatPercent(delta.liquidityChangePct)}</span>
+                                        <span>Vol {formatPercent(delta.volumeChangePct)}</span>
+                                        <span>Price {formatPercent(delta.priceChangePct)}</span>
+                                        <span>Tx {formatPercent(delta.transactionChangePct)}</span>
+                                    </div>
+                                </div>
+                            ))}
+                            {!detectionEvent.snapshotDeltas?.length && (
+                                <div className="text-sm font-semibold leading-snug text-text-medium">History is warming up. Snapshot deltas appear after more detection cycles.</div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-card p-4">
+                        <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Counter Signals</div>
+                        <div className="mt-3 flex flex-col gap-2">
+                            {(detectionEvent.counterSignals?.length ? detectionEvent.counterSignals : ['Market signal only. Safe Scan and Smart Money are not used for this detection yet.']).slice(0, 3).map((signal, index) => (
+                                <div key={index} className="text-sm font-semibold leading-snug text-text-light">{signal}</div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+            )}
+
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-6">
                 <div className="bg-card border border-border rounded-2xl p-6">
                     <div className="flex justify-between items-center mb-4">
@@ -781,32 +832,15 @@ export const TokenDetection: React.FC = () => {
                 </div>
 
                 <div className="bg-card border border-border rounded-2xl p-6">
-                    <h3 className="font-bold text-lg mb-6">Token Actions</h3>
+                    <h3 className="font-bold text-lg mb-6">Quick Actions</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
                         <button
-                            onClick={() => token && registerWatch(token, TWO_HOURS_MS, 'Tracking for 2 hours.')}
-                            disabled={!token?.address}
-                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-primary-green rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            <Check size={20} className="text-primary-green" />
-                            <span className="font-bold text-sm text-text-light group-hover:text-primary-green">Track This Token</span>
-                        </button>
-                        <button
-                            onClick={() => trackedWalletAddress && navigate(`/wallet/${encodeURIComponent(trackedWalletAddress)}`)}
-                            disabled={!trackedWalletAddress}
-                            title={trackedWalletAddress ? 'Open this wallet in Wallet Tracker' : 'Creator wallet is not available for this token yet'}
-                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                            <Wallet size={20} className="text-text-medium group-hover:text-text-light" />
-                            <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Track Creator Wallet</span>
-                        </button>
-                        <button
-                            onClick={() => navigate(`/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: getSafeScanChain(tokenChain) }).toString()}`)}
+                            onClick={() => navigate(`/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: getSafeScanChain(tokenChain), autoScan: '1' }).toString()}`)}
                             disabled={!tokenAddress}
                             className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <Shield size={20} className="text-text-medium group-hover:text-text-light" />
-                            <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Run SafeScan</span>
+                            <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Run Safe Scan</span>
                         </button>
                         <button
                             onClick={() => navigate(`/smart-alerts?${new URLSearchParams({ address: tokenAddress, chain: tokenChain }).toString()}`)}
@@ -814,7 +848,7 @@ export const TokenDetection: React.FC = () => {
                             className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <Bell size={20} className="text-text-medium group-hover:text-text-light" />
-                            <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Create Alerts</span>
+                            <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Create Alert</span>
                         </button>
                     </div>
                 </div>

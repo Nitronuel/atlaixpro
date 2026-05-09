@@ -115,6 +115,55 @@ export interface AlphaGauntletScores {
     total: number;
 }
 
+export type DetectionLane =
+    | 'Fresh Launch'
+    | 'Emerging Momentum'
+    | 'Established Momentum'
+    | 'Market Stress'
+    | 'Liquidity Risk'
+    | 'Paid Attention'
+    | 'Watchlist Candidate';
+
+export type DetectionEvidenceKind = 'observed' | 'derived' | 'inferred' | 'unverified';
+
+export interface DetectionTriggerDetail {
+    id: string;
+    label: string;
+    kind: DetectionEvidenceKind;
+    strength: number;
+    explanation: string;
+    metrics?: Record<string, number | string | boolean>;
+}
+
+export interface DetectionConfidence {
+    score: number;
+    label: 'High' | 'Medium' | 'Low';
+    reasons: string[];
+}
+
+export interface DetectionWatchCondition {
+    label: string;
+    direction: 'bullish' | 'bearish' | 'neutral';
+    metric: string;
+    threshold?: number;
+    explanation: string;
+}
+
+export type DetectionSnapshotWindow = '5m' | '15m' | '1h' | '6h' | '24h';
+
+export interface DetectionSnapshotDelta {
+    window: DetectionSnapshotWindow;
+    fromCapturedAt: string;
+    toCapturedAt: string;
+    liquidityChangePct: number;
+    liquidityChangeUsd: number;
+    priceChangePct: number;
+    volumeChangePct: number;
+    transactionChangePct: number;
+    buyChangePct: number;
+    sellChangePct: number;
+}
+
 export interface AlphaGauntletEvent {
     token: MarketCoin;
     eventType: AlphaGauntletEventType;
@@ -139,6 +188,20 @@ export interface AlphaGauntletEvent {
         priceChange24h: number;
         netFlow: number;
     };
+    lane?: DetectionLane;
+    activityScore?: number;
+    marketQualityScore?: number;
+    liquidityQualityScore?: number;
+    manipulationRiskScore?: number;
+    confidence?: DetectionConfidence;
+    triggerDetails?: DetectionTriggerDetail[];
+    whyDetected?: string[];
+    counterSignals?: string[];
+    watchConditions?: DetectionWatchCondition[];
+    snapshotDeltas?: DetectionSnapshotDelta[];
+    snapshotInsights?: string[];
+    dataFreshnessMs?: number;
+    isContractSafetyVerified?: false;
 }
 
 export interface Post {

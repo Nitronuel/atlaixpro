@@ -69,6 +69,8 @@ const { fetchMoralisTopHolders } = await import('../src/services/forensics/moral
 const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import('../src/services/forensics/alchemy-hub-chains');
 const { DetectionEngineRunner } = await import('./detection-engine-runner');
 const { DetectionSnapshotStore } = await import('./detection-snapshot-store');
+const { DetectionOutcomeTracker } = await import('./detection-outcome-tracker');
+const { SelectiveAlchemyVerifier } = await import('./selective-alchemy-verifier');
 const { DatabaseService } = await import('../src/services/DatabaseService');
 const { ChainRouter } = await import('../src/services/ChainRouter');
 const { SmartMoneyQualificationService } = await import('../src/services/SmartMoneyQualificationService');
@@ -765,6 +767,23 @@ const server = createServer(async (request, response) => {
                 fallback: true,
                 warning: error instanceof Error ? error.message : 'Shared detection snapshot feed is unavailable.',
                 status: detectionEngine.getStatus()
+            });
+            return;
+        }
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/detection/signal-quality') {
+        try {
+            const summary = await DetectionOutcomeTracker.getSignalQualitySummary();
+            json(response, 200, {
+                summary,
+                alchemy: SelectiveAlchemyVerifier.getStats(),
+                generatedAt: new Date().toISOString()
+            });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'Could not load detection signal quality.'
             });
             return;
         }

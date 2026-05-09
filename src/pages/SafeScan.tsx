@@ -1,5 +1,5 @@
 // Route-level product screen for the Atlaix application.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Copy, Loader2, ShieldCheck } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { ForensicBundleSection } from '../components/safe-scan/ForensicBundleSection';
@@ -222,12 +222,14 @@ export const SafeScan: React.FC = () => {
     const [searchParams] = useSearchParams();
     const requestedAddress = useMemo(() => searchParams.get('address') || searchParams.get('token') || '', [searchParams]);
     const requestedChain = useMemo(() => normalizeSafeScanChain(searchParams.get('chain')), [searchParams]);
+    const shouldAutoScan = useMemo(() => ['1', 'true', 'yes'].includes((searchParams.get('autoScan') || '').toLowerCase()), [searchParams]);
     const [contract, setContract] = useState(requestedAddress);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [report, setReport] = useState<ForensicBundleReport | null>(null);
     const [securityReport, setSecurityReport] = useState<SecurityReport | null>(null);
     const [chain, setChain] = useState<AlchemyHubChain>(requestedChain);
+    const autoScanKeyRef = useRef('');
 
     useEffect(() => {
         if (!requestedAddress) return;
@@ -242,9 +244,10 @@ export const SafeScan: React.FC = () => {
     const isSupported = SafeScanService.isSupported(normalizedContract, chain);
     const chainLabel = ALCHEMY_HUB_CHAINS.find((option) => option.id === chain)?.label ?? 'Chain';
 
-    const handleScan = async () => {
-        const tokenAddress = contract.trim();
+    const handleScan = useCallback(async (scanContract = contract, scanChain = chain) => {
+        const tokenAddress = scanContract.trim();
         if (!tokenAddress) return;
+        if (!SafeScanService.isSupported(tokenAddress, scanChain)) return;
 
         setLoading(true);
         setError(null);
@@ -253,8 +256,8 @@ export const SafeScan: React.FC = () => {
 
         try {
             const [nextReport, nextSecurity] = await Promise.all([
-                SafeScanService.analyzeToken(tokenAddress, chain),
-                GoPlusService.fetchTokenSecurity(tokenAddress, scanSecurityChain(chain)).catch(() => null)
+                SafeScanService.analyzeToken(tokenAddress, scanChain),
+                GoPlusService.fetchTokenSecurity(tokenAddress, scanSecurityChain(scanChain)).catch(() => null)
             ]);
             setReport(nextReport);
             setSecurityReport(nextSecurity);
@@ -263,7 +266,19 @@ export const SafeScan: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [chain, contract]);
+
+    useEffect(() => {
+        const tokenAddress = requestedAddress.trim();
+        if (!shouldAutoScan || !tokenAddress) return;
+        if (!SafeScanService.isSupported(tokenAddress, requestedChain)) return;
+
+        const autoScanKey = `${requestedChain}:${tokenAddress}`;
+        if (autoScanKeyRef.current === autoScanKey) return;
+
+        autoScanKeyRef.current = autoScanKey;
+        void handleScan(tokenAddress, requestedChain);
+    }, [handleScan, requestedAddress, requestedChain, shouldAutoScan]);
 
     const resetScan = () => {
         setContract('');

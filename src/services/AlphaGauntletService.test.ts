@@ -38,6 +38,10 @@ describe('AlphaGauntletService', () => {
         expect(event).not.toBeNull();
         expect(event?.score).toBeGreaterThanOrEqual(AlphaGauntletService.OVERVIEW_THRESHOLD);
         expect(event?.triggers).toContain('Volume Spike');
+        expect(event?.activityScore).toBeGreaterThan(0);
+        expect(event?.confidence?.label).toMatch(/High|Medium|Low/);
+        expect(event?.triggerDetails?.some((trigger) => trigger.label === 'Volume Expansion')).toBe(true);
+        expect(event?.summary).toContain('activity score');
     });
 
     it('still rejects tokens without enough market structure', () => {
@@ -89,6 +93,35 @@ describe('AlphaGauntletService', () => {
 
         expect(event).not.toBeNull();
         expect(event?.eventType).toBe('Recovery');
+    });
+
+    it('does not let inferred liquidity structure override cleaner accumulation evidence', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            cap: '$4.00M',
+            liquidity: '$1.10M',
+            volume24h: '$900.00K',
+            dexBuys: '2200',
+            dexSells: '1200',
+            buyVolume24h: '$620.00K',
+            sellVolume24h: '$280.00K',
+            netFlow: '+$340.00K',
+            h24: '16.00%'
+        }));
+
+        expect(event).not.toBeNull();
+        expect(event?.triggers).toContain('Liquidity Added');
+        expect(event?.eventType).toBe('Accumulation');
+    });
+
+    it('does not claim holder growth when only transaction proxy data exists', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            dexBuys: '4200',
+            dexSells: '2600',
+            activeWallets24h: undefined
+        }));
+
+        expect(event).not.toBeNull();
+        expect(event?.triggers).not.toContain('Holder Growth Spike');
     });
 
     it('keeps true distribution when sell pressure has negative price and negative USD flow', () => {

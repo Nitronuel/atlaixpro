@@ -6,6 +6,7 @@ import { AlphaGauntletEvent, AlphaGauntletEventType } from '../types';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { DatabaseService } from '../services/DatabaseService';
 import { ImpactfulActivityService } from '../services/ImpactfulActivityService';
+import { enrichDetectionEvent, getHonestTriggerLabel } from '../services/detection/DetectionEventPresenter';
 import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
 type DetectionCategory = Exclude<AlphaGauntletEventType, 'Market Stress'>;
@@ -143,7 +144,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:buy-pressure`,
             source: event,
-            title: 'Qualified Buy Pressure',
+            title: getHonestTriggerLabel('Strong Buy Pressure'),
             description: `${tokenLabel} is showing stronger buy-side pressure across the latest 24h market flow.`,
             usdValue: Math.max(event.metrics.buyVolume24h || 0, valueBasis),
             detectedAt: event.detectedAt,
@@ -155,7 +156,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:sell-pressure`,
             source: event,
-            title: 'Qualified Sell Pressure',
+            title: getHonestTriggerLabel('Strong Sell Pressure'),
             description: `${tokenLabel} has elevated sell-side pressure relative to current market activity.`,
             usdValue: Math.max(event.metrics.sellVolume24h || 0, valueBasis),
             detectedAt: event.detectedAt,
@@ -167,7 +168,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:recovery`,
             source: event,
-            title: 'Recovery Momentum',
+            title: getHonestTriggerLabel('Price Recovery'),
             description: `${tokenLabel} is rebounding with ${event.metrics.priceChange24h >= 0 ? '+' : ''}${event.metrics.priceChange24h.toFixed(2)}% 24h price momentum.`,
             usdValue: event.metrics.volume24h,
             detectedAt: event.detectedAt,
@@ -179,7 +180,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:price-dump`,
             source: event,
-            title: 'Major Dump Event',
+            title: getHonestTriggerLabel('Price Dump'),
             description: `${tokenLabel} moved ${event.metrics.priceChange24h.toFixed(2)}% over 24h with elevated activity.`,
             usdValue: event.metrics.volume24h,
             detectedAt: event.detectedAt,
@@ -201,7 +202,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:volume`,
             source: event,
-            title: 'Major Volume Event',
+            title: getHonestTriggerLabel('Volume Spike'),
             description: `${tokenLabel} produced ${formatCompactUsd(event.metrics.volume24h)} in 24h market volume.`,
             usdValue: event.metrics.volume24h,
             detectedAt: event.detectedAt,
@@ -213,8 +214,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:liquidity-added`,
             source: event,
-            title: 'Liquidity Added',
-            description: `${tokenLabel} shows constructive liquidity expansion with ${formatCompactUsd(event.metrics.liquidity)} active liquidity.`,
+            title: getHonestTriggerLabel('Liquidity Added'),
+            description: `${tokenLabel} has deep current liquidity structure with ${formatCompactUsd(event.metrics.liquidity)} active liquidity. Fresh liquidity addition is not yet snapshot-confirmed.`,
             usdValue: event.metrics.liquidity,
             detectedAt: event.detectedAt,
             sentiment: 'bullish'
@@ -225,8 +226,8 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:liquidity-removed`,
             source: event,
-            title: 'Liquidity Removed',
-            description: `${tokenLabel} shows a liquidity reduction risk with ${formatCompactUsd(event.metrics.liquidity)} active liquidity remaining.`,
+            title: getHonestTriggerLabel('Liquidity Removed'),
+            description: `${tokenLabel} has thin liquidity risk with ${formatCompactUsd(event.metrics.liquidity)} active liquidity remaining. Actual liquidity removal is not yet snapshot-confirmed.`,
             usdValue: event.metrics.liquidity,
             detectedAt: event.detectedAt,
             sentiment: 'bearish'
@@ -239,7 +240,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         events.push({
             id: `${getDetectionEventKey(event)}:large-trades`,
             source: event,
-            title: positiveFlow ? 'Abnormal Large Inflow' : negativeFlow ? 'Abnormal Large Outflow' : 'Abnormal Large Trades',
+            title: positiveFlow ? 'Large Flow Inflow' : negativeFlow ? 'Large Flow Outflow' : getHonestTriggerLabel('Abnormal Large Trades'),
             description: `${tokenLabel} has ${positiveFlow ? 'positive' : negativeFlow ? 'negative' : 'unusual'} net flow of ${formatCompactUsd(Math.abs(event.metrics.netFlow))}.`,
             usdValue: Math.abs(event.metrics.netFlow),
             detectedAt: event.detectedAt,
@@ -258,7 +259,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         id: `${getDetectionEventKey(event)}:activity`,
         source: event,
         title: fallbackSentiment === 'neutral' ? 'Activity Signal' : `${event.eventType} Signal`,
-        description: `${tokenLabel} remains active in global detection with a ${event.score} Alpha score.`,
+        description: `${tokenLabel} remains active in global detection with a ${event.score} activity score.`,
         usdValue: valueBasis,
         detectedAt: event.detectedAt,
         sentiment: fallbackSentiment
@@ -331,10 +332,10 @@ export const Detection: React.FC = () => {
             const detectedAt = activeDetectedAtRef.current.get(key) || event.detectedAt;
             activeDetectedAtRef.current.set(key, detectedAt);
 
-            return {
+            return enrichDetectionEvent({
                 ...event,
                 detectedAt
-            };
+            });
         });
 
         if (replaceActiveSet) {
@@ -652,12 +653,18 @@ export const Detection: React.FC = () => {
                                                         </div>
                                                     </td>
                                                     <td className="px-2 py-4 2xl:px-4">
-                                                        <span className="font-mono text-xs font-bold text-primary-green 2xl:text-sm">{event.score}</span>
+                                                        <span className="font-mono text-xs font-bold text-primary-green 2xl:text-sm">{event.activityScore ?? event.score}</span>
+                                                        <div className="mt-1 text-[10px] font-bold uppercase text-text-medium">Activity</div>
                                                     </td>
                                                     <td className="px-2 py-4 2xl:px-4">
                                                         <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold 2xl:px-2.5 2xl:py-1 2xl:text-xs ${severityClass(event.severity)}`}>
                                                             {event.severity}
                                                         </span>
+                                                        {event.confidence && (
+                                                            <div className="mt-1 text-[10px] font-bold text-text-medium">
+                                                                {event.confidence.label} conf.
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ))}

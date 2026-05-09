@@ -1,6 +1,7 @@
 import type { AlphaGauntletEvent } from '../src/types';
 import type { ImpactfulTokenActivity } from './impactful-token-activity';
 import { getDetectionKey } from './detection-snapshot-store';
+import { getHonestTriggerLabel } from '../src/services/detection/DetectionEventPresenter';
 
 const normalizeAddress = (value = '') => value.trim().toLowerCase();
 
@@ -72,7 +73,7 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         event,
         'admission',
         `${event.eventType} Admission`,
-        `${tokenLabel} entered the Detection Engine as ${event.eventType} with score ${event.score}.`,
+        `${tokenLabel} entered the Detection Engine as ${event.eventType} with activity score ${event.score}.`,
         valueBasis,
         event.eventType === 'Accumulation' || event.eventType === 'Recovery'
             ? 'bullish'
@@ -85,7 +86,7 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'buy-pressure',
-            'Qualified Buy Pressure',
+            getHonestTriggerLabel('Strong Buy Pressure'),
             `${tokenLabel} is showing stronger buy-side pressure across the latest 24h market flow.`,
             Math.max(event.metrics.buyVolume24h || 0, valueBasis),
             'bullish'
@@ -96,7 +97,7 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'sell-pressure',
-            'Qualified Sell Pressure',
+            getHonestTriggerLabel('Strong Sell Pressure'),
             `${tokenLabel} has elevated sell-side pressure relative to current market activity.`,
             Math.max(event.metrics.sellVolume24h || 0, valueBasis),
             'bearish'
@@ -107,7 +108,7 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'recovery',
-            'Recovery Momentum',
+            getHonestTriggerLabel('Price Recovery'),
             `${tokenLabel} is rebounding with ${event.metrics.priceChange24h >= 0 ? '+' : ''}${event.metrics.priceChange24h.toFixed(2)}% 24h price momentum.`,
             event.metrics.volume24h,
             'bullish'
@@ -118,7 +119,7 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'price-dump',
-            'Major Dump Event',
+            getHonestTriggerLabel('Price Dump'),
             `${tokenLabel} moved ${event.metrics.priceChange24h.toFixed(2)}% over 24h with elevated activity.`,
             event.metrics.volume24h,
             'bearish'
@@ -138,7 +139,7 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'volume',
-            'Major Volume Event',
+            getHonestTriggerLabel('Volume Spike'),
             `${tokenLabel} produced ${formatCompactUsd(event.metrics.volume24h)} in 24h market volume.`,
             event.metrics.volume24h,
             'neutral'
@@ -149,8 +150,8 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'liquidity-added',
-            'Liquidity Added',
-            `${tokenLabel} shows constructive liquidity expansion with ${formatCompactUsd(event.metrics.liquidity)} active liquidity.`,
+            getHonestTriggerLabel('Liquidity Added'),
+            `${tokenLabel} has deep current liquidity structure with ${formatCompactUsd(event.metrics.liquidity)} active liquidity. Fresh liquidity addition is not yet snapshot-confirmed.`,
             event.metrics.liquidity,
             'bullish'
         ));
@@ -160,8 +161,8 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'liquidity-removed',
-            'Liquidity Removed',
-            `${tokenLabel} shows a liquidity reduction risk with ${formatCompactUsd(event.metrics.liquidity)} active liquidity remaining.`,
+            getHonestTriggerLabel('Liquidity Removed'),
+            `${tokenLabel} has thin liquidity risk with ${formatCompactUsd(event.metrics.liquidity)} active liquidity remaining. Actual liquidity removal is not yet snapshot-confirmed.`,
             event.metrics.liquidity,
             'bearish'
         ));
@@ -173,7 +174,7 @@ export const buildDetectionImpactActivities = (event: AlphaGauntletEvent): Impac
         activities.push(toActivity(
             event,
             'large-trades',
-            positiveFlow ? 'Abnormal Large Inflow' : negativeFlow ? 'Abnormal Large Outflow' : 'Abnormal Large Trades',
+            positiveFlow ? 'Large Flow Inflow' : negativeFlow ? 'Large Flow Outflow' : getHonestTriggerLabel('Abnormal Large Trades'),
             `${tokenLabel} has ${positiveFlow ? 'positive' : negativeFlow ? 'negative' : 'unusual'} net flow of ${formatCompactUsd(Math.abs(event.metrics.netFlow))}.`,
             Math.abs(event.metrics.netFlow),
             positiveFlow ? 'bullish' : negativeFlow ? 'bearish' : 'neutral'

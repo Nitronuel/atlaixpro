@@ -6,6 +6,10 @@ import { DatabaseService } from '../src/services/DatabaseService';
 import { ImpactfulTokenActivityStore } from './impactful-token-activity';
 import type { ImpactfulTokenActivity } from './impactful-token-activity';
 import { DetectionSnapshotStore } from './detection-snapshot-store';
+import { DetectionPairSnapshotStore } from './detection-pair-snapshot-store';
+import { enrichEventsWithSnapshotDeltas } from './detection-snapshot-delta-enricher';
+import { DetectionOutcomeTracker } from './detection-outcome-tracker';
+import { SelectiveAlchemyVerifier } from './selective-alchemy-verifier';
 import { buildDetectionImpactActivities } from './token-impact-timeline-builder';
 
 type RunnerStatus = {
@@ -30,6 +34,7 @@ const PREWARM_CONCURRENCY = 2;
 const PREWARM_STALE_MS = 10 * 60 * 1000;
 const WATCH_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const PREWARM_TIMEOUT_MS = 18_000;
+const SNAPSHOT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 const readNumberEnv = (key: string, fallback: number) => {
     const value = Number(process.env[key]);
@@ -137,6 +142,7 @@ export class DetectionEngineRunner {
     private status: RunnerStatus;
     private readonly configureWebhooks = readBooleanEnv('DETECTION_ENGINE_CONFIGURE_WEBHOOKS', false);
     private readonly prewarmLimit = readNumberEnv('DETECTION_ENGINE_PREWARM_LIMIT', DEFAULT_TOP_LIMIT);
+    private lastSnapshotCleanupAt = 0;
 
     constructor() {
         this.status = {
@@ -187,14 +193,19 @@ export class DetectionEngineRunner {
 
         try {
             const response = await DatabaseService.getMarketData(true, false);
+            await DetectionPairSnapshotStore.insertCoinSnapshots(response.data);
+            await this.prunePairSnapshotsIfDue();
             const detectedEvents = AlphaGauntletService.getDetectionEvents(response.data);
             const topEvents = detectedEvents
                 .filter((event) => Boolean(event.token.address))
                 .sort((a, b) => b.score - a.score)
                 .slice(0, this.status.topLimit);
 
-            const sharedTopEvents = await DetectionSnapshotStore.upsertEvents(topEvents);
+            const snapshotAwareTopEvents = await enrichEventsWithSnapshotDeltas(topEvents);
+            const verifiedTopEvents = await SelectiveAlchemyVerifier.enrichEvents(snapshotAwareTopEvents);
+            const sharedTopEvents = await DetectionSnapshotStore.upsertEvents(verifiedTopEvents);
             await DatabaseService.syncDetectionEvents(sharedTopEvents);
+            await DetectionOutcomeTracker.recordDueOutcomes(sharedTopEvents);
             await this.persistDetectionTimelineEvents(sharedTopEvents);
             await this.watchTopEvents(sharedTopEvents);
             await this.prewarmTopEvents(sharedTopEvents);
@@ -239,6 +250,13 @@ export class DetectionEngineRunner {
             });
             this.watchedUntil.set(watchKey, now + ttlMs);
         }
+    }
+
+    private async prunePairSnapshotsIfDue() {
+        const now = Date.now();
+        if (now - this.lastSnapshotCleanupAt < SNAPSHOT_CLEANUP_INTERVAL_MS) return;
+        this.lastSnapshotCleanupAt = now;
+        await DetectionPairSnapshotStore.pruneOldSnapshots();
     }
 
     private async persistDetectionTimelineEvents(events: AlphaGauntletEvent[]) {

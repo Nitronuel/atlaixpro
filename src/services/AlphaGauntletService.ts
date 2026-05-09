@@ -1,5 +1,6 @@
 // Intelligence service module for Atlaix data workflows.
-import { AlphaGauntletEvent, AlphaGauntletEventType, AlphaGauntletTrigger, MarketCoin } from '../types';
+import { AlphaGauntletEvent, AlphaGauntletEventType, AlphaGauntletTrigger, DetectionLane, MarketCoin } from '../types';
+import { buildDetectionSummary, enrichDetectionEvent, getHonestTriggerLabel } from './detection/DetectionEventPresenter';
 import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
 const OVERVIEW_THRESHOLD = 70;
@@ -52,6 +53,21 @@ const hasHealthyLiquidityStructure = (marketCap: number, liquidity: number, volu
     return false;
 };
 
+const inferLane = (
+    eventType: AlphaGauntletEventType,
+    ageHours: number,
+    lpToMarketCapRatio: number,
+    score: number,
+    triggers: AlphaGauntletTrigger[]
+): DetectionLane => {
+    if (eventType === 'Market Stress') return 'Market Stress';
+    if (triggers.includes('Liquidity Removed') || lpToMarketCapRatio <= 0.08) return 'Liquidity Risk';
+    if (ageHours <= 6) return 'Fresh Launch';
+    if (ageHours <= 72) return 'Emerging Momentum';
+    if (score < 72) return 'Watchlist Candidate';
+    return 'Established Momentum';
+};
+
 const classifyEvent = (
     triggers: AlphaGauntletTrigger[],
     priceChange24h: number,
@@ -66,9 +82,7 @@ const classifyEvent = (
     const sellVolumeLeads = volumeFlowRatio <= 0.98 || netFlow < 0;
     const countSellPressure = buySellRatio <= 0.8;
 
-    if (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed')) return 'Liquidity Event';
     if (triggers.includes('Price Dump') && (triggers.includes('Strong Sell Pressure') || lpToMarketCapRatio < 0.15)) return 'Market Stress';
-    if (triggers.includes('Price Recovery') && triggers.includes('Volume Spike')) return 'Recovery';
     if (triggers.includes('Strong Sell Pressure')) {
         if (strongPositiveMomentum && buyVolumeLeads) return 'Recovery';
         if (strongPositiveMomentum) return triggers.includes('Price Recovery') ? 'Recovery' : 'Unusual Activity';
@@ -76,13 +90,106 @@ const classifyEvent = (
         return 'Unusual Activity';
     }
     if (triggers.includes('Strong Buy Pressure') && (triggers.includes('Volume Spike') || buySellRatio >= 1.4)) return 'Accumulation';
+    if (triggers.includes('Price Recovery') && triggers.includes('Volume Spike')) return 'Recovery';
+    if (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed')) return 'Liquidity Event';
     if (priceChange24h < -15) return 'Market Stress';
     return 'Unusual Activity';
 };
 
 const buildSummary = (eventType: AlphaGauntletEventType, coin: MarketCoin, triggers: AlphaGauntletTrigger[], score: number) => {
-    const triggerText = triggers.slice(0, 2).join(' + ').toLowerCase();
-    return `${coin.ticker} qualified as ${eventType.toLowerCase()} with ${triggerText || 'unusual activity'} and a ${score} Alpha score.`;
+    const triggerLabels = triggers.map(getHonestTriggerLabel);
+    return buildDetectionSummary(eventType, coin.ticker, triggerLabels, score);
+};
+
+const computeV2Scores = (
+    marketStructure: number,
+    liquidityHealth: number,
+    activity: number,
+    eventStrength: number,
+    triggers: AlphaGauntletTrigger[],
+    metrics: {
+        liquidity: number;
+        volume24h: number;
+        lpToMarketCapRatio: number;
+        buySellRatio: number;
+        netFlow: number;
+        priceChange24h: number;
+    }
+) => {
+    const volumeToLiquidity = metrics.liquidity > 0 ? metrics.volume24h / metrics.liquidity : 0;
+    const flowShare = metrics.volume24h > 0 ? Math.abs(metrics.netFlow) / metrics.volume24h : 0;
+    const buySellBalance = Math.max(0, 100 - Math.abs((metrics.buySellRatio || 1) - 1) * 45);
+    const turnoverPenalty = volumeToLiquidity >= 8 ? 35 : volumeToLiquidity >= 5 ? 22 : volumeToLiquidity >= 3 ? 10 : 0;
+    const thinLiquidityPenalty = metrics.lpToMarketCapRatio <= 0.08 ? 26 : metrics.lpToMarketCapRatio <= 0.12 ? 12 : 0;
+    const contradictionPenalty =
+        metrics.priceChange24h > 10 && metrics.netFlow < 0 ? 18 :
+            metrics.priceChange24h < -8 && metrics.netFlow > 0 ? 12 :
+                0;
+
+    const activityScore = activity;
+    const liquidityQualityScore = Math.round(clamp(liquidityHealth - turnoverPenalty - thinLiquidityPenalty));
+    const marketQualityScore = Math.round(clamp(
+        marketStructure * 0.3 +
+        eventStrength * 0.25 +
+        buySellBalance * 0.25 +
+        liquidityQualityScore * 0.2 -
+        contradictionPenalty
+    ));
+    const manipulationRiskScore = Math.round(clamp(
+        turnoverPenalty +
+        thinLiquidityPenalty +
+        contradictionPenalty +
+        (flowShare >= 0.2 ? 18 : flowShare >= 0.12 ? 10 : 0) +
+        (triggers.includes('Liquidity Removed') ? 12 : 0)
+    ));
+    const detectionGrade = Math.round(clamp(
+        activityScore * 0.3 +
+        marketQualityScore * 0.3 +
+        liquidityQualityScore * 0.2 +
+        eventStrength * 0.2 -
+        manipulationRiskScore * 0.15
+    ));
+
+    return {
+        activityScore,
+        marketQualityScore,
+        liquidityQualityScore,
+        manipulationRiskScore,
+        detectionGrade
+    };
+};
+
+const laneThreshold = (lane: DetectionLane) => {
+    switch (lane) {
+        case 'Fresh Launch': return 58;
+        case 'Emerging Momentum': return 62;
+        case 'Established Momentum': return 65;
+        case 'Market Stress': return 60;
+        case 'Liquidity Risk': return 62;
+        case 'Watchlist Candidate': return 68;
+        case 'Paid Attention': return 70;
+        default: return DETECTION_THRESHOLD;
+    }
+};
+
+const shouldAdmitEvent = (event: AlphaGauntletEvent, fallbackThreshold: number) => {
+    const lane = event.lane || 'Watchlist Candidate';
+    const grade = event.score;
+    const threshold = Math.max(Math.min(fallbackThreshold, 70), laneThreshold(lane));
+
+    if (lane === 'Liquidity Risk') {
+        return event.triggers.includes('Liquidity Removed') && (
+            event.metrics.volume24h >= 500000 ||
+            event.metrics.lpToMarketCapRatio <= 0.06 ||
+            event.snapshotDeltas?.some((delta) => delta.liquidityChangePct <= -20)
+        );
+    }
+
+    if (lane === 'Watchlist Candidate') {
+        return grade >= threshold && (event.confidence?.score || 0) >= 55;
+    }
+
+    return grade >= threshold;
 };
 
 export const AlphaGauntletService = {
@@ -125,17 +232,25 @@ export const AlphaGauntletService = {
         const triggers: AlphaGauntletTrigger[] = [];
         const volumeToLiquidity = liquidity > 0 ? volume24h / liquidity : 0;
         const volumeToMarketCap = marketCap > 0 ? volume24h / marketCap : 0;
+        const largeFlowThreshold = liquidity < 250000
+            ? Math.max(50000, liquidity * 0.2, volume24h * 0.25)
+            : liquidity < 1000000
+                ? Math.max(150000, liquidity * 0.12, volume24h * 0.15)
+                : Math.max(300000, liquidity * 0.08, volume24h * 0.12);
 
         if (volumeToLiquidity >= 1.2 || volumeToMarketCap >= 0.2 || volume24h >= 1000000) triggers.push('Volume Spike');
-        if (transactions24h >= 2000 || transactions24h / Math.max(holderProxy, 1) >= 2) triggers.push('Transaction Spike');
+        if (
+            transactions24h >= 10000 ||
+            (transactions24h >= 5000 && volumeToLiquidity >= 3) ||
+            (ageHours <= 24 && transactions24h >= 3500 && volumeToLiquidity >= 2)
+        ) triggers.push('Transaction Spike');
         if ((buySellRatio >= 1.25 && netFlow > 0) || (volumeFlowRatio >= 1.08 && priceChange24h >= 5) || (buySellRatio >= 1.5 && volume24h >= 500000)) triggers.push('Strong Buy Pressure');
         if ((buySellRatio <= 0.8 && netFlow < 0) || (volumeFlowRatio <= 0.92 && priceChange24h <= 5) || (buySellRatio <= 0.67 && volume24h >= 500000 && netFlow <= 0)) triggers.push('Strong Sell Pressure');
         if (lpToMarketCapRatio >= 0.25 && volumeToLiquidity >= 0.6) triggers.push('Liquidity Added');
         if (lpToMarketCapRatio <= 0.08 && volume24h >= 500000) triggers.push('Liquidity Removed');
-        if (holderProxy >= 2500 && transactions24h >= 2500) triggers.push('Holder Growth Spike');
         if (priceChange24h <= -12 || priceChange1h <= -8) triggers.push('Price Dump');
         if ((priceChange1h >= 5 || priceChange24h >= 12) && priceChange24h > -10 && volumeToLiquidity >= 0.5) triggers.push('Price Recovery');
-        if (absNetFlow >= 35000 || absNetFlow >= volume24h * 0.08) triggers.push('Abnormal Large Trades');
+        if (absNetFlow >= largeFlowThreshold) triggers.push('Abnormal Large Trades');
 
         if (triggers.length === 0) return null;
 
@@ -166,16 +281,26 @@ export const AlphaGauntletService = {
             scoreRatio(absNetFlow, 250000) * 0.25
         ));
 
-        const total = Math.round(
+        const legacyTotal = Math.round(
             marketStructure * 0.35 +
             liquidityHealth * 0.25 +
             activity * 0.25 +
             eventStrength * 0.15
         );
 
-        const severity = total >= 85 ? 'High' : total >= 72 ? 'Medium' : 'Low';
+        const v2Scores = computeV2Scores(marketStructure, liquidityHealth, activity, eventStrength, triggers, {
+            liquidity,
+            volume24h,
+            lpToMarketCapRatio,
+            buySellRatio,
+            netFlow,
+            priceChange24h
+        });
+        const total = Math.max(legacyTotal, v2Scores.detectionGrade);
+        const severity = total >= 85 || (eventType === 'Market Stress' && v2Scores.manipulationRiskScore >= 55) ? 'High' : total >= 72 ? 'Medium' : 'Low';
+        const lane = inferLane(eventType, ageHours, lpToMarketCapRatio, total, triggers);
 
-        return {
+        return enrichDetectionEvent({
             token: coin,
             eventType,
             triggers,
@@ -184,6 +309,11 @@ export const AlphaGauntletService = {
             severity,
             summary: buildSummary(eventType, coin, triggers, total),
             detectedAt: Date.now(),
+            lane,
+            activityScore: v2Scores.activityScore,
+            marketQualityScore: v2Scores.marketQualityScore,
+            liquidityQualityScore: v2Scores.liquidityQualityScore,
+            manipulationRiskScore: v2Scores.manipulationRiskScore,
             metrics: {
                 marketCap,
                 liquidity,
@@ -199,14 +329,19 @@ export const AlphaGauntletService = {
                 priceChange24h,
                 netFlow
             }
-        };
+        });
     },
 
     qualifyTokens(tokens: MarketCoin[], threshold = DETECTION_THRESHOLD): AlphaGauntletEvent[] {
         return tokens
             .map(token => this.qualifyToken(token))
-            .filter((event): event is AlphaGauntletEvent => Boolean(event && event.score >= threshold))
-            .sort((a, b) => b.score - a.score);
+            .filter((event): event is AlphaGauntletEvent => Boolean(event && shouldAdmitEvent(event, threshold)))
+            .sort((a, b) => {
+                const urgencyA = a.lane === 'Market Stress' ? (a.manipulationRiskScore || 0) : a.score;
+                const urgencyB = b.lane === 'Market Stress' ? (b.manipulationRiskScore || 0) : b.score;
+                if (urgencyB !== urgencyA) return urgencyB - urgencyA;
+                return (b.confidence?.score || 0) - (a.confidence?.score || 0);
+            });
     },
 
     getOverviewEvents(tokens: MarketCoin[]): AlphaGauntletEvent[] {
