@@ -90,11 +90,14 @@ const HELIUS_RPC_URL = APP_CONFIG.heliusKey
 const ALCHEMY_RPC_URL = APP_CONFIG.alchemyKey
     ? `https://solana-mainnet.g.alchemy.com/v2/${APP_CONFIG.alchemyKey}`
     : null;
+const browserApiUrl = (path: string) => APP_CONFIG.apiBaseUrl
+    ? `${APP_CONFIG.apiBaseUrl.replace(/\/$/, '')}${path}`
+    : path;
 const HELIUS_ENDPOINT = IS_BROWSER
-    ? '/api/providers/solana-helius'
+    ? browserApiUrl('/api/providers/solana-helius')
     : HELIUS_RPC_URL;
 const ALCHEMY_ENDPOINT = IS_BROWSER
-    ? '/api/providers/solana-alchemy'
+    ? browserApiUrl('/api/providers/solana-alchemy')
     : ALCHEMY_RPC_URL;
 const PUBLIC_ENDPOINT = (IS_DEV && IS_BROWSER) ? '/api/solana-public' : 'https://api.mainnet-beta.solana.com';
 const RPC_ENDPOINTS = [
