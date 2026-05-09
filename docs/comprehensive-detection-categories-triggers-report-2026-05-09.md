@@ -228,11 +228,7 @@ Build a detection pipeline with separate modules:
 5. `ClassificationEngine`
    - Produces primary category, secondary tags, confidence, and counter-signals.
 
-6. `SelectiveAlchemyVerifier`
-   - Runs only when needed.
-   - Adds wallet diversity sample, transfer concentration, token metadata, LP event evidence, and contract existence sanity checks.
-
-7. `OutcomeTracker`
+6. `OutcomeTracker`
    - Tracks detection outcomes at 5m, 15m, 1h, 6h, 24h.
    - Calibrates thresholds over time.
 
@@ -1499,8 +1495,7 @@ Update detection event types to include:
 - `whyDetected`,
 - `counterSignals`,
 - `watchConditions`,
-- `dataFreshness`,
-- `isContractSafetyVerified: false` for now.
+- `dataFreshness`.
 
 ### Task 2: Rename misleading triggers
 

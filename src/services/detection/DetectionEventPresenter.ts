@@ -274,7 +274,6 @@ export const enrichDetectionEvent = (event: AlphaGauntletEvent): AlphaGauntletEv
         manipulationRiskScore: event.manipulationRiskScore ?? Math.round(clamp(100 - event.scores.liquidityHealth + (event.triggers.includes('Holder Growth Spike') ? 12 : 0))),
         confidence: event.confidence || buildConfidence(event),
         triggerDetails,
-        isContractSafetyVerified: false,
         dataFreshnessMs: event.dataFreshnessMs ?? Math.max(0, Date.now() - event.detectedAt)
     };
 

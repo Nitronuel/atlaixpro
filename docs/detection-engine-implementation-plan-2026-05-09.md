@@ -2,7 +2,7 @@
 
 Date: 2026-05-09
 
-Purpose: Turn the comprehensive Detection Engine category and trigger redesign into a practical engineering roadmap. This plan is scoped to DexScreener plus selective low-cost Alchemy. It does not depend on the current Smart Money Engine or Safe Scan page for detection quality.
+Purpose: Turn the comprehensive Detection Engine category and trigger redesign into a practical engineering roadmap. This implementation is scoped to DexScreener plus snapshot history, with no detection-specific Alchemy re-verification layer. It does not depend on the current Smart Money Engine or Safe Scan page for detection quality.
 
 Related reports:
 
@@ -22,8 +22,7 @@ The recommended implementation sequence is:
 4. Use snapshot deltas to improve liquidity, recovery, momentum, and stress detection.
 5. Add lane-specific classification.
 6. Update the Detection UI to show evidence, confidence, counter-signals, and watch conditions.
-7. Add selective Alchemy verification only after the DexScreener + snapshot system is stable.
-8. Add outcome tracking to measure whether the engine is actually working.
+7. Add outcome tracking to measure whether the engine is actually working.
 
 The most important technical point: the repo already has `server/detection-snapshot-store.ts` and `supabase/detected_token_snapshots.sql`, but that table is currently a latest-state shared detection cache keyed by `detection_key`. It is not a full time-series pair snapshot system. We should keep it for feed sharing, but add a new historical pair snapshot table for detection deltas.
 
@@ -183,7 +182,6 @@ whyDetected?: string[];
 counterSignals?: string[];
 watchConditions?: DetectionWatchCondition[];
 dataFreshnessMs?: number;
-isContractSafetyVerified?: false;
 ```
 
 Why optional first:
@@ -660,56 +658,7 @@ Do not make the page feel like a giant report. Users should scan quickly:
 - Low-confidence events are clearly marked.
 - Paid attention is not visually treated as bullish by default.
 
-## 13. Phase 7 - Selective Alchemy Verification
-
-Goal: improve quality only where it matters, without high cost.
-
-### When to run Alchemy
-
-Run only for:
-
-- top candidates by V2 detection grade,
-- user-opened token detail pages,
-- high severity `Market Stress` or `Liquidity Risk`,
-- contradictory signals,
-- watchlisted tokens.
-
-### Backend tasks
-
-Create `server/selective-alchemy-verifier.ts`.
-
-Suggested checks:
-
-- EVM:
-  - `eth_getCode` for contract existence.
-  - `alchemy_getTokenMetadata`.
-  - sampled `alchemy_getAssetTransfers` for recent transfer diversity.
-  - selected `eth_getLogs` for LP events only when needed.
-
-- Solana:
-  - `getTokenSupply`.
-  - `getTokenLargestAccounts`.
-  - limited `getSignaturesForAddress`.
-  - limited `getTransaction` sampling.
-
-### Cache and budget
-
-Add:
-
-- cache key: `chain:tokenAddress:verificationType`,
-- TTL: 10 to 30 minutes,
-- daily call counter,
-- enrichment reason,
-- failure fallback.
-
-### Acceptance criteria
-
-- Alchemy is not called for every feed event.
-- Every Alchemy call has a reason.
-- Costs can be monitored.
-- Detection still works when Alchemy fails.
-
-## 14. Phase 8 - Outcome Tracking
+## 13. Phase 7 - Outcome Tracking
 
 Goal: measure whether signals are good.
 
@@ -944,19 +893,6 @@ Deliverables:
 Acceptance:
 
 - User can understand the detection reason quickly.
-
-### Ticket 12: Add selective Alchemy verifier
-
-Files:
-
-- `server/selective-alchemy-verifier.ts`
-- optional Supabase cache migration
-
-Deliverables:
-
-- Budgeted verifier.
-- Caching.
-- Enrichment reasons.
 
 Acceptance:
 

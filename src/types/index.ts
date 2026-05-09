@@ -201,7 +201,6 @@ export interface AlphaGauntletEvent {
     snapshotDeltas?: DetectionSnapshotDelta[];
     snapshotInsights?: string[];
     dataFreshnessMs?: number;
-    isContractSafetyVerified?: false;
 }
 
 export interface Post {

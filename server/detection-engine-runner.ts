@@ -9,7 +9,6 @@ import { DetectionSnapshotStore } from './detection-snapshot-store';
 import { DetectionPairSnapshotStore } from './detection-pair-snapshot-store';
 import { enrichEventsWithSnapshotDeltas } from './detection-snapshot-delta-enricher';
 import { DetectionOutcomeTracker } from './detection-outcome-tracker';
-import { SelectiveAlchemyVerifier } from './selective-alchemy-verifier';
 import { buildDetectionImpactActivities } from './token-impact-timeline-builder';
 
 type RunnerStatus = {
@@ -202,8 +201,7 @@ export class DetectionEngineRunner {
                 .slice(0, this.status.topLimit);
 
             const snapshotAwareTopEvents = await enrichEventsWithSnapshotDeltas(topEvents);
-            const verifiedTopEvents = await SelectiveAlchemyVerifier.enrichEvents(snapshotAwareTopEvents);
-            const sharedTopEvents = await DetectionSnapshotStore.upsertEvents(verifiedTopEvents);
+            const sharedTopEvents = await DetectionSnapshotStore.upsertEvents(snapshotAwareTopEvents);
             await DatabaseService.syncDetectionEvents(sharedTopEvents);
             await DetectionOutcomeTracker.recordDueOutcomes(sharedTopEvents);
             await this.persistDetectionTimelineEvents(sharedTopEvents);

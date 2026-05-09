@@ -70,7 +70,6 @@ const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import(
 const { DetectionEngineRunner } = await import('./detection-engine-runner');
 const { DetectionSnapshotStore } = await import('./detection-snapshot-store');
 const { DetectionOutcomeTracker } = await import('./detection-outcome-tracker');
-const { SelectiveAlchemyVerifier } = await import('./selective-alchemy-verifier');
 const { DatabaseService } = await import('../src/services/DatabaseService');
 const { ChainRouter } = await import('../src/services/ChainRouter');
 const { SmartMoneyQualificationService } = await import('../src/services/SmartMoneyQualificationService');
@@ -777,7 +776,6 @@ const server = createServer(async (request, response) => {
             const summary = await DetectionOutcomeTracker.getSignalQualitySummary();
             json(response, 200, {
                 summary,
-                alchemy: SelectiveAlchemyVerifier.getStats(),
                 generatedAt: new Date().toISOString()
             });
             return;
