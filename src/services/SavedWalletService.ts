@@ -1,8 +1,6 @@
 // Intelligence service module for Atlaix data workflows.
 import { SavedWallet, WalletCategory } from '../types';
 import { WalletStats } from '../hooks/useWalletPortfolio';
-import { SmartMoneyQualificationService } from './SmartMoneyQualificationService';
-import { DatabaseService } from './DatabaseService';
 
 const STORAGE_KEY = 'atlaix_saved_wallets';
 
@@ -18,14 +16,6 @@ const withLegacyMigration = (wallet: any): SavedWallet => ({
 });
 
 const buildAutoTrackedName = (addr: string) => `Tracked ${addr.slice(0, 6)}...${addr.slice(-4)}`;
-
-const syncQualifiedWalletToGlobalSmartMoney = (wallet: SavedWallet) => {
-    if (!wallet.qualification?.qualified) return;
-
-    DatabaseService.upsertSmartMoneyWallet(wallet).catch((error) => {
-        console.warn('Global smart money sync skipped:', error instanceof Error ? error.message : error);
-    });
-};
 
 export const SavedWalletService = {
     getWallets: (): SavedWallet[] => {
@@ -64,7 +54,6 @@ export const SavedWalletService = {
             }
 
             persistWallets(wallets);
-            syncQualifiedWalletToGlobalSmartMoney(newWallet);
             return newWallet;
         } catch (e) {
             console.error("Failed to save wallet", e);
@@ -112,11 +101,9 @@ export const SavedWalletService = {
             const index = wallets.findIndex(w => w.addr.toLowerCase() === addr.toLowerCase());
 
             if (index !== -1) {
-                const qualification = walletStats ? SmartMoneyQualificationService.evaluate(walletStats) : wallets[index].qualification;
+                const qualification = wallets[index].qualification;
                 const existingCategories = wallets[index].categories || [];
-                const nextCategories: WalletCategory[] = qualification?.qualified && !existingCategories.includes('Smart Money')
-                    ? [...existingCategories, 'Smart Money']
-                    : existingCategories;
+                const nextCategories: WalletCategory[] = existingCategories;
                 const nextBalance = stats.bal || wallets[index].lastBalance;
                 const nextWinRate = stats.win || wallets[index].lastWinRate;
                 const nextPnl = stats.pnl || wallets[index].lastPnl;
@@ -127,11 +114,9 @@ export const SavedWalletService = {
                     wallets[index].lastWinRate !== nextWinRate ||
                     wallets[index].lastPnl !== nextPnl ||
                     qualificationChanged ||
-                    categoriesChanged ||
-                    (qualification?.qualified ? true : wallets[index].autoPromotedToSmartMoney) !== wallets[index].autoPromotedToSmartMoney;
+                    categoriesChanged;
 
                 if (!hasChanged) {
-                    syncQualifiedWalletToGlobalSmartMoney(wallets[index]);
                     return false;
                 }
 
@@ -142,10 +127,9 @@ export const SavedWalletService = {
                     lastPnl: nextPnl,
                     qualification,
                     categories: nextCategories,
-                    autoPromotedToSmartMoney: qualification?.qualified ? true : wallets[index].autoPromotedToSmartMoney
+                    autoPromotedToSmartMoney: wallets[index].autoPromotedToSmartMoney
                 };
                 persistWallets(wallets);
-                syncQualifiedWalletToGlobalSmartMoney(wallets[index]);
 
                 return true;
             }

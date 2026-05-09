@@ -70,6 +70,9 @@ const { getAlchemyHubChain, getAlchemyHubScanDepth, isEvmChain } = await import(
 const { DetectionEngineRunner } = await import('./detection-engine-runner');
 const { DetectionSnapshotStore } = await import('./detection-snapshot-store');
 const { DatabaseService } = await import('../src/services/DatabaseService');
+const { ChainRouter } = await import('../src/services/ChainRouter');
+const { SmartMoneyQualificationService } = await import('../src/services/SmartMoneyQualificationService');
+const { validateWalletAddress } = await import('../src/utils/wallet');
 const { SmartAlertRunner } = await import('./smart-alert-runner');
 const detectionEngine = new DetectionEngineRunner();
 const smartAlertRunner = new SmartAlertRunner();
@@ -153,6 +156,18 @@ function normalizeAddress(value: string) {
     return value.trim();
 }
 
+function normalizeWalletAddressForStorage(value: string) {
+    const trimmed = value.trim();
+    return trimmed.startsWith('0x') ? trimmed.toLowerCase() : trimmed;
+}
+
+function getWalletScanChain(walletType: 'evm' | 'solana' | null, requestedChain?: string) {
+    if (walletType === 'solana') return 'Solana';
+    const chain = String(requestedChain || '').trim();
+    if (!chain || chain.toLowerCase() === 'solana') return 'All Chains';
+    return chain;
+}
+
 function normalizeText(value: string | undefined | null) {
     return String(value || '').trim().toLowerCase();
 }
@@ -168,6 +183,116 @@ function compactMetric(value: string | number | undefined | null) {
     if (raw.includes('M')) return signed * 1e6;
     if (raw.includes('K')) return signed * 1e3;
     return signed;
+}
+
+function formatUsd(value: number) {
+    return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function buildWalletStats(portfolio: any, assetsWithPnl: any[]) {
+    const assets = Array.isArray(portfolio?.assets) ? portfolio.assets : [];
+    const totalHoldingsValue = assets.reduce((sum: number, asset: any) => sum + Number(asset.rawValue || 0), 0);
+    const validAssets = assetsWithPnl.filter((asset) => asset.pnlPercent !== undefined && asset.avgBuy !== 'N/A');
+    const winningAssets = validAssets.filter((asset) => Number(asset.pnlPercent || 0) > 0);
+    const activePositions = assets.filter((asset: any) => Number(asset.rawValue || 0) > 1).length;
+
+    let totalPnlPercent = 0;
+    let pnlPrefix = '';
+
+    if (validAssets.length > 0) {
+        let totalCostBasis = 0;
+        let totalCurrentValueForPnl = 0;
+
+        validAssets.forEach((asset) => {
+            const rawValue = Number(asset.rawValue || 0);
+            const pnlPercent = Number(asset.pnlPercent || 0);
+            const cost = rawValue / (1 + (pnlPercent / 100));
+            totalCostBasis += cost;
+            totalCurrentValueForPnl += rawValue;
+        });
+
+        const totalPnlValue = totalCurrentValueForPnl - totalCostBasis;
+        totalPnlPercent = totalCostBasis > 0 ? (totalPnlValue / totalCostBasis) * 100 : 0;
+        pnlPrefix = totalPnlValue >= 0 ? '+' : '';
+    }
+
+    return {
+        winRate: validAssets.length > 0 ? `${Math.round((winningAssets.length / validAssets.length) * 100)}%` : 'N/A',
+        totalPnL: validAssets.length > 0 ? `${pnlPrefix}${totalPnlPercent.toFixed(2)}%` : 'N/A',
+        netWorth: formatUsd(totalHoldingsValue),
+        activePositions,
+        profitableTrader: winningAssets.length.toString(),
+        avgHoldTime: 'N/A'
+    };
+}
+
+async function scanSmartMoneyWallet(walletAddress: string, requestedChain?: string) {
+    const validation = validateWalletAddress(walletAddress);
+    if (!validation.isValid) {
+        throw new Error(validation.error || 'Enter a valid EVM or Solana wallet address.');
+    }
+
+    const normalizedAddress = normalizeWalletAddressForStorage(validation.normalizedAddress);
+    const chain = getWalletScanChain(validation.type, requestedChain);
+
+    if (await DatabaseService.isSmartMoneyWalletExcluded(normalizedAddress)) {
+        return {
+            wallet: null,
+            excluded: true,
+            qualified: false,
+            message: 'This wallet is excluded from Smart Money promotion.'
+        };
+    }
+
+    const portfolio = await ChainRouter.fetchPortfolio(chain, normalizedAddress, true);
+    const candidateAssets = (portfolio.assets || [])
+        .filter((asset: any) => Number(asset.rawValue || 0) > 1 && Number(asset.currentPrice || 0) > 0)
+        .slice(0, 8);
+
+    const assetsWithPnl = await Promise.all(candidateAssets.map(async (asset: any) => {
+        try {
+            let assetChain = asset.chain || chain;
+            if (assetChain === 'All Chains' || !assetChain) {
+                assetChain = String(asset.address || '').startsWith('0x') ? 'Ethereum' : 'Solana';
+            }
+
+            const pnl = await ChainRouter.fetchTokenPnL(assetChain, normalizedAddress, asset.address, Number(asset.currentPrice || 0), 'ALL');
+            return { ...asset, ...pnl };
+        } catch {
+            return { ...asset, avgBuy: 'N/A', pnl: 'N/A', pnlPercent: undefined };
+        }
+    }));
+
+    const stats = buildWalletStats(portfolio, assetsWithPnl);
+    const qualification = SmartMoneyQualificationService.evaluate(stats);
+    const wallet = {
+        addr: normalizedAddress,
+        name: `Tracked ${normalizedAddress.slice(0, 6)}...${normalizedAddress.slice(-4)}`,
+        categories: qualification.qualified ? ['Smart Money'] : [],
+        timestamp: Date.now(),
+        lastBalance: stats.netWorth,
+        lastWinRate: stats.winRate,
+        lastPnl: stats.totalPnL,
+        qualification,
+        autoTracked: false,
+        autoPromotedToSmartMoney: qualification.qualified
+    };
+
+    if (qualification.qualified) {
+        await DatabaseService.upsertSmartMoneyWallet(wallet);
+    }
+
+    return {
+        wallet,
+        excluded: false,
+        qualified: qualification.qualified,
+        portfolio: {
+            netWorth: portfolio.netWorth,
+            assetCount: portfolio.assets?.length || 0,
+            providerUsed: portfolio.providerUsed,
+            timestamp: portfolio.timestamp
+        }
+    };
 }
 
 function normalizeTokenLookup(coin: any, source = 'market-cache') {
@@ -520,6 +645,61 @@ const server = createServer(async (request, response) => {
     if (method === 'GET' && requestUrl.pathname === '/api/smart-alerts/status') {
         json(response, 200, smartAlertRunner.getStatus());
         return;
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/smart-money/wallets') {
+        try {
+            const wallets = await DatabaseService.fetchSmartMoneyWallets();
+            json(response, 200, {
+                wallets,
+                generatedAt: new Date().toISOString(),
+                source: 'backend'
+            });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'Could not load Smart Money wallets.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/smart-money/track-wallet') {
+        try {
+            const body = await readJsonBody(request) as { walletAddress?: string; chain?: string };
+            const result = await scanSmartMoneyWallet(String(body.walletAddress || ''), body.chain);
+            json(response, 200, result);
+            return;
+        } catch (error) {
+            json(response, 400, {
+                error: error instanceof Error ? error.message : 'Could not scan Smart Money wallet.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/smart-money/exclude-wallet') {
+        try {
+            const body = await readJsonBody(request) as { walletAddress?: string; reason?: string };
+            const validation = validateWalletAddress(String(body.walletAddress || ''));
+            if (!validation.isValid) {
+                json(response, 400, { error: validation.error || 'Enter a valid wallet address.' });
+                return;
+            }
+
+            const walletAddress = normalizeWalletAddressForStorage(validation.normalizedAddress);
+            await DatabaseService.excludeSmartMoneyWallet(walletAddress, body.reason);
+            json(response, 200, {
+                walletAddress,
+                excluded: true
+            });
+            return;
+        } catch (error) {
+            json(response, 400, {
+                error: error instanceof Error ? error.message : 'Could not exclude Smart Money wallet.'
+            });
+            return;
+        }
     }
 
     if (method === 'POST' && requestUrl.pathname === '/api/smart-alerts/run') {

@@ -25,16 +25,16 @@ const wallet = (patch: Partial<SavedWallet>): SavedWallet => ({
 });
 
 describe('mergeSmartMoneyWallets', () => {
-    it('keeps shared wallets and appends local qualified wallets', () => {
+    it('keeps backend-approved shared wallets and ignores local qualified wallets', () => {
         const shared = wallet({ addr: '0x1111111111111111111111111111111111111111', name: 'Shared Alpha' });
         const local = wallet({ addr: '0x2222222222222222222222222222222222222222', name: 'Local Alpha' });
 
         const merged = mergeSmartMoneyWallets([shared], [local]);
 
-        expect(merged.map((entry) => entry.addr)).toEqual([shared.addr, local.addr]);
+        expect(merged.map((entry) => entry.addr)).toEqual([shared.addr]);
     });
 
-    it('dedupes the same wallet and keeps the strongest qualification score', () => {
+    it('dedupes shared wallets and keeps the strongest backend qualification score', () => {
         const shared = wallet({
             addr: '0x3333333333333333333333333333333333333333',
             name: 'Shared Wallet',
@@ -55,7 +55,7 @@ describe('mergeSmartMoneyWallets', () => {
         const merged = mergeSmartMoneyWallets([shared], [local]);
 
         expect(merged).toHaveLength(1);
-        expect(merged[0].qualification?.score).toBe(91);
+        expect(merged[0].qualification?.score).toBe(72);
         expect(merged[0].categories).toContain('Smart Money');
     });
 });

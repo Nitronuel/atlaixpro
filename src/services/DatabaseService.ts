@@ -6,8 +6,11 @@ import { filterAlphaTokens, isExcludedAlphaToken } from '../utils/tokenFilters';
 
 // --- INITIALIZE SUPABASE ---
 const hasSupabaseConfig = Boolean(APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseAnonKey);
+const runtimeSupabaseKey = typeof window === 'undefined'
+    ? (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || APP_CONFIG.supabaseAnonKey)
+    : APP_CONFIG.supabaseAnonKey;
 const supabase = hasSupabaseConfig
-    ? createClient(APP_CONFIG.supabaseUrl, APP_CONFIG.supabaseAnonKey, {
+    ? createClient(APP_CONFIG.supabaseUrl, runtimeSupabaseKey, {
         auth: {
             persistSession: false,
             autoRefreshToken: false
@@ -16,6 +19,7 @@ const supabase = hasSupabaseConfig
     : null;
 let supabaseAvailable = hasSupabaseConfig;
 let smartMoneyWalletTableAvailable = hasSupabaseConfig;
+let smartMoneyExclusionTableAvailable = hasSupabaseConfig;
 let detectionEventsTableAvailable = hasSupabaseConfig;
 let hasWarnedAboutSupabase = false;
 let hasWarnedAboutSmartMoneyTable = false;
@@ -57,6 +61,7 @@ const DEXSCREENER_SEARCH_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/search`;
 const DEXSCREENER_PAIRS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/pairs`;
 const DEXSCREENER_TOKENS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/tokens`;
 const SMART_MONEY_TABLE = 'smart_money_wallets';
+const SMART_MONEY_EXCLUSIONS_TABLE = 'smart_money_exclusions';
 const DETECTION_EVENTS_TABLE = 'detection_engine_events';
 const GLOBAL_SMART_MONEY_SOURCE = 'wallet-tracking-global';
 const apiUrl = (path: string) => APP_CONFIG.apiBaseUrl
@@ -1330,6 +1335,7 @@ export const DatabaseService = {
         try {
             if (!supabase || !supabaseAvailable || !smartMoneyWalletTableAvailable) return;
             if (!isGlobalSmartMoneyCandidate(wallet)) return;
+            if (await DatabaseService.isSmartMoneyWalletExcluded(wallet.addr)) return;
 
             const categories = new Set<WalletCategory>(wallet.categories?.length ? wallet.categories : []);
             categories.add('Smart Money');
@@ -1399,12 +1405,94 @@ export const DatabaseService = {
                 return [];
             }
 
-            return data.map(mapSmartMoneyRowToWallet);
+            const exclusions = await DatabaseService.fetchSmartMoneyExclusions();
+            return data
+                .filter((row) => !exclusions.has(String(row.wallet_address || '').toLowerCase()))
+                .map(mapSmartMoneyRowToWallet);
         } catch (e) {
             if (e instanceof Error && /fetch failed|failed to fetch|network/i.test(e.message)) {
                 smartMoneyWalletTableAvailable = false;
             }
             return [];
+        }
+    },
+
+    fetchSmartMoneyExclusions: async (): Promise<Set<string>> => {
+        try {
+            if (!supabase || !supabaseAvailable || !smartMoneyExclusionTableAvailable) return new Set();
+
+            const { data, error } = await supabase
+                .from(SMART_MONEY_EXCLUSIONS_TABLE)
+                .select('wallet_address');
+
+            if (error || !data) {
+                if (error && /schema cache|does not exist|not find the table|PGRST|404/i.test(error.message)) {
+                    smartMoneyExclusionTableAvailable = false;
+                }
+                return new Set();
+            }
+
+            return new Set(data.map((row: any) => String(row.wallet_address || '').toLowerCase()).filter(Boolean));
+        } catch {
+            return new Set();
+        }
+    },
+
+    isSmartMoneyWalletExcluded: async (walletAddress: string): Promise<boolean> => {
+        const normalized = walletAddress.trim().toLowerCase();
+        if (!normalized) return false;
+
+        try {
+            if (!supabase || !supabaseAvailable || !smartMoneyExclusionTableAvailable) return false;
+
+            const { data, error } = await supabase
+                .from(SMART_MONEY_EXCLUSIONS_TABLE)
+                .select('wallet_address')
+                .eq('wallet_address', normalized)
+                .maybeSingle();
+
+            if (error) {
+                if (/schema cache|does not exist|not find the table|PGRST|404/i.test(error.message)) {
+                    smartMoneyExclusionTableAvailable = false;
+                }
+                return false;
+            }
+
+            return Boolean(data);
+        } catch {
+            return false;
+        }
+    },
+
+    excludeSmartMoneyWallet: async (walletAddress: string, reason?: string) => {
+        const normalized = walletAddress.trim().toLowerCase();
+        if (!normalized) throw new Error('Wallet address is required.');
+        if (!supabase || !supabaseAvailable) throw new Error('Supabase is not configured.');
+
+        if (smartMoneyExclusionTableAvailable) {
+            const { error } = await supabase
+                .from(SMART_MONEY_EXCLUSIONS_TABLE)
+                .upsert({
+                    wallet_address: normalized,
+                    reason: reason?.trim() || null
+                }, { onConflict: 'wallet_address' });
+
+            if (error) {
+                if (/schema cache|does not exist|not find the table|PGRST|404/i.test(error.message)) {
+                    smartMoneyExclusionTableAvailable = false;
+                } else {
+                    throw new Error(formatSupabaseError(error));
+                }
+            }
+        }
+
+        if (smartMoneyWalletTableAvailable) {
+            const { error } = await supabase
+                .from(SMART_MONEY_TABLE)
+                .delete()
+                .eq('wallet_address', normalized);
+
+            if (error) throw new Error(formatSupabaseError(error));
         }
     },
 

@@ -109,12 +109,12 @@ const VALUE_OPTIONS: Partial<Record<SmartAlertType, string[]>> = {
 };
 
 const SETUP_DEFAULTS: Record<SmartAlertType, AlertSetupDraft> = {
-    Price: { target: 'SOL', chainId: 'solana', tokenAddress: '', condition: 'above', thresholdKind: 'currency', threshold: '$200', notificationChannels: ['in_app'], expirationMinutes: null },
-    Volume: { target: 'Any token', chainId: 'solana', tokenAddress: '', condition: 'above', thresholdKind: 'currency', threshold: '$1M', notificationChannels: ['in_app'], expirationMinutes: null },
-    Liquidity: { target: 'Any token', chainId: 'solana', tokenAddress: '', condition: 'below', thresholdKind: 'currency', threshold: '$100K', notificationChannels: ['in_app'], expirationMinutes: null },
-    Whale: { target: 'Any token', chainId: 'solana', tokenAddress: '', condition: 'buy_above', thresholdKind: 'currency', threshold: '$50K', notificationChannels: ['in_app'], expirationMinutes: null },
-    Alpha: { target: 'Any token', chainId: 'solana', tokenAddress: '', condition: 'event_is', thresholdKind: 'event', threshold: 'Liquidity Event', notificationChannels: ['in_app'], expirationMinutes: null },
-    Risk: { target: 'Any token', chainId: 'solana', tokenAddress: '', condition: 'severity_is', thresholdKind: 'severity', threshold: 'High', notificationChannels: ['in_app'], expirationMinutes: null }
+    Price: { target: '', chainId: '', tokenAddress: '', condition: 'above', thresholdKind: 'currency', threshold: '$200', notificationChannels: ['in_app'], expirationMinutes: null },
+    Volume: { target: '', chainId: '', tokenAddress: '', condition: 'above', thresholdKind: 'currency', threshold: '$1M', notificationChannels: ['in_app'], expirationMinutes: null },
+    Liquidity: { target: '', chainId: '', tokenAddress: '', condition: 'below', thresholdKind: 'currency', threshold: '$100K', notificationChannels: ['in_app'], expirationMinutes: null },
+    Whale: { target: '', chainId: '', tokenAddress: '', condition: 'buy_above', thresholdKind: 'currency', threshold: '$50K', notificationChannels: ['in_app'], expirationMinutes: null },
+    Alpha: { target: '', chainId: '', tokenAddress: '', condition: 'event_is', thresholdKind: 'event', threshold: 'Liquidity Event', notificationChannels: ['in_app'], expirationMinutes: null },
+    Risk: { target: '', chainId: '', tokenAddress: '', condition: 'severity_is', thresholdKind: 'severity', threshold: 'High', notificationChannels: ['in_app'], expirationMinutes: null }
 };
 
 const EXPIRATION_OPTIONS = [
@@ -250,7 +250,7 @@ const currencyPattern = /^\$?\d+(?:\.\d+)?\s*[kKmMbB]?$/;
 const percentPattern = /^-?\d+(?:\.\d+)?%?$/;
 
 const validateDraft = (draft: AlertSetupDraft) => {
-    if (!draft.target.trim()) return 'Enter a target token or choose Any token.';
+    if (!draft.target.trim() || !draft.chainId.trim() || !draft.tokenAddress.trim()) return 'Enter a token contract address and wait for Atlaix to identify it.';
     if (!draft.threshold.trim()) return 'Enter a threshold.';
     if (draft.thresholdKind === 'currency' && !currencyPattern.test(draft.threshold.trim())) {
         return 'Use a currency value like $50K, $1.5M, or 50000.';
@@ -262,7 +262,9 @@ const validateDraft = (draft: AlertSetupDraft) => {
 };
 
 const getAlertTrigger = (template: BasicAlertType, draft: AlertSetupDraft) => {
-    const target = draft.target.trim() || 'Any token';
+    const target = draft.target.trim();
+    if (!target) return 'Select a token to preview this alert';
+
     const conditionLabel = CONDITION_OPTIONS[template.type].find((option) => option.value === draft.condition)?.label.toLowerCase() || draft.condition;
     const value = draft.thresholdKind === 'percent' && !draft.threshold.includes('%')
         ? `${draft.threshold}%`
@@ -435,6 +437,11 @@ export const SmartAlerts: React.FC = () => {
                     };
                 });
             } catch {
+                setSelectedToken(null);
+                setSetupDraft((current) => {
+                    if (current.tokenAddress.trim() !== address) return current;
+                    return { ...current, target: '', chainId: '' };
+                });
                 setSetupTokenLookupError('Could not find a token for that contract address.');
             } finally {
                 setSetupTokenLookupLoading(false);
@@ -761,6 +768,28 @@ export const SmartAlerts: React.FC = () => {
                     </button>
                 </div>
                 {tokenLookupError && <div className="mt-3 text-xs font-medium text-primary-red">{tokenLookupError}</div>}
+                {selectedToken && (
+                    <div className="mt-4 rounded-xl border border-primary-green/30 bg-primary-green/10 p-4">
+                        <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-primary-green">
+                            <CheckCircle2 size={14} />
+                            Token identified
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <div>
+                                <div className="text-xs font-bold text-text-dark">Token name</div>
+                                <div className="mt-1 truncate text-sm font-bold text-text-light">{selectedToken.name || selectedToken.symbol || 'Unknown token'}</div>
+                            </div>
+                            <div>
+                                <div className="text-xs font-bold text-text-dark">Token network</div>
+                                <div className="mt-1 truncate text-sm font-bold text-text-light">{selectedToken.chainId || 'Unknown network'}</div>
+                            </div>
+                            <div>
+                                <div className="text-xs font-bold text-text-dark">Contract</div>
+                                <div className="mt-1 font-mono text-sm font-bold text-text-light">{shortenAddress(selectedToken.address || tokenQuery)}</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 <div className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="inline-flex w-full rounded-xl border border-border bg-main p-1 sm:w-auto">
                         {(['single', 'linked'] as const).map((mode) => (
@@ -964,27 +993,35 @@ export const SmartAlerts: React.FC = () => {
                         <div className="custom-scrollbar max-h-[calc(92vh-152px)] space-y-5 overflow-y-auto p-5">
                             {formError && <div className="rounded-xl border border-primary-red/30 bg-primary-red/10 px-4 py-3 text-sm text-primary-red">{formError}</div>}
 
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <label className="block">
-                                    <span className="mb-2 block text-xs font-bold text-text-medium">Token name</span>
-                                    <input value={setupDraft.target} readOnly className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none placeholder:text-text-dark" placeholder="Token name appears after contract lookup" />
-                                </label>
-                                <label className="block">
-                                    <span className="mb-2 block text-xs font-bold text-text-medium">Detected chain</span>
-                                    <div className="w-full rounded-xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light">{setupDraft.chainId}</div>
-                                </label>
-                            </div>
-
                             <label className="block">
                                 <span className="mb-2 block text-xs font-bold text-text-medium">Token or pair address</span>
                                 <input value={setupDraft.tokenAddress} onChange={(event) => {
                                     setSetupTokenLookupError(null);
                                     setSelectedToken(null);
-                                    setSetupDraft((current) => ({ ...current, target: '', tokenAddress: event.target.value }));
+                                    setSetupDraft((current) => ({ ...current, target: '', chainId: '', tokenAddress: event.target.value }));
                                 }} className="w-full rounded-xl border border-border bg-main px-4 py-3 font-mono text-sm text-text-light outline-none placeholder:text-text-dark focus:border-primary-green/60" placeholder="Paste token contract address" />
                                 {setupTokenLookupLoading && <div className="mt-2 text-xs font-medium text-text-medium">Looking up token...</div>}
                                 {setupTokenLookupError && <div className="mt-2 text-xs font-medium text-primary-red">{setupTokenLookupError}</div>}
                             </label>
+
+                            {setupDraft.target && setupDraft.chainId && (
+                                <div className="rounded-xl border border-primary-green/30 bg-primary-green/10 p-4">
+                                    <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-primary-green">
+                                        <CheckCircle2 size={14} />
+                                        Token identified
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <div>
+                                            <div className="text-xs font-bold text-text-dark">Token name</div>
+                                            <div className="mt-1 truncate text-sm font-bold text-text-light">{setupDraft.target}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-xs font-bold text-text-dark">Token network</div>
+                                            <div className="mt-1 truncate text-sm font-bold text-text-light">{setupDraft.chainId}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block">

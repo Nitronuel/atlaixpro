@@ -5,8 +5,8 @@ import {
     Search, Filter, ChevronDown,
     Wallet, Activity, Layers
 } from 'lucide-react';
-import { SavedWalletService } from '../services/SavedWalletService';
 import { DatabaseService } from '../services/DatabaseService';
+import { SmartMoneyService } from '../services/SmartMoneyService';
 import { SavedWallet } from '../types';
 import { ChainRouter } from '../services/ChainRouter';
 import { ChainActivityService } from '../services/ChainActivityService';
@@ -66,10 +66,10 @@ const CHAIN_FILTERS = [
     { id: 'base', label: 'Base' }
 ];
 
-export const mergeSmartMoneyWallets = (sharedWallets: SavedWallet[], localWallets: SavedWallet[]) => {
+export const mergeSmartMoneyWallets = (sharedWallets: SavedWallet[], _localWallets: SavedWallet[] = []) => {
     const byAddress = new Map<string, SavedWallet>();
 
-    [...sharedWallets, ...localWallets].forEach((wallet) => {
+    sharedWallets.forEach((wallet) => {
         const key = wallet.addr.toLowerCase();
         const existing = byAddress.get(key);
         if (!existing) {
@@ -114,13 +114,11 @@ export const SmartMoney: React.FC = () => {
     useEffect(() => {
         const loadWallets = async () => {
             setLoadingWallets(true);
-            const [sharedWallets, localWallets] = await Promise.all([
-                DatabaseService.fetchSmartMoneyWallets(),
-                Promise.resolve(SavedWalletService.getSmartMoneyWallets())
-            ]);
-            const nextWallets = mergeSmartMoneyWallets(sharedWallets, localWallets);
-            setSmartWallets(nextWallets);
-            setLoadingWallets(false);
+            try {
+                setSmartWallets(await SmartMoneyService.listWallets());
+            } finally {
+                setLoadingWallets(false);
+            }
         };
 
         loadWallets();

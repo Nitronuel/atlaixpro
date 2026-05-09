@@ -8,7 +8,7 @@ import {
 import { useWalletPortfolio, WalletStats } from '../hooks/useWalletPortfolio';
 import { detectWalletAddressType, validateWalletAddress } from '../utils/wallet';
 import { SavedWalletService } from '../services/SavedWalletService';
-import { DatabaseService } from '../services/DatabaseService';
+import { SmartMoneyService } from '../services/SmartMoneyService';
 import { SmartMoneyQualificationService } from '../services/SmartMoneyQualificationService';
 
 const getWalletChain = (walletAddress: string) => {
@@ -76,7 +76,7 @@ export const SmartWalletProfile: React.FC = () => {
                 setSharedTimestamp(localWallet.timestamp);
             }
 
-            const sharedWallets = await DatabaseService.fetchSmartMoneyWallets();
+            const sharedWallets = await SmartMoneyService.listWallets();
             const sharedWallet = sharedWallets.find((wallet) => wallet.addr.toLowerCase() === address.toLowerCase());
             if (sharedWallet) {
                 setSharedWalletName(sharedWallet.name);

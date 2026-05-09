@@ -8,9 +8,16 @@ import { WalletTracking } from './WalletTracking';
 import { SavedWalletService } from '../services/SavedWalletService';
 
 const mockUseWalletPortfolio = vi.fn();
+const mockScanWallet = vi.fn();
 
 vi.mock('../hooks/useWalletPortfolio', () => ({
     useWalletPortfolio: (...args: unknown[]) => mockUseWalletPortfolio(...args)
+}));
+
+vi.mock('../services/SmartMoneyService', () => ({
+    SmartMoneyService: {
+        scanWallet: (...args: unknown[]) => mockScanWallet(...args)
+    }
 }));
 
 const LocationDisplay = () => {
@@ -21,6 +28,7 @@ const LocationDisplay = () => {
 describe('WalletTracking page', () => {
     beforeEach(() => {
         localStorage.clear();
+        mockScanWallet.mockResolvedValue({ wallet: null, excluded: false, qualified: false });
         mockUseWalletPortfolio.mockReturnValue({
             loading: false,
             portfolioData: {
@@ -176,7 +184,7 @@ describe('WalletTracking page', () => {
         expect(screen.getAllByText('Solana').length).toBeGreaterThan(0);
     });
 
-    it('auto-promotes qualifying tracked wallets into smart money', async () => {
+    it('keeps qualification local and asks the backend to scan tracked wallets', async () => {
         const solanaWallet = '68VzUdiSmH2yiRZbNm9MCkqND2bNRJmpAQwRjoLEPg6B';
         mockUseWalletPortfolio.mockReturnValue({
             loading: false,
@@ -209,7 +217,8 @@ describe('WalletTracking page', () => {
 
         const savedWallet = SavedWalletService.getWallet(solanaWallet);
         expect(savedWallet).toBeDefined();
-        expect(savedWallet?.categories).toContain('Smart Money');
-        expect(savedWallet?.qualification?.qualified).toBe(true);
+        expect(savedWallet?.categories).not.toContain('Smart Money');
+        expect(savedWallet?.qualification).toBeUndefined();
+        expect(mockScanWallet).toHaveBeenCalledWith(solanaWallet, 'Solana');
     });
 });

@@ -13,6 +13,7 @@ import { WalletCard } from '../components/wallet/WalletCard';
 import { EVM_WALLET_CHAINS, PROFILE_CHAIN_OPTIONS, SUPPORTED_WALLET_CHAINS, normalizeWalletChain } from '../utils/chains';
 import { getCompatibleDefaultChain, validateWalletAddress } from '../utils/wallet';
 import { ChainType } from '../services/ChainRouter';
+import { SmartMoneyService } from '../services/SmartMoneyService';
 
 export const WalletTracking: React.FC = () => {
     const { address } = useParams<{ address: string }>();
@@ -52,6 +53,7 @@ export const WalletTracking: React.FC = () => {
     const [walletType, setWalletType] = useState('Smart Money');
     const [timeFilter, setTimeFilter] = useState<'ALL' | '1D' | '1W' | '1M' | '>1M'>('ALL');
     const [trackError, setTrackError] = useState('');
+    const [backendScanError, setBackendScanError] = useState('');
 
     const updateProfileChain = (nextChain: ChainType) => {
         setChain(nextChain);
@@ -106,6 +108,24 @@ export const WalletTracking: React.FC = () => {
         SavedWalletService.ensureTrackedWallet(address);
         setSavedWallets(SavedWalletService.getWallets());
     }, [address, walletAddressState.isValid]);
+
+    useEffect(() => {
+        if (!address || !walletAddressState.isValid) return;
+
+        let cancelled = false;
+        setBackendScanError('');
+
+        SmartMoneyService.scanWallet(address, chain)
+            .catch((error) => {
+                if (!cancelled) {
+                    setBackendScanError(error instanceof Error ? error.message : 'Backend Smart Money scan failed.');
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [address, walletAddressState.isValid, chain]);
 
     useEffect(() => {
         if (existingWallet) {
@@ -429,6 +449,11 @@ export const WalletTracking: React.FC = () => {
                                             <span className="font-mono text-xs text-text-medium truncate">{address}</span>
                                             <CheckCircle size={12} className="text-primary-green flex-shrink-0" />
                                         </div>
+                                        {backendScanError && (
+                                            <div className="mb-4 rounded-lg border border-primary-red/30 bg-primary-red/10 px-3 py-2 text-xs text-primary-red">
+                                                {backendScanError}
+                                            </div>
+                                        )}
                                         <div className="flex gap-2 mb-6 w-full">
                                             <button onClick={() => setIsEditing(true)} className="flex-1 bg-card hover:bg-card-hover border border-border text-text-light font-bold py-1.5 rounded text-xs transition-colors">Edit Profile</button>
                                             {existingWallet && (

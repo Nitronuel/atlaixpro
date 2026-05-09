@@ -33,7 +33,15 @@ where promotion_scope is null or promotion_scope = '';
 create index if not exists smart_money_wallets_score_idx
     on public.smart_money_wallets (smart_money_score desc, updated_at desc);
 
+create table if not exists public.smart_money_exclusions (
+    wallet_address text primary key,
+    reason text,
+    created_by uuid,
+    created_at timestamptz not null default timezone('utc', now())
+);
+
 alter table public.smart_money_wallets enable row level security;
+alter table public.smart_money_exclusions enable row level security;
 
 drop policy if exists "Public can read smart money wallets" on public.smart_money_wallets;
 create policy "Public can read smart money wallets"
@@ -42,17 +50,18 @@ create policy "Public can read smart money wallets"
     using (true);
 
 drop policy if exists "Public can insert smart money wallets" on public.smart_money_wallets;
-create policy "Public can insert smart money wallets"
-    on public.smart_money_wallets
-    for insert
-    with check (true);
 
 drop policy if exists "Public can update smart money wallets" on public.smart_money_wallets;
-create policy "Public can update smart money wallets"
-    on public.smart_money_wallets
-    for update
-    using (true)
-    with check (true);
+
+drop policy if exists "Public can read smart money exclusions" on public.smart_money_exclusions;
+create policy "Public can read smart money exclusions"
+    on public.smart_money_exclusions
+    for select
+    using (true);
+
+drop policy if exists "Public can insert smart money exclusions" on public.smart_money_exclusions;
+
+drop policy if exists "Public can delete smart money exclusions" on public.smart_money_exclusions;
 
 create or replace function public.set_smart_money_wallets_updated_at()
 returns trigger
