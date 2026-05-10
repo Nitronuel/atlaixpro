@@ -130,7 +130,7 @@ export const ChainActivityService = {
                 // but we might want to also label it as Buy/Sell for the detailed view.
                 // For now, if it's huge, we treat it as Whale event first. 
                 // User requirement: "Whales... as proposed".
-                if (usdValue >= 500000) {
+                if (usdValue >= 500000 && !(pairAddr && (from === pairAddr || to === pairAddr))) {
                     activities.push({
                         type: 'Transfer', // Typed as transfer but tagged Whale
                         val: val.toFixed(2),

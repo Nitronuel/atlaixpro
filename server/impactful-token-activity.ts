@@ -59,6 +59,8 @@ const MAX_EVENTS_PER_TOKEN = 100;
 const WATCH_TTL_MS = 2 * 60 * 60 * 1000;
 const MIN_WATCH_MS = 5 * 60 * 1000;
 const MAX_WATCH_MS = 24 * 60 * 60 * 1000;
+const WHALE_TRADE_MIN_USD = 100_000;
+const LARGE_WALLET_MOVEMENT_MIN_USD = 500_000;
 const DATA_DIR = resolve(process.cwd(), 'data', 'token-activity');
 const STATE_FILE = resolve(DATA_DIR, 'state.json');
 const ALCHEMY_NOTIFY_API = 'https://dashboard.alchemy.com/api';
@@ -203,6 +205,53 @@ const fromSupabaseRow = (row: any): ImpactfulTokenActivity => {
     };
 };
 
+const normalizeLegacyActivity = (activity: ImpactfulTokenActivity): ImpactfulTokenActivity => {
+    const normalizedTitle = activity.title.toLowerCase();
+    const detectionTypeByTitle = (() => {
+        if (normalizedTitle === 'seller dominance') return 'Sell-Side Flow';
+        if (normalizedTitle === 'buyer dominance') return 'Buy-Side Flow';
+        if (normalizedTitle.includes('admission')) return 'Detection Event';
+        if (normalizedTitle.includes('liquidity')) return 'Liquidity Event';
+        if (normalizedTitle === 'volume expansion') return 'Market Event';
+        return '';
+    })();
+    const normalizedType = detectionTypeByTitle && activity.source === 'detection-engine'
+        ? detectionTypeByTitle
+        : activity.type;
+
+    if (
+        normalizedTitle === 'volume expansion' &&
+        /\bin 24h market volume\.?$/i.test(activity.description)
+    ) {
+        return {
+            ...activity,
+            type: normalizedType,
+            description: activity.description.replace(/\bin 24h market volume\.?$/i, 'in latest 24h volume. Prior 24h baseline is still warming up.')
+        };
+    }
+
+    return normalizedType === activity.type ? activity : { ...activity, type: normalizedType };
+};
+
+const isReportableActivity = (activity: ImpactfulTokenActivity) => {
+    const title = activity.title.toLowerCase();
+    const type = activity.type.toLowerCase();
+    const usdValue = Number(activity.usdValue || 0);
+
+    if (title === 'large wallet movement') {
+        return usdValue >= LARGE_WALLET_MOVEMENT_MIN_USD;
+    }
+
+    if (title === 'whale buy' || title === 'whale sell' || type === 'whale buy' || type === 'whale sell') {
+        return usdValue >= WHALE_TRADE_MIN_USD;
+    }
+
+    return true;
+};
+
+const normalizeActivityList = (activities: ImpactfulTokenActivity[]) =>
+    activities.map(normalizeLegacyActivity).filter(isReportableActivity);
+
 const persistStateNow = () => {
     if (persistTimer) {
         clearTimeout(persistTimer);
@@ -242,7 +291,7 @@ const loadState = () => {
         }
 
         for (const record of payload.tokenActivities || []) {
-            tokenActivities.set(record.key, (record.activities || []).slice(0, MAX_EVENTS_PER_TOKEN));
+            tokenActivities.set(record.key, normalizeActivityList(record.activities || []).slice(0, MAX_EVENTS_PER_TOKEN));
             tokenActivitySavedAt.set(record.key, record.savedAt || now);
         }
     } catch {
@@ -268,7 +317,7 @@ const cleanupExpiredWatches = () => {
 
 const getThresholds = (watch: WatchedToken) => {
     const liquidityThreshold = watch.liquidityUsd > 0 ? watch.liquidityUsd * 0.005 : 0;
-    const whaleThreshold = Math.max(1_000, Math.min(25_000, liquidityThreshold || 5_000));
+    const whaleThreshold = Math.max(WHALE_TRADE_MIN_USD, liquidityThreshold || WHALE_TRADE_MIN_USD);
     const liquidityEventThreshold = Math.max(5_000, watch.liquidityUsd * 0.02);
 
     return {
@@ -412,12 +461,12 @@ const classifyCandidate = (watch: WatchedToken, candidate: ActivityCandidate): I
         };
     }
 
-    if (usdValue >= Math.max(thresholds.whaleThreshold * 2, 5_000)) {
+    if (usdValue >= LARGE_WALLET_MOVEMENT_MIN_USD) {
         return {
             id: `${candidate.txHash}:transfer`,
             chain: watch.chain,
             tokenAddress: watch.tokenAddress,
-            type: 'Whale Transfer',
+            type: 'Large Wallet Movement',
             severity: usdValue >= thresholds.whaleThreshold * 5 ? 'High' : 'Signal',
             title: 'Large Wallet Movement',
             description: `${compactUsd(usdValue)} moved between wallets.`,
@@ -465,10 +514,10 @@ const extractCandidates = (payload: any): ActivityCandidate[] => {
 
 const mergeActivities = (chain: string, tokenAddress: string, incoming: ImpactfulTokenActivity[]) => {
     const key = tokenKey(chain, tokenAddress);
-    const existing = tokenActivities.get(key) || [];
+    const existing = normalizeActivityList(tokenActivities.get(key) || []);
     const activityMap = new Map<string, ImpactfulTokenActivity>();
 
-    [...existing, ...incoming].forEach((event) => {
+    [...existing, ...normalizeActivityList(incoming)].forEach((event) => {
         const eventKey = event.id || event.txHash;
         const previous = activityMap.get(eventKey);
 
@@ -556,7 +605,7 @@ const fetchSupabaseActivities = async (chain: string, tokenAddress: string) => {
     if (error) throw error;
 
     const rows = (data || []) as any[];
-    const activities = rows.map(fromSupabaseRow);
+    const activities = normalizeActivityList(rows.map(fromSupabaseRow));
     const key = tokenKey(chain, tokenAddress);
     tokenActivities.set(key, activities);
     const newestSavedAt = rows[0]?.saved_at ? new Date(rows[0].saved_at).getTime() : Date.now();
@@ -696,7 +745,7 @@ export const ImpactfulTokenActivityStore = {
             warnSupabaseOnce(`Supabase token impact event read failed: ${formatSupabaseError(error)}. Falling back to local token activity cache.`);
         }
 
-        return tokenActivities.get(tokenKey(chain, tokenAddress)) || [];
+        return normalizeActivityList(tokenActivities.get(tokenKey(chain, tokenAddress)) || []);
     },
 
     getActivitySource: () => {
@@ -707,7 +756,7 @@ export const ImpactfulTokenActivityStore = {
         cleanupExpiredWatches();
         const key = tokenKey(chain, tokenAddress);
         const savedAt = tokenActivitySavedAt.get(key) || 0;
-        const activities = tokenActivities.get(key) || [];
+        const activities = normalizeActivityList(tokenActivities.get(key) || []);
 
         return {
             savedAt,

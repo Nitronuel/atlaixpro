@@ -37,10 +37,10 @@ describe('AlphaGauntletService', () => {
 
         expect(event).not.toBeNull();
         expect(event?.score).toBeGreaterThanOrEqual(AlphaGauntletService.OVERVIEW_THRESHOLD);
-        expect(event?.triggers).toContain('Volume Spike');
+        expect(event?.triggers).toContain('Elevated Volume');
         expect(event?.activityScore).toBeGreaterThan(0);
         expect(event?.confidence?.label).toMatch(/High|Medium|Low/);
-        expect(event?.triggerDetails?.some((trigger) => trigger.label === 'Volume Expansion')).toBe(true);
+        expect(event?.triggerDetails?.some((trigger) => trigger.label === 'Elevated Volume Relative to Liquidity')).toBe(true);
         expect(event?.summary).toContain('activity score');
     });
 

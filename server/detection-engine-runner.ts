@@ -34,6 +34,8 @@ const PREWARM_STALE_MS = 10 * 60 * 1000;
 const WATCH_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const PREWARM_TIMEOUT_MS = 18_000;
 const SNAPSHOT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const WHALE_TRADE_MIN_USD = 100_000;
+const LARGE_WALLET_MOVEMENT_MIN_USD = 500_000;
 
 const readNumberEnv = (key: string, fallback: number) => {
     const value = Number(process.env[key]);
@@ -98,17 +100,17 @@ const getSeverity = (activity: RealActivity, usdValue: number, threshold: number
 };
 
 const isImpactful = (activity: RealActivity, usdValue: number, threshold: number) => {
-    if ((activity.type === 'Buy' || activity.type === 'Sell') && usdValue >= threshold) return true;
+    if ((activity.type === 'Buy' || activity.type === 'Sell') && usdValue >= WHALE_TRADE_MIN_USD) return true;
     if ((activity.type === 'Add Liq' || activity.type === 'Remove Liq') && usdValue >= Math.max(5_000, threshold)) return true;
     if (activity.type === 'Burn' && usdValue >= Math.max(1_000, threshold * 0.25)) return true;
-    return activity.type === 'Transfer' && usdValue >= Math.max(threshold * 2, 5_000);
+    return activity.type === 'Transfer' && usdValue >= LARGE_WALLET_MOVEMENT_MIN_USD;
 };
 
 const toImpactfulActivities = (event: AlphaGauntletEvent, recentActivity: RealActivity[]): ImpactfulTokenActivity[] => {
     const tokenAddress = event.token.address || '';
     const chain = event.token.chain.toLowerCase();
     const liquidityUsd = event.metrics?.liquidity || parseCurrencyValue(event.token.liquidity);
-    const whaleThreshold = Math.max(1_000, Math.min(25_000, liquidityUsd > 0 ? liquidityUsd * 0.005 : 5_000));
+    const whaleThreshold = Math.max(WHALE_TRADE_MIN_USD, liquidityUsd > 0 ? liquidityUsd * 0.005 : WHALE_TRADE_MIN_USD);
 
     return recentActivity
         .map((activity, index): ImpactfulTokenActivity | null => {

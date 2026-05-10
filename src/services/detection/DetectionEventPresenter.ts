@@ -21,6 +21,7 @@ const formatCompactUsd = (value: number) => {
 };
 
 export const HONEST_TRIGGER_LABELS: Record<AlphaGauntletTrigger, string> = {
+    'Elevated Volume': 'Elevated Volume Relative to Liquidity',
     'Volume Spike': 'Volume Expansion',
     'Transaction Spike': 'Trade Count Acceleration',
     'Strong Buy Pressure': 'Buyer Dominance',
@@ -28,9 +29,13 @@ export const HONEST_TRIGGER_LABELS: Record<AlphaGauntletTrigger, string> = {
     'Liquidity Added': 'Deep Liquidity Structure',
     'Liquidity Removed': 'Thin Liquidity Risk',
     'Holder Growth Spike': 'Active Trade Proxy Spike',
+    'Sharp Pullback': 'Sharp Pullback',
     'Price Dump': 'Price Breakdown',
+    'Major Dump': 'Major Dump',
     'Price Recovery': 'Recovery Attempt',
-    'Abnormal Large Trades': 'Large Flow Imbalance'
+    'Confirmed Recovery': 'Confirmed Recovery',
+    'Abnormal Large Trades': 'Large Flow Imbalance',
+    'Possible Artificial Volume': 'Possible Artificial Volume'
 };
 
 export const getHonestTriggerLabel = (trigger: AlphaGauntletTrigger | string) => {
@@ -46,6 +51,8 @@ const triggerStrength = (trigger: AlphaGauntletTrigger, event: AlphaGauntletEven
     const netFlowShare = metrics.volume24h > 0 ? Math.abs(metrics.netFlow) / metrics.volume24h : 0;
 
     switch (trigger) {
+        case 'Elevated Volume':
+            return clamp(volumeToLiquidity * 28);
         case 'Volume Spike':
             return clamp(volumeToLiquidity * 35);
         case 'Transaction Spike':
@@ -59,11 +66,17 @@ const triggerStrength = (trigger: AlphaGauntletTrigger, event: AlphaGauntletEven
             return clamp((0.12 - metrics.lpToMarketCapRatio) * 900);
         case 'Holder Growth Spike':
             return clamp((metrics.holders / 5000) * 100);
+        case 'Sharp Pullback':
+            return clamp(Math.abs(metrics.priceChange24h) * 1.8);
         case 'Price Dump':
+        case 'Major Dump':
         case 'Price Recovery':
+        case 'Confirmed Recovery':
             return clamp(Math.abs(metrics.priceChange24h) * 2.5);
         case 'Abnormal Large Trades':
             return clamp(netFlowShare * 350);
+        case 'Possible Artificial Volume':
+            return clamp(volumeToLiquidity * 18 + (metrics.transactions24h / 10000) * 40);
         default:
             return 50;
     }
@@ -75,26 +88,36 @@ const triggerExplanation = (trigger: AlphaGauntletTrigger, event: AlphaGauntletE
     const netFlow = formatCompactUsd(Math.abs(m.netFlow));
 
     switch (trigger) {
+        case 'Elevated Volume':
+            return `24h volume is ${volumeToLiquidity.toFixed(2)}x current liquidity. Historical volume baseline is still needed before calling this true expansion.`;
         case 'Volume Spike':
-            return `24h volume is ${volumeToLiquidity.toFixed(2)}x current liquidity, showing elevated market activity.`;
+            return `24h volume expanded versus the available baseline and is ${volumeToLiquidity.toFixed(2)}x current liquidity.`;
         case 'Transaction Spike':
             return `${m.transactions24h.toLocaleString()} buys/sells were observed over 24h, so trade activity is elevated.`;
         case 'Strong Buy Pressure':
-            return `Buy-side activity leads sell-side activity with an estimated ${formatCompactUsd(Math.max(m.buyVolume24h, 0))} buy volume.`;
+            return `Buy-side USD flow leads sell-side flow with an estimated ${formatCompactUsd(Math.max(m.buyVolume24h, 0))} buy volume.`;
         case 'Strong Sell Pressure':
-            return `Sell-side activity is elevated with estimated sell volume of ${formatCompactUsd(Math.max(m.sellVolume24h, 0))}.`;
+            return `Sell-side USD flow is elevated with estimated sell volume of ${formatCompactUsd(Math.max(m.sellVolume24h, 0))}.`;
         case 'Liquidity Added':
             return `Liquidity depth is high relative to market cap, but no historical snapshot has confirmed fresh liquidity was added yet.`;
         case 'Liquidity Removed':
             return `Liquidity is thin relative to market cap and volume, but no historical snapshot has confirmed actual removal yet.`;
         case 'Holder Growth Spike':
             return `The current holder figure is an active-trade proxy, not verified holder growth.`;
+        case 'Sharp Pullback':
+            return `Price is showing a sharp short-window pullback; sell flow and liquidity context decide whether it becomes a dump.`;
         case 'Price Dump':
-            return `Price has broken down by ${m.priceChange24h.toFixed(2)}% over 24h or sharply over the latest short window.`;
+            return `Price is down ${m.priceChange24h.toFixed(2)}% over 24h with sell-side or liquidity context supporting the move.`;
+        case 'Major Dump':
+            return `Price is down ${m.priceChange24h.toFixed(2)}% over 24h with enough activity to classify the move as major stress.`;
         case 'Price Recovery':
             return `Price is bouncing with ${m.priceChange24h >= 0 ? '+' : ''}${m.priceChange24h.toFixed(2)}% 24h movement, but prior drawdown still needs snapshot confirmation.`;
+        case 'Confirmed Recovery':
+            return `Price recovery is supported by buy-side flow and controlled liquidity conditions.`;
         case 'Abnormal Large Trades':
-            return `Estimated net flow is ${m.netFlow >= 0 ? 'positive' : 'negative'} by ${netFlow}, which can materially affect the token.`;
+            return `Net flow is ${netFlow}, suggesting a large aggregate flow imbalance rather than a single-wallet whale trade.`;
+        case 'Possible Artificial Volume':
+            return `High activity is paired with balanced buy/sell flow and muted price movement, a pattern that can resemble artificial volume.`;
         default:
             return `${getHonestTriggerLabel(trigger)} contributed to this detection.`;
     }
@@ -102,7 +125,8 @@ const triggerExplanation = (trigger: AlphaGauntletTrigger, event: AlphaGauntletE
 
 const triggerKind = (trigger: AlphaGauntletTrigger) => {
     if (trigger === 'Liquidity Added' || trigger === 'Liquidity Removed' || trigger === 'Holder Growth Spike') return 'inferred';
-    if (trigger === 'Abnormal Large Trades') return 'derived';
+    if (trigger === 'Elevated Volume') return 'inferred';
+    if (trigger === 'Abnormal Large Trades' || trigger === 'Possible Artificial Volume') return 'derived';
     return 'derived';
 };
 

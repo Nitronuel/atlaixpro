@@ -6,7 +6,8 @@ import { AlphaGauntletEvent, AlphaGauntletEventType } from '../types';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { DatabaseService } from '../services/DatabaseService';
 import { ImpactfulActivityService } from '../services/ImpactfulActivityService';
-import { enrichDetectionEvent, getHonestTriggerLabel } from '../services/detection/DetectionEventPresenter';
+import { enrichDetectionEvent } from '../services/detection/DetectionEventPresenter';
+import { buildDetectionTimelineCards } from '../services/detection/DetectionTimelinePresenter';
 import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
 type DetectionCategory = Exclude<AlphaGauntletEventType, 'Market Stress'>;
@@ -132,122 +133,12 @@ const formatCompactUsd = (value: number) => {
 };
 
 const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] => {
-    const tokenLabel = event.token.ticker;
+    const events = buildDetectionTimelineCards(event).map((card) => ({ ...card, source: event }));
     const valueBasis = Math.max(
         event.metrics.volume24h || 0,
         event.metrics.liquidity || 0,
         (event.metrics.marketCap || 0) * 0.01
     );
-    const events: GlobalTokenEvent[] = [];
-
-    if (event.triggers.includes('Strong Buy Pressure')) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:buy-pressure`,
-            source: event,
-            title: getHonestTriggerLabel('Strong Buy Pressure'),
-            description: `${tokenLabel} is showing stronger buy-side pressure across the latest 24h market flow.`,
-            usdValue: Math.max(event.metrics.buyVolume24h || 0, valueBasis),
-            detectedAt: event.detectedAt,
-            sentiment: 'bullish'
-        });
-    }
-
-    if (event.triggers.includes('Strong Sell Pressure')) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:sell-pressure`,
-            source: event,
-            title: getHonestTriggerLabel('Strong Sell Pressure'),
-            description: `${tokenLabel} has elevated sell-side pressure relative to current market activity.`,
-            usdValue: Math.max(event.metrics.sellVolume24h || 0, valueBasis),
-            detectedAt: event.detectedAt,
-            sentiment: 'bearish'
-        });
-    }
-
-    if (event.triggers.includes('Price Recovery')) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:recovery`,
-            source: event,
-            title: getHonestTriggerLabel('Price Recovery'),
-            description: `${tokenLabel} is rebounding with ${event.metrics.priceChange24h >= 0 ? '+' : ''}${event.metrics.priceChange24h.toFixed(2)}% 24h price momentum.`,
-            usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt,
-            sentiment: 'bullish'
-        });
-    }
-
-    if (event.triggers.includes('Price Dump')) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:price-dump`,
-            source: event,
-            title: getHonestTriggerLabel('Price Dump'),
-            description: `${tokenLabel} moved ${event.metrics.priceChange24h.toFixed(2)}% over 24h with elevated activity.`,
-            usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt,
-            sentiment: 'bearish'
-        });
-    } else if (event.metrics.priceChange24h >= 12) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:price-pump`,
-            source: event,
-            title: 'Major Pump Event',
-            description: `${tokenLabel} moved +${event.metrics.priceChange24h.toFixed(2)}% over 24h with meaningful volume.`,
-            usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt,
-            sentiment: 'bullish'
-        });
-    }
-
-    if (event.triggers.includes('Volume Spike')) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:volume`,
-            source: event,
-            title: getHonestTriggerLabel('Volume Spike'),
-            description: `${tokenLabel} produced ${formatCompactUsd(event.metrics.volume24h)} in 24h market volume.`,
-            usdValue: event.metrics.volume24h,
-            detectedAt: event.detectedAt,
-            sentiment: 'neutral'
-        });
-    }
-
-    if (event.triggers.includes('Liquidity Added')) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:liquidity-added`,
-            source: event,
-            title: getHonestTriggerLabel('Liquidity Added'),
-            description: `${tokenLabel} has deep current liquidity structure with ${formatCompactUsd(event.metrics.liquidity)} active liquidity. Fresh liquidity addition is not yet snapshot-confirmed.`,
-            usdValue: event.metrics.liquidity,
-            detectedAt: event.detectedAt,
-            sentiment: 'bullish'
-        });
-    }
-
-    if (event.triggers.includes('Liquidity Removed')) {
-        events.push({
-            id: `${getDetectionEventKey(event)}:liquidity-removed`,
-            source: event,
-            title: getHonestTriggerLabel('Liquidity Removed'),
-            description: `${tokenLabel} has thin liquidity risk with ${formatCompactUsd(event.metrics.liquidity)} active liquidity remaining. Actual liquidity removal is not yet snapshot-confirmed.`,
-            usdValue: event.metrics.liquidity,
-            detectedAt: event.detectedAt,
-            sentiment: 'bearish'
-        });
-    }
-
-    if (event.triggers.includes('Abnormal Large Trades')) {
-        const positiveFlow = event.metrics.netFlow > 0;
-        const negativeFlow = event.metrics.netFlow < 0;
-        events.push({
-            id: `${getDetectionEventKey(event)}:large-trades`,
-            source: event,
-            title: positiveFlow ? 'Large Flow Inflow' : negativeFlow ? 'Large Flow Outflow' : getHonestTriggerLabel('Abnormal Large Trades'),
-            description: `${tokenLabel} has ${positiveFlow ? 'positive' : negativeFlow ? 'negative' : 'unusual'} net flow of ${formatCompactUsd(Math.abs(event.metrics.netFlow))}.`,
-            usdValue: Math.abs(event.metrics.netFlow),
-            detectedAt: event.detectedAt,
-            sentiment: positiveFlow ? 'bullish' : negativeFlow ? 'bearish' : 'neutral'
-        });
-    }
-
     const fallbackSentiment =
         event.eventType === 'Accumulation' || event.eventType === 'Recovery'
             ? 'bullish'
@@ -259,7 +150,7 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         id: `${getDetectionEventKey(event)}:activity`,
         source: event,
         title: fallbackSentiment === 'neutral' ? 'Activity Signal' : `${event.eventType} Signal`,
-        description: `${tokenLabel} remains active in global detection with a ${event.score} activity score.`,
+        description: `${event.token.ticker} remains active in global detection with a ${event.score} activity score.`,
         usdValue: valueBasis,
         detectedAt: event.detectedAt,
         sentiment: fallbackSentiment

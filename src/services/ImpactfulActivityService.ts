@@ -18,14 +18,59 @@ const parseUsd = (value: string) => Number(String(value || '').replace(/[$,]/g, 
 const ACTIVITY_CACHE_PREFIX = 'atlaix-token-activity-cache:';
 const ACTIVITY_CACHE_MAX_AGE_MS = 60 * 1000;
 const ACTIVITY_CACHE_MAX_ITEMS = 100;
+const WHALE_TRADE_MIN_USD = 100_000;
+const LARGE_WALLET_MOVEMENT_MIN_USD = 500_000;
 
 const canUseLocalStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
 const activityCacheKey = (chain: string, tokenAddress: string) =>
     `${ACTIVITY_CACHE_PREFIX}${chain.toLowerCase()}:${tokenAddress.toLowerCase()}`;
 
+const normalizeLegacyActivity = (activity: ImpactfulActivity): ImpactfulActivity => {
+    const normalizedTitle = activity.title.toLowerCase();
+    const detectionTypeByTitle = (() => {
+        if (normalizedTitle === 'seller dominance') return 'Sell-Side Flow';
+        if (normalizedTitle === 'buyer dominance') return 'Buy-Side Flow';
+        if (normalizedTitle.includes('admission')) return 'Detection Event';
+        if (normalizedTitle.includes('liquidity')) return 'Liquidity Event';
+        if (normalizedTitle === 'volume expansion') return 'Market Event';
+        return '';
+    })();
+    const normalizedType = detectionTypeByTitle && activity.source === 'detection-engine'
+        ? detectionTypeByTitle
+        : activity.type;
+
+    if (
+        normalizedTitle === 'volume expansion' &&
+        /\bin 24h market volume\.?$/i.test(activity.description)
+    ) {
+        return {
+            ...activity,
+            type: normalizedType,
+            description: activity.description.replace(/\bin 24h market volume\.?$/i, 'in latest 24h volume. Prior 24h baseline is still warming up.')
+        };
+    }
+
+    return normalizedType === activity.type ? activity : { ...activity, type: normalizedType };
+};
+
+const isReportableActivity = (activity: ImpactfulActivity) => {
+    const title = activity.title.toLowerCase();
+    const type = activity.type.toLowerCase();
+
+    if (title === 'large wallet movement') {
+        return activity.usdValue >= LARGE_WALLET_MOVEMENT_MIN_USD;
+    }
+
+    if (title === 'whale buy' || title === 'whale sell' || type === 'whale buy' || type === 'whale sell') {
+        return activity.usdValue >= WHALE_TRADE_MIN_USD;
+    }
+
+    return true;
+};
+
 const normalizeActivities = (activities: any[], source: ImpactfulActivity['source'] = 'webhook'): ImpactfulActivity[] => {
-    return activities.map((activity: any) => ({
+    return activities.map((activity: any) => normalizeLegacyActivity({
         id: activity.id,
         type: activity.type,
         severity: activity.severity,
@@ -37,7 +82,7 @@ const normalizeActivities = (activities: any[], source: ImpactfulActivity['sourc
         txHash: activity.txHash || '',
         detectedAt: Number(activity.detectedAt || Date.now()),
         source: activity.source || source
-    }));
+    })).filter(isReportableActivity);
 };
 
 const setCachedActivities = (chain: string, tokenAddress: string, activities: ImpactfulActivity[]) => {
@@ -55,7 +100,7 @@ const setCachedActivities = (chain: string, tokenAddress: string, activities: Im
 
 const getThresholds = (liquidityUsd: number) => {
     const liquidityBased = liquidityUsd > 0 ? liquidityUsd * 0.005 : 0;
-    const whaleThreshold = Math.max(1_000, Math.min(25_000, liquidityBased || 5_000));
+    const whaleThreshold = Math.max(WHALE_TRADE_MIN_USD, liquidityBased || WHALE_TRADE_MIN_USD);
 
     return { whaleThreshold };
 };
@@ -70,7 +115,7 @@ const normalizeTitle = (event: RealActivity, usdValue: number, threshold: number
     if (event.type === 'Buy') return 'Whale Buy';
     if (event.type === 'Sell') return 'Whale Sell';
     if (event.type === 'Burn') return 'Token Burn';
-    if (event.tag === 'Whale' || usdValue >= threshold * 2) return 'Large Wallet Movement';
+    if (event.type === 'Transfer' && usdValue >= LARGE_WALLET_MOVEMENT_MIN_USD) return 'Large Wallet Movement';
     return event.type;
 };
 
@@ -153,9 +198,9 @@ export const ImpactfulActivityService = {
         return events
             .map((event, index): ImpactfulActivity | null => {
                 const usdValue = parseUsd(event.usd);
-                const isImpactfulTrade = (event.type === 'Buy' || event.type === 'Sell') && usdValue >= whaleThreshold;
+                const isImpactfulTrade = (event.type === 'Buy' || event.type === 'Sell') && usdValue >= WHALE_TRADE_MIN_USD;
                 const isImpactfulBurn = event.type === 'Burn' && usdValue >= Math.max(1_000, whaleThreshold * 0.25);
-                const isWhaleTransfer = event.type === 'Transfer' && usdValue >= Math.max(whaleThreshold * 2, 5_000);
+                const isWhaleTransfer = event.type === 'Transfer' && usdValue >= LARGE_WALLET_MOVEMENT_MIN_USD;
 
                 if (!isImpactfulTrade && !isImpactfulBurn && !isWhaleTransfer) return null;
 

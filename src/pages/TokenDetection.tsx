@@ -65,6 +65,35 @@ const shortAddress = (address?: string) => {
     return `${address.slice(0, 6)}...${address.slice(-6)}`;
 };
 
+const copyToClipboard = async (value: string) => {
+    if (!value) return false;
+
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+    } catch {
+        // Fall through to the textarea fallback for browsers that block clipboard writes.
+    }
+
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return copied;
+    } catch {
+        return false;
+    }
+};
+
 const getAge = (timestamp?: number) => {
     if (!timestamp) return 'Unknown';
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -72,17 +101,6 @@ const getAge = (timestamp?: number) => {
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
     return `${Math.floor(seconds / 86400)}d`;
-};
-
-const formatDateTime = (timestamp?: number) => {
-    if (!timestamp) return 'unknown time';
-    return new Intl.DateTimeFormat('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    }).format(new Date(timestamp));
 };
 
 const getTimeAgo = (timestamp?: number) => {
@@ -264,11 +282,34 @@ const severityStyles = (severity: ImpactfulActivity['severity']) => {
     };
 };
 
+const WHALE_TRADE_MIN_USD = 100_000;
+const LARGE_WALLET_MOVEMENT_MIN_USD = 500_000;
+
+const isReportableTimelineActivity = (event: ImpactfulActivity) => {
+    const title = event.title.toLowerCase();
+    const type = event.type.toLowerCase();
+
+    if (title === 'large wallet movement') {
+        return event.usdValue >= LARGE_WALLET_MOVEMENT_MIN_USD;
+    }
+
+    if (title === 'whale buy' || title === 'whale sell' || type === 'whale buy' || type === 'whale sell') {
+        return event.usdValue >= WHALE_TRADE_MIN_USD;
+    }
+
+    return true;
+};
+
+const getActivityMergeKey = (event: ImpactfulActivity) => {
+    if (event.title.toLowerCase() === 'volume expansion') return 'semantic:volume-expansion';
+    return event.txHash || event.id;
+};
+
 const mergeActivities = (incoming: ImpactfulActivity[], existing: ImpactfulActivity[] = []) => {
     const activityMap = new Map<string, ImpactfulActivity>();
 
-    [...existing, ...incoming].forEach((event) => {
-        const key = event.txHash || event.id;
+    [...existing, ...incoming].filter(isReportableTimelineActivity).forEach((event) => {
+        const key = getActivityMergeKey(event);
         const previous = activityMap.get(key);
 
         activityMap.set(key, previous
@@ -278,171 +319,9 @@ const mergeActivities = (incoming: ImpactfulActivity[], existing: ImpactfulActiv
     });
 
     return [...activityMap.values()]
+        .filter(isReportableTimelineActivity)
         .sort((a, b) => b.detectedAt - a.detectedAt)
         .slice(0, 9);
-};
-
-const getCachedDetectedAt = (activities: ImpactfulActivity[], txHash: string, fallback: number) => {
-    return activities.find((activity) => activity.txHash === txHash || activity.id === txHash)?.detectedAt || fallback;
-};
-
-const buildDetectionContextActivities = (
-    resolved: TokenSnapshot,
-    input: {
-        eventType?: string | null;
-        severity?: string | null;
-        score?: string | null;
-        detectedAt?: string | null;
-        cachedActivity?: ImpactfulActivity[];
-    }
-): ImpactfulActivity[] => {
-    const detectedAt = Number(input.detectedAt || 0) || Date.now();
-    const cachedActivity = input.cachedActivity || [];
-    const severity = input.severity === 'High' || input.severity === 'Medium' ? input.severity : 'Signal';
-    const score = Number(input.score || 0);
-    const activities: ImpactfulActivity[] = [];
-    const buySellTotal = resolved.buys24h + resolved.sells24h;
-    const buyRatio = buySellTotal > 0 ? resolved.buys24h / buySellTotal : 0;
-    const sellRatio = buySellTotal > 0 ? resolved.sells24h / buySellTotal : 0;
-    const valueBasis = Math.max(resolved.volume24h, resolved.liquidity, resolved.marketCap * 0.01);
-    const pairCreatedAt = resolved.pairCreatedAt || detectedAt;
-
-    if (resolved.pairCreatedAt) {
-        activities.push({
-            id: `timeline-pair-created-${resolved.address}`,
-            type: 'Liquidity Event',
-            severity: 'Signal',
-            title: 'Trading Pair Created',
-            description: `${resolved.symbol} became tradable on ${normalizeChain(resolved.chain)}${resolved.dex ? ` via ${resolved.dex}` : ''} on ${formatDateTime(resolved.pairCreatedAt)}.`,
-            usdValue: resolved.liquidity,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash: `timeline-pair-created-${resolved.address}`,
-            detectedAt: getCachedDetectedAt(cachedActivity, `timeline-pair-created-${resolved.address}`, resolved.pairCreatedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    if (resolved.liquidity > 0) {
-        activities.push({
-            id: `timeline-liquidity-established-${resolved.address}`,
-            type: 'Liquidity Event',
-            severity: resolved.liquidity >= 100_000 ? 'High' : 'Signal',
-            title: 'Liquidity Established',
-            description: `${formatCurrency(resolved.liquidity)} current liquidity is available across ${resolved.poolCount.toLocaleString()} tracked pool${resolved.poolCount === 1 ? '' : 's'}.`,
-            usdValue: resolved.liquidity,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash: `timeline-liquidity-established-${resolved.address}`,
-            detectedAt: getCachedDetectedAt(cachedActivity, `timeline-liquidity-established-${resolved.address}`, pairCreatedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    if (input.eventType) {
-        const txHash = `detection-${resolved.address}-${input.eventType}-${detectedAt}`;
-        activities.push({
-            id: txHash,
-            type: input.eventType,
-            severity: severity === 'Medium' ? 'High' : severity,
-            title: `${input.eventType} Admission`,
-            description: `${resolved.symbol} entered the Detection Engine as ${input.eventType}${score ? ` with activity score ${score}` : ''}.`,
-            usdValue: valueBasis,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash,
-            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    if (resolved.volume24h >= 5_000 && buyRatio >= 0.62) {
-        const txHash = `derived-buy-pressure-${resolved.address}-${detectedAt}`;
-        activities.push({
-            id: txHash,
-            type: 'Whale Buy',
-            severity: buyRatio >= 0.75 ? 'High' : 'Signal',
-            title: 'Buyer Dominance',
-            description: `${resolved.buys24h.toLocaleString()} buys vs ${resolved.sells24h.toLocaleString()} sells in the latest 24h market data.`,
-            usdValue: resolved.volume24h * buyRatio,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash,
-            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    if (resolved.volume24h >= 5_000 && sellRatio >= 0.62) {
-        const txHash = `derived-sell-pressure-${resolved.address}-${detectedAt}`;
-        activities.push({
-            id: txHash,
-            type: 'Whale Sell',
-            severity: sellRatio >= 0.75 ? 'Critical' : 'High',
-            title: 'Seller Dominance',
-            description: `${resolved.sells24h.toLocaleString()} sells vs ${resolved.buys24h.toLocaleString()} buys in the latest 24h market data.`,
-            usdValue: resolved.volume24h * sellRatio,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash,
-            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    if (Math.abs(resolved.priceChange24h) >= 10) {
-        const positive = resolved.priceChange24h > 0;
-        const txHash = `derived-price-move-${resolved.address}-${detectedAt}`;
-        activities.push({
-            id: txHash,
-            type: positive ? 'Whale Buy' : 'Whale Sell',
-            severity: Math.abs(resolved.priceChange24h) >= 25 ? 'High' : 'Signal',
-            title: positive ? 'Momentum Expansion' : 'Price Breakdown',
-            description: `${resolved.symbol} moved ${formatPercent(resolved.priceChange24h)} over 24h with ${formatCurrency(resolved.volume24h)} volume.`,
-            usdValue: resolved.volume24h,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash,
-            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    if (resolved.volume24h >= 25_000) {
-        const txHash = `derived-volume-spike-${resolved.address}-${detectedAt}`;
-        activities.push({
-            id: txHash,
-            type: 'Whale Transfer',
-            severity: resolved.volume24h >= 250_000 ? 'High' : 'Signal',
-            title: 'Volume Expansion',
-            description: `${resolved.symbol} produced ${formatCurrency(resolved.volume24h)} in 24h volume after launching ${getAge(resolved.pairCreatedAt)} ago.`,
-            usdValue: resolved.volume24h,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash,
-            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    if (resolved.liquidity > 0 && resolved.volume24h / resolved.liquidity >= 2) {
-        const txHash = `derived-liquidity-turnover-${resolved.address}-${detectedAt}`;
-        activities.push({
-            id: txHash,
-            type: 'Liquidity Event',
-            severity: resolved.volume24h / resolved.liquidity >= 5 ? 'High' : 'Signal',
-            title: 'High Liquidity Turnover',
-            description: `24h volume is ${(resolved.volume24h / resolved.liquidity).toFixed(1)}x current liquidity, indicating meaningful pool activity.`,
-            usdValue: resolved.volume24h,
-            tokenAmount: 0,
-            wallet: resolved.pairAddress || resolved.address,
-            txHash,
-            detectedAt: getCachedDetectedAt(cachedActivity, txHash, detectedAt),
-            source: 'recent-scan'
-        });
-    }
-
-    return activities.slice(0, 8);
 };
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -473,8 +352,6 @@ export const TokenDetection: React.FC = () => {
     const isDetectionToken = searchParams.get('source') === 'detection';
     const detectionSeverity = searchParams.get('severity');
     const detectionEventType = searchParams.get('eventType');
-    const detectionScore = searchParams.get('score');
-    const detectionDetectedAt = searchParams.get('detectedAt');
     const initialWatchTtlMs = isDetectionToken && detectionSeverity === 'High' ? ONE_DAY_MS : ONE_HOUR_MS;
 
     const [token, setToken] = useState<TokenSnapshot | null>(null);
@@ -485,6 +362,14 @@ export const TokenDetection: React.FC = () => {
     const [watchStatus, setWatchStatus] = useState('');
     const [error, setError] = useState('');
     const [detectionEvent, setDetectionEvent] = useState<AlphaGauntletEvent | null>(null);
+    const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+
+    const handleCopyAddress = async () => {
+        const address = token?.address || tokenQuery;
+        const copied = await copyToClipboard(address);
+        setCopyState(copied ? 'copied' : 'error');
+        window.setTimeout(() => setCopyState('idle'), 1800);
+    };
 
     const registerWatch = async (resolved: TokenSnapshot, ttlMs: number, label: string) => {
         if (!resolved.address) return;
@@ -557,20 +442,12 @@ export const TokenDetection: React.FC = () => {
                 const priceUsd = parsePrice(resolved.price);
                 const localCachedActivity = ImpactfulActivityService.getCachedActivities(resolved.chain, resolved.address);
                 if (localCachedActivity.length) {
-                    setActivity(localCachedActivity);
+                    setActivity(localCachedActivity.filter(isReportableTimelineActivity));
                     setActivityLoading(false);
                 }
 
                 const cachedActivity = await ImpactfulActivityService.getWebhookActivities(resolved.chain, resolved.address);
-                const derivedActivity = buildDetectionContextActivities(resolved, {
-                    eventType: detectionEventType,
-                    severity: detectionSeverity,
-                    score: detectionScore,
-                    detectedAt: detectionDetectedAt,
-                    cachedActivity
-                });
-
-                setActivity((current) => mergeActivities(derivedActivity, mergeActivities(cachedActivity, current)));
+                setActivity((current) => mergeActivities(cachedActivity, current));
 
                 try {
                     await registerWatch(
@@ -588,12 +465,11 @@ export const TokenDetection: React.FC = () => {
                     const cachedRecentActivity = await ImpactfulActivityService.cacheActivities(
                         resolved.chain,
                         resolved.address,
-                        mergeActivities(recentActivity, derivedActivity)
+                        recentActivity
                     );
-                    setActivity((current) => mergeActivities(cachedRecentActivity.length ? cachedRecentActivity : mergeActivities(recentActivity, derivedActivity), current));
+                    setActivity((current) => mergeActivities(cachedRecentActivity.length ? cachedRecentActivity : recentActivity, current));
                 } catch (activityError) {
                     console.warn('Token impact timeline scan failed', activityError);
-                    setActivity((current) => mergeActivities(derivedActivity, current));
                 }
             }
         } catch (err) {
@@ -699,12 +575,15 @@ export const TokenDetection: React.FC = () => {
 
                         <div className="flex flex-wrap items-center gap-3 text-text-medium text-sm ml-1 mt-1">
                             <button
-                                className="flex items-center gap-1.5 bg-card/50 px-2.5 py-1 rounded-lg border border-border/50 transition-colors hover:border-border group/copy"
-                                disabled={!token?.address}
-                                onClick={() => token?.address && navigator.clipboard.writeText(token.address)}
+                                type="button"
+                                className="flex items-center gap-1.5 bg-card/50 px-2.5 py-1 rounded-lg border border-border/50 transition-colors hover:border-border disabled:cursor-not-allowed disabled:opacity-60 group/copy"
+                                disabled={!(token?.address || tokenQuery)}
+                                onClick={handleCopyAddress}
+                                title={copyState === 'copied' ? 'Copied contract address' : copyState === 'error' ? 'Copy failed' : 'Copy contract address'}
+                                aria-label="Copy contract address"
                             >
                                 <span className="font-mono text-xs">{shortAddress(token?.address || tokenQuery)}</span>
-                                <Copy size={12} className="text-text-medium group-hover/copy:text-white transition-colors" />
+                                <Copy size={12} className={`${copyState === 'copied' ? 'text-primary-green' : copyState === 'error' ? 'text-primary-red' : 'text-text-medium group-hover/copy:text-white'} transition-colors`} />
                             </button>
 
                             {token?.pairAddress && (
@@ -763,58 +642,6 @@ export const TokenDetection: React.FC = () => {
                     </div>
                 ))}
             </div>
-
-            {detectionEvent && (
-                <section className="grid gap-4 lg:grid-cols-4">
-                    <div className="rounded-xl border border-border bg-card p-4">
-                        <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Why Detected</div>
-                        <div className="mt-3 flex flex-col gap-2">
-                            {(detectionEvent.whyDetected || []).slice(0, 3).map((reason, index) => (
-                                <div key={index} className="text-sm font-semibold leading-snug text-text-light">{reason}</div>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-card p-4">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Confidence</div>
-                            <span className="rounded border border-primary-green/30 bg-primary-green/10 px-2 py-0.5 text-xs font-bold text-primary-green">
-                                {detectionEvent.confidence?.label || 'Medium'}
-                            </span>
-                        </div>
-                        <div className="mt-3 text-2xl font-black text-text-light">{detectionEvent.confidence?.score ?? detectionEvent.score}</div>
-                        <div className="mt-2 text-xs font-semibold leading-relaxed text-text-medium">
-                            {(detectionEvent.confidence?.reasons || ['Market signal only. Contract safety is not verified.']).slice(0, 2).join(' ')}
-                        </div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-card p-4">
-                        <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Snapshot Deltas</div>
-                        <div className="mt-3 flex flex-col gap-2">
-                            {(detectionEvent.snapshotDeltas || []).slice(0, 3).map((delta) => (
-                                <div key={delta.window} className="rounded-lg border border-border/60 bg-main/30 p-2">
-                                    <div className="text-xs font-black text-text-light">{delta.window}</div>
-                                    <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] font-semibold text-text-medium">
-                                        <span>Liq {formatPercent(delta.liquidityChangePct)}</span>
-                                        <span>Vol {formatPercent(delta.volumeChangePct)}</span>
-                                        <span>Price {formatPercent(delta.priceChangePct)}</span>
-                                        <span>Tx {formatPercent(delta.transactionChangePct)}</span>
-                                    </div>
-                                </div>
-                            ))}
-                            {!detectionEvent.snapshotDeltas?.length && (
-                                <div className="text-sm font-semibold leading-snug text-text-medium">History is warming up. Snapshot deltas appear after more detection cycles.</div>
-                            )}
-                        </div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-card p-4">
-                        <div className="text-xs font-bold uppercase tracking-wide text-text-medium">Counter Signals</div>
-                        <div className="mt-3 flex flex-col gap-2">
-                            {(detectionEvent.counterSignals?.length ? detectionEvent.counterSignals : ['Market signal only. Safe Scan and Smart Money are not used for this detection yet.']).slice(0, 3).map((signal, index) => (
-                                <div key={index} className="text-sm font-semibold leading-snug text-text-light">{signal}</div>
-                            ))}
-                        </div>
-                    </div>
-                </section>
-            )}
 
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-6">
                 <div className="bg-card border border-border rounded-2xl p-6">

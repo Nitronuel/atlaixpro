@@ -82,17 +82,18 @@ const classifyEvent = (
     const sellVolumeLeads = volumeFlowRatio <= 0.98 || netFlow < 0;
     const countSellPressure = buySellRatio <= 0.8;
 
-    if (triggers.includes('Price Dump') && (triggers.includes('Strong Sell Pressure') || lpToMarketCapRatio < 0.15)) return 'Market Stress';
+    if ((triggers.includes('Major Dump') || triggers.includes('Price Dump')) && (triggers.includes('Strong Sell Pressure') || lpToMarketCapRatio < 0.15)) return 'Market Stress';
     if (triggers.includes('Strong Sell Pressure')) {
         if (strongPositiveMomentum && buyVolumeLeads) return 'Recovery';
-        if (strongPositiveMomentum) return triggers.includes('Price Recovery') ? 'Recovery' : 'Unusual Activity';
+        if (strongPositiveMomentum) return 'Recovery';
         if (strongNegativeMomentum || (countSellPressure && sellVolumeLeads)) return 'Distribution';
         return 'Unusual Activity';
     }
-    if (triggers.includes('Strong Buy Pressure') && (triggers.includes('Volume Spike') || buySellRatio >= 1.4)) return 'Accumulation';
-    if (triggers.includes('Price Recovery') && triggers.includes('Volume Spike')) return 'Recovery';
+    if (triggers.includes('Possible Artificial Volume')) return 'Unusual Activity';
+    if (triggers.includes('Strong Buy Pressure') && (triggers.includes('Volume Spike') || triggers.includes('Elevated Volume') || buySellRatio >= 1.4)) return 'Accumulation';
+    if ((triggers.includes('Price Recovery') || triggers.includes('Confirmed Recovery')) && (triggers.includes('Volume Spike') || triggers.includes('Elevated Volume'))) return 'Recovery';
     if (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed')) return 'Liquidity Event';
-    if (priceChange24h < -15) return 'Market Stress';
+    if (triggers.includes('Major Dump') || priceChange24h < -18) return 'Market Stress';
     return 'Unusual Activity';
 };
 
@@ -140,13 +141,23 @@ const computeV2Scores = (
         thinLiquidityPenalty +
         contradictionPenalty +
         (flowShare >= 0.2 ? 18 : flowShare >= 0.12 ? 10 : 0) +
-        (triggers.includes('Liquidity Removed') ? 12 : 0)
+        (triggers.includes('Liquidity Removed') ? 12 : 0) +
+        (triggers.includes('Possible Artificial Volume') ? 18 : 0)
+    ));
+    const evidenceQualityScore = Math.round(clamp(
+        55 +
+        (triggers.includes('Volume Spike') ? 14 : 0) +
+        (triggers.includes('Confirmed Recovery') ? 12 : 0) +
+        (triggers.includes('Elevated Volume') ? -8 : 0) +
+        (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed') ? -6 : 0) +
+        (triggers.includes('Possible Artificial Volume') ? -10 : 0)
     ));
     const detectionGrade = Math.round(clamp(
         activityScore * 0.3 +
         marketQualityScore * 0.3 +
         liquidityQualityScore * 0.2 +
-        eventStrength * 0.2 -
+        eventStrength * 0.15 +
+        evidenceQualityScore * 0.05 -
         manipulationRiskScore * 0.15
     ));
 
@@ -155,6 +166,7 @@ const computeV2Scores = (
         marketQualityScore,
         liquidityQualityScore,
         manipulationRiskScore,
+        evidenceQualityScore,
         detectionGrade
     };
 };
@@ -237,20 +249,37 @@ export const AlphaGauntletService = {
             : liquidity < 1000000
                 ? Math.max(150000, liquidity * 0.12, volume24h * 0.15)
                 : Math.max(300000, liquidity * 0.08, volume24h * 0.12);
+        const buyerDominance = buyVolume24h > 0 && buyVolume24h > sellVolume24h * 1.2;
+        const sellerDominance = sellVolume24h > 0 && sellVolume24h > buyVolume24h * 1.2;
+        const sharpPullback = priceChange1h <= -8 && volumeToLiquidity >= 0.5;
+        const priceDump = priceChange1h <= -10 || priceChange24h <= -18 || (priceChange24h <= -12 && sellerDominance);
+        const majorDump = priceChange24h <= -22 && volume24h >= liquidity * 0.5;
+        const recoveryAttempt = priceChange1h >= 5 && buyVolume24h >= sellVolume24h && priceChange24h > -10 && volumeToLiquidity >= 0.5;
+        const confirmedRecovery = priceChange24h >= 12 && buyerDominance && lpToMarketCapRatio > 0.08;
+        const balancedFlow = buyVolume24h > 0 && sellVolume24h > 0 && volumeFlowRatio >= 0.95 && volumeFlowRatio <= 1.05;
+        const possibleArtificialVolume =
+            transactions24h >= 10000 &&
+            balancedFlow &&
+            Math.abs(priceChange24h) < 3 &&
+            volumeToLiquidity >= 3;
 
-        if (volumeToLiquidity >= 1.2 || volumeToMarketCap >= 0.2 || volume24h >= 1000000) triggers.push('Volume Spike');
+        if (volumeToLiquidity >= 1.2 || volumeToMarketCap >= 0.2 || volume24h >= 1000000) triggers.push('Elevated Volume');
         if (
             transactions24h >= 10000 ||
             (transactions24h >= 5000 && volumeToLiquidity >= 3) ||
             (ageHours <= 24 && transactions24h >= 3500 && volumeToLiquidity >= 2)
         ) triggers.push('Transaction Spike');
-        if ((buySellRatio >= 1.25 && netFlow > 0) || (volumeFlowRatio >= 1.08 && priceChange24h >= 5) || (buySellRatio >= 1.5 && volume24h >= 500000)) triggers.push('Strong Buy Pressure');
-        if ((buySellRatio <= 0.8 && netFlow < 0) || (volumeFlowRatio <= 0.92 && priceChange24h <= 5) || (buySellRatio <= 0.67 && volume24h >= 500000 && netFlow <= 0)) triggers.push('Strong Sell Pressure');
+        if (buyerDominance || (volumeFlowRatio >= 1.08 && priceChange24h >= 5) || (buySellRatio >= 1.5 && volume24h >= 500000 && netFlow > 0)) triggers.push('Strong Buy Pressure');
+        if (sellerDominance || (volumeFlowRatio <= 0.92 && priceChange24h <= 5) || (buySellRatio <= 0.67 && volume24h >= 500000 && netFlow < 0)) triggers.push('Strong Sell Pressure');
         if (lpToMarketCapRatio >= 0.25 && volumeToLiquidity >= 0.6) triggers.push('Liquidity Added');
         if (lpToMarketCapRatio <= 0.08 && volume24h >= 500000) triggers.push('Liquidity Removed');
-        if (priceChange24h <= -12 || priceChange1h <= -8) triggers.push('Price Dump');
-        if ((priceChange1h >= 5 || priceChange24h >= 12) && priceChange24h > -10 && volumeToLiquidity >= 0.5) triggers.push('Price Recovery');
+        if (sharpPullback && !priceDump) triggers.push('Sharp Pullback');
+        if (priceDump) triggers.push('Price Dump');
+        if (majorDump) triggers.push('Major Dump');
+        if (recoveryAttempt) triggers.push('Price Recovery');
+        if (confirmedRecovery) triggers.push('Confirmed Recovery');
         if (absNetFlow >= largeFlowThreshold) triggers.push('Abnormal Large Trades');
+        if (possibleArtificialVolume) triggers.push('Possible Artificial Volume');
 
         if (triggers.length === 0) return null;
 
@@ -305,7 +334,7 @@ export const AlphaGauntletService = {
             eventType,
             triggers,
             score: total,
-            scores: { marketStructure, liquidityHealth, activity, eventStrength, total },
+            scores: { marketStructure, liquidityHealth, activity, eventStrength, evidenceQuality: v2Scores.evidenceQualityScore, total },
             severity,
             summary: buildSummary(eventType, coin, triggers, total),
             detectedAt: Date.now(),

@@ -96,6 +96,7 @@ export type AlphaGauntletEventType =
     | 'Unusual Activity';
 
 export type AlphaGauntletTrigger =
+    | 'Elevated Volume'
     | 'Volume Spike'
     | 'Transaction Spike'
     | 'Strong Buy Pressure'
@@ -103,15 +104,20 @@ export type AlphaGauntletTrigger =
     | 'Liquidity Added'
     | 'Liquidity Removed'
     | 'Holder Growth Spike'
+    | 'Sharp Pullback'
     | 'Price Dump'
+    | 'Major Dump'
     | 'Price Recovery'
-    | 'Abnormal Large Trades';
+    | 'Confirmed Recovery'
+    | 'Abnormal Large Trades'
+    | 'Possible Artificial Volume';
 
 export interface AlphaGauntletScores {
     marketStructure: number;
     liquidityHealth: number;
     activity: number;
     eventStrength: number;
+    evidenceQuality?: number;
     total: number;
 }
 
