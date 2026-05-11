@@ -103,6 +103,10 @@ export default defineConfig(({ mode }) => {
         '/api/detection': {
           target: 'http://127.0.0.1:3101',
           changeOrigin: true
+        },
+        '/api/ai-assistant': {
+          target: 'http://127.0.0.1:3101',
+          changeOrigin: true
         }
       }
     },

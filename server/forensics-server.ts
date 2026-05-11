@@ -115,6 +115,526 @@ const CHAIN_DEX_VOLUME_LABELS: Record<string, string> = {
     sui: 'Sui'
 };
 
+type AssistantNotification = {
+    id: string;
+    title: string;
+    body: string;
+    tone: 'bullish' | 'bearish' | 'neutral' | 'risk';
+    href?: string;
+    timestamp: number;
+};
+
+type AssistantChatAction = {
+    label: string;
+    href: string;
+};
+
+type AssistantProvider = {
+    configured: boolean;
+    model: string | null;
+    mode: 'model-ready' | 'local-tool-router';
+};
+
+type AssistantConversationMessage = {
+    role?: string;
+    text?: string;
+};
+
+type AssistantToolName =
+    | 'conversation'
+    | 'get_detection_updates'
+    | 'run_safe_scan'
+    | 'prepare_alert_setup'
+    | 'get_token_activity'
+    | 'get_smart_alert_status';
+
+type AssistantToolRequest = {
+    tool: AssistantToolName;
+    address?: string;
+    chain?: string;
+    responseStyle?: 'brief' | 'detailed';
+};
+
+const getAssistantProvider = (): AssistantProvider => {
+    const model = readEnv('OPENROUTER_MODEL') || null;
+    const configured = Boolean(readEnv('OPENROUTER_API_KEY') && model);
+    return {
+        configured,
+        model,
+        mode: configured ? 'model-ready' : 'local-tool-router'
+    };
+};
+
+const compactUsd = (value: number | null | undefined) => {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric) || numeric <= 0) return '$0';
+    if (numeric >= 1_000_000_000) return `$${(numeric / 1_000_000_000).toFixed(2)}B`;
+    if (numeric >= 1_000_000) return `$${(numeric / 1_000_000).toFixed(2)}M`;
+    if (numeric >= 1_000) return `$${(numeric / 1_000).toFixed(2)}K`;
+    return `$${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+};
+
+const inferAssistantChain = (message: string, address: string) => {
+    const lower = message.toLowerCase();
+    if (lower.includes('solana') || lower.includes('pump')) return 'solana';
+    if (lower.includes('bsc') || lower.includes('bnb')) return 'bsc';
+    if (lower.includes('base')) return 'base';
+    if (lower.includes('polygon')) return 'polygon';
+    if (lower.includes('ethereum') || lower.includes('eth')) return 'ethereum';
+    return isLikelyEvmAddress(address) ? 'ethereum' : 'solana';
+};
+
+const extractAssistantAddress = (message: string) => {
+    const evm = message.match(/0x[a-fA-F0-9]{40}/)?.[0];
+    if (evm) return evm;
+
+    const solana = message.match(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/)?.[0];
+    return solana || '';
+};
+
+const getRecentAssistantAddress = (messages: AssistantConversationMessage[] = []) => {
+    for (const message of [...messages].reverse()) {
+        const found = extractAssistantAddress(String(message.text || ''));
+        if (found) return found;
+    }
+    return '';
+};
+
+const eventTokenHref = (event: any) => {
+    const token = event?.token || {};
+    const address = token.address || token.pairAddress || token.ticker || '';
+    if (!address) return '/detection';
+    const params = new URLSearchParams({
+        source: 'detection',
+        severity: event.severity || 'Medium',
+        eventType: event.eventType || 'Unusual Activity',
+        score: String(event.score || 0),
+        detectedAt: String(event.detectedAt || Date.now())
+    });
+    return `/detection/token/${encodeURIComponent(address)}?${params.toString()}`;
+};
+
+const formatAssistantDetectionLine = (event: any) => {
+    const token = event?.token || {};
+    const label = token.ticker || token.name || 'Unknown token';
+    const volume = compactUsd(event?.metrics?.volume24h);
+    const liquidity = compactUsd(event?.metrics?.liquidity);
+    return `${label}: ${event.eventType || 'Detection'} (${event.severity || 'Medium'}) with score ${event.score || 0}. 24h volume ${volume}, liquidity ${liquidity}.`;
+};
+
+const loadAssistantNotifications = async (): Promise<AssistantNotification[]> => {
+    const events = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+    const notifications: AssistantNotification[] = (events || []).slice(0, 6).map((event: any, index: number) => ({
+        id: `detection-${event?.token?.address || event?.token?.ticker || index}-${event?.detectedAt || index}`,
+        title: `${event?.token?.ticker || event?.token?.name || 'Token'} ${event?.eventType || 'Detection'}`,
+        body: `${event?.severity || 'Medium'} severity, score ${event?.score || 0}. ${event?.summary || formatAssistantDetectionLine(event)}`,
+        tone: event?.eventType === 'Distribution' || event?.eventType === 'Market Stress'
+            ? 'bearish'
+            : event?.severity === 'High'
+                ? 'risk'
+                : event?.eventType === 'Accumulation' || event?.eventType === 'Recovery'
+                    ? 'bullish'
+                    : 'neutral',
+        href: eventTokenHref(event),
+        timestamp: Number(event?.detectedAt || Date.now())
+    }));
+
+    const smartStatus = smartAlertRunner.getStatus();
+    if (smartStatus.lastRunStatus || smartStatus.lastError) {
+        notifications.unshift({
+            id: `smart-alert-status-${smartStatus.lastRunCompletedAt || smartStatus.lastRunStartedAt || 'pending'}`,
+            title: 'Smart Alerts status',
+            body: smartStatus.lastError
+                ? `Latest alert evaluation needs attention: ${smartStatus.lastError}`
+                : `Latest alert run ${smartStatus.lastRunStatus || 'is pending'} after checking ${smartStatus.rulesChecked || 0} rules.`,
+            tone: smartStatus.lastError ? 'risk' : 'neutral',
+            href: '/smart-alerts',
+            timestamp: smartStatus.lastRunCompletedAt ? new Date(smartStatus.lastRunCompletedAt).getTime() : Date.now()
+        });
+    }
+
+    return notifications.slice(0, 8);
+};
+
+const summarizeSafeScanReport = (report: any) => {
+    const intelligence = report?.bundleIntelligence || {};
+    const attribution = report?.supplyAttribution || {};
+    const holder = report?.holderConcentration || {};
+    const highlights = Array.isArray(report?.evidenceHighlights) ? report.evidenceHighlights.slice(0, 3) : [];
+    const reasons = Array.isArray(intelligence.reasons) ? intelligence.reasons.slice(0, 3) : [];
+
+    return [
+        `Safe Scan completed for ${report?.tokenSymbol || report?.tokenName || 'this token'}.`,
+        `Risk level: ${intelligence.riskLevel || 'unknown'} with ${intelligence.confidence || 'unknown'} confidence.`,
+        `Coordinated supply estimate: ${Number(attribution.combinedCoordinatedPct || 0).toFixed(2)}%. Top 10 holders: ${Number(holder.top10Pct || 0).toFixed(2)}%.`,
+        reasons.length ? `Main reasons: ${reasons.join(' ')}` : '',
+        highlights.length ? `Evidence highlights: ${highlights.map((item: any) => item.title).join(', ')}.` : ''
+    ].filter(Boolean).join('\n');
+};
+
+const buildAssistantSystemPrompt = () => [
+    'You are the Atlaix in-app AI assistant router.',
+    'Choose exactly one approved tool for the user request.',
+    'You cannot modify source code, change app architecture, access secrets, run shell commands, or invent app data.',
+    'Write actions must be confirmation-first. For alerts, choose prepare_alert_setup, not a direct save.',
+    'Return only valid JSON with keys: tool, address, chain, responseStyle.',
+    'Approved tools: conversation, get_detection_updates, run_safe_scan, prepare_alert_setup, get_token_activity, get_smart_alert_status.',
+    'Use run_safe_scan only when the user asks for scan, safety, risk, security, or forensic analysis.',
+    'Use get_detection_updates for Detection Engine, new updates, admitted tokens, market events, or alpha events.',
+    'Use prepare_alert_setup for alerts, notifications, watching a token, or thresholds.',
+    'Use get_token_activity for whale buys, whale sells, wallet movements, token impact timeline, or activity.',
+    'Use get_smart_alert_status for existing alert runner/status questions.',
+    'Use conversation for casual chat, capability questions, or unclear requests.'
+].join('\n');
+
+const buildAssistantChatPrompt = () => [
+    'You are Atlaix AI, a warm, sharp, conversational assistant inside the Atlaix crypto intelligence platform.',
+    'Answer normal questions directly first. Be chatty when the user is casual, concise when they are operational, and never sound like a rigid command menu.',
+    'Use plain text with no emoji and no decorative formatting.',
+    'When it is natural, connect the conversation back to useful Atlaix capabilities: Detection Engine updates, Safe Scan token risk summaries, token activity/whale movement review, and Smart Alert preparation.',
+    'Do not force Atlaix features into every answer. Use a light touch: one helpful bridge is enough when relevant.',
+    'You cannot modify source code, change system architecture, access secrets, run shell commands, or silently change saved app state.',
+    'For anything that would change app state, explain the next confirmation step instead of claiming you completed it.',
+    `Current date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Lagos' })}.`
+].join('\n');
+
+const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => {
+    try {
+        const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        const allowed = new Set<AssistantToolName>([
+            'conversation',
+            'get_detection_updates',
+            'run_safe_scan',
+            'prepare_alert_setup',
+            'get_token_activity',
+            'get_smart_alert_status'
+        ]);
+        if (!allowed.has(parsed.tool)) return null;
+        return {
+            tool: parsed.tool,
+            address: typeof parsed.address === 'string' ? parsed.address : undefined,
+            chain: typeof parsed.chain === 'string' ? parsed.chain : undefined,
+            responseStyle: parsed.responseStyle === 'detailed' ? 'detailed' : 'brief'
+        };
+    } catch {
+        return null;
+    }
+};
+
+const chooseAssistantToolWithModel = async (
+    message: string,
+    history: AssistantConversationMessage[]
+): Promise<AssistantToolRequest | null> => {
+    const apiKey = readEnv('OPENROUTER_API_KEY');
+    if (!apiKey) return null;
+
+    const model = readEnv('OPENROUTER_MODEL');
+    if (!model) return null;
+
+    const baseUrl = readEnv('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1';
+    const historyText = history.slice(-8).map((item) => `${item.role || 'user'}: ${item.text || ''}`).join('\n');
+
+    const response = await fetchWithTimeout(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'http://localhost:3000',
+            'X-Title': 'Atlaix AI Assistant'
+        },
+        body: JSON.stringify({
+            model,
+            temperature: 0,
+            response_format: { type: 'json_object' },
+            messages: [
+                { role: 'system', content: buildAssistantSystemPrompt() },
+                { role: 'user', content: `Recent conversation:\n${historyText || 'none'}\n\nCurrent request:\n${message}` }
+            ]
+        })
+    }, 15_000);
+
+    if (!response.ok) {
+        throw new Error(`OpenRouter request failed with ${response.status}.`);
+    }
+
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content;
+    return typeof content === 'string' ? parseAssistantToolRequest(content) : null;
+};
+
+const chooseAssistantToolLocally = (message: string, history: AssistantConversationMessage[] = []): AssistantToolRequest => {
+    const lower = message.toLowerCase();
+    const address = extractAssistantAddress(message) || (/\b(that|this)\s+token\b/i.test(message) ? getRecentAssistantAddress(history) : '');
+
+    if (/\bsafe scan\b|\bscan\b|\brisk\b|\bsecurity\b|\bforensic\b|\bscam\b|\brug\b|\bhoneypot\b|\baudit\b|\bsketchy\b/.test(lower)) {
+        return { tool: 'run_safe_scan', address, chain: address ? inferAssistantChain(message, address) : undefined };
+    }
+
+    if (/\bactivity\b|\bwhale\b|\bbuy\b|\bsell\b|\bwallet movement\b|\btimeline\b/.test(lower)) {
+        return { tool: 'get_token_activity', address, chain: address ? inferAssistantChain(message, address) : undefined };
+    }
+
+    if (/\bdetection\b|\bupdate\b|\bnew\b|\bengine\b|\balpha\b/.test(lower)) {
+        return { tool: 'get_detection_updates' };
+    }
+
+    if (/\balert status\b|\bsmart alert status\b|\brunner\b/.test(lower)) {
+        return { tool: 'get_smart_alert_status' };
+    }
+
+    if (/\balert\b|\bnotify\b|\bwatch\b/.test(lower)) {
+        return { tool: 'prepare_alert_setup', address, chain: address ? inferAssistantChain(message, address) : undefined };
+    }
+
+    return { tool: 'conversation' };
+};
+
+const chooseAssistantTool = async (message: string, history: AssistantConversationMessage[] = []) => {
+    const localChoice = chooseAssistantToolLocally(message, history);
+    if (localChoice.tool !== 'conversation') return localChoice;
+    return localChoice;
+};
+
+const generateAssistantConversation = async (message: string, history: AssistantConversationMessage[] = []) => {
+    const apiKey = readEnv('OPENROUTER_API_KEY');
+    const model = readEnv('OPENROUTER_MODEL');
+    if (!apiKey || !model) return null;
+
+    const baseUrl = readEnv('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1';
+    const recentMessages = history.slice(-10).map((item) => ({
+        role: item.role === 'assistant' ? 'assistant' : 'user',
+        content: String(item.text || '').slice(0, 1500)
+    }));
+
+    const response = await fetchWithTimeout(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'http://localhost:3000',
+            'X-Title': 'Atlaix AI Assistant'
+        },
+        body: JSON.stringify({
+            model,
+            temperature: 0.55,
+            messages: [
+                { role: 'system', content: buildAssistantChatPrompt() },
+                ...recentMessages,
+                { role: 'user', content: message }
+            ]
+        })
+    }, 15_000);
+
+    if (!response.ok) {
+        throw new Error(`OpenRouter chat failed with ${response.status}.`);
+    }
+
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content;
+    return typeof content === 'string' && content.trim() ? content.trim() : null;
+};
+
+const buildLocalConversationResponse = (message: string) => {
+    const lower = message.toLowerCase();
+    if (/\b(today|date|day)\b/.test(lower)) {
+        const today = new Date().toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            timeZone: 'Africa/Lagos'
+        });
+        return `Today is ${today}. If you are checking market context for the day, I can also pull the latest Detection Engine updates or help you run a Safe Scan on a token.`;
+    }
+
+    if (/\bhello\b|\bhi\b|\bhey\b/.test(lower)) {
+        return 'Hey. I am here. You can talk to me normally, and when the conversation touches tokens, wallets, alerts, or risk, I can help turn that into an Atlaix action like a Safe Scan, Detection Engine review, token activity check, or alert setup.';
+    }
+
+    return 'I can talk through that with you. I am best when I can connect the conversation to Atlaix data too, so if this is about a token, wallet movement, risk, or alerts, send me the address or the goal and I will help you move from question to action.';
+};
+
+const normalizeAssistantText = (text: string) => text
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+
+const buildAssistantResponse = async (message: string, history: AssistantConversationMessage[] = []) => {
+    const request = await chooseAssistantTool(message, history);
+    const address = request.address || extractAssistantAddress(message) || getRecentAssistantAddress(history);
+    const chain = request.chain || (address ? inferAssistantChain(message, address) : '');
+    const actions: AssistantChatAction[] = [];
+
+    if (request.tool === 'run_safe_scan') {
+        if (!address) {
+            return {
+                answer: 'I can run a Safe Scan, but I need the token contract address first. Send the address and, if you know it, the chain.',
+                tool: 'safe_scan_needs_address',
+                actions: [{ label: 'Open Safe Scan', href: '/safe-scan' }]
+            };
+        }
+
+        const report = isEvmChain(chain)
+            ? await analyzeAlchemyHubEvmToken(address, chain, { depth: 'balanced', holderSeeds: [], seedOnly: true })
+            : await analyzeAlchemyHubToken(address, { depth: 'balanced', holderSeeds: [], seedOnly: true });
+
+        actions.push({
+            label: 'Open Safe Scan',
+            href: `/safe-scan?${new URLSearchParams({ address, chain, autoScan: '1' }).toString()}`
+        });
+
+        return {
+            answer: summarizeSafeScanReport(report),
+            tool: 'run_safe_scan',
+            data: {
+                tokenAddress: address,
+                chain,
+                tokenSymbol: report?.tokenSymbol,
+                riskLevel: report?.bundleIntelligence?.riskLevel,
+                confidence: report?.bundleIntelligence?.confidence
+            },
+            actions
+        };
+    }
+
+    if (request.tool === 'get_detection_updates') {
+        const events = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+        const topEvents = (events || []).slice(0, 5);
+        actions.push({ label: 'Open Detection Engine', href: '/detection' });
+
+        if (!topEvents.length) {
+            return {
+                answer: 'I checked the Detection Engine, but there are no current detection events available from the local feed.',
+                tool: 'detection_updates',
+                actions
+            };
+        }
+
+        return {
+            answer: [
+                `I found ${topEvents.length} recent Detection Engine updates:`,
+                ...topEvents.map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionLine(event)}`)
+            ].join('\n'),
+            tool: 'detection_updates',
+            data: {
+                events: topEvents.map((event: any) => ({
+                    token: event?.token?.ticker || event?.token?.name,
+                    eventType: event?.eventType,
+                    severity: event?.severity,
+                    score: event?.score,
+                    href: eventTokenHref(event)
+                }))
+            },
+            actions
+        };
+    }
+
+    if (request.tool === 'get_token_activity') {
+        if (!address) {
+            return {
+                answer: 'I can check token activity, but I need the token contract address first.',
+                tool: 'token_activity_needs_address',
+                actions: [{ label: 'Open Detection Engine', href: '/detection' }]
+            };
+        }
+
+        const activities = await ImpactfulTokenActivityStore.getActivities(chain, address);
+        actions.push({ label: 'Open Token Detection', href: `/detection/token/${encodeURIComponent(address)}` });
+
+        if (!activities.length) {
+            return {
+                answer: 'I checked the token activity cache, but no reportable token impact events are stored for that address yet.',
+                tool: 'get_token_activity',
+                actions
+            };
+        }
+
+        return {
+            answer: [
+                `I found ${activities.length} reportable token impact event${activities.length === 1 ? '' : 's'} for this token:`,
+                ...activities.slice(0, 5).map((activity, index) => `${index + 1}. ${activity.title}: ${activity.description} (${compactUsd(activity.usdValue)}).`)
+            ].join('\n'),
+            tool: 'get_token_activity',
+            data: {
+                tokenAddress: address,
+                chain,
+                activities: activities.slice(0, 5).map((activity) => ({
+                    title: activity.title,
+                    description: activity.description,
+                    usdValue: activity.usdValue,
+                    severity: activity.severity,
+                    detectedAt: activity.detectedAt
+                }))
+            },
+            actions
+        };
+    }
+
+    if (request.tool === 'get_smart_alert_status') {
+        const status = smartAlertRunner.getStatus();
+        return {
+            answer: [
+                `Smart Alerts are ${status.enabled ? 'enabled' : 'disabled'}.`,
+                `Last run status: ${status.lastRunStatus || 'not run yet'}.`,
+                `Rules checked: ${status.rulesChecked || 0}. Triggers created: ${status.triggersCreated || 0}.`,
+                status.lastError ? `Latest error: ${status.lastError}` : ''
+            ].filter(Boolean).join('\n'),
+            tool: 'get_smart_alert_status',
+            data: status,
+            actions: [{ label: 'Open Smart Alerts', href: '/smart-alerts' }]
+        };
+    }
+
+    if (request.tool === 'prepare_alert_setup') {
+        const href = address
+            ? `/smart-alerts?${new URLSearchParams({ address, chain }).toString()}`
+            : '/smart-alerts';
+        return {
+            answer: address
+                ? 'I can help prepare this alert, but I will not save it silently. Open Smart Alerts, review the token and condition, then confirm it there.'
+                : 'I can help set up an alert. Send the token address and condition, or open Smart Alerts to choose the alert type.',
+            tool: 'alert_setup',
+            actions: [{ label: 'Open Smart Alerts', href }]
+        };
+    }
+
+    if (request.tool === 'conversation') {
+        try {
+            const modelAnswer = await generateAssistantConversation(message, history);
+            if (modelAnswer) {
+                return {
+                    answer: normalizeAssistantText(modelAnswer),
+                    tool: 'conversation'
+                };
+            }
+        } catch (error) {
+            console.warn('[AiAssistant] model conversation unavailable; using local chat fallback', error instanceof Error ? error.message : error);
+        }
+
+        return {
+            answer: buildLocalConversationResponse(message),
+            tool: 'conversation'
+        };
+    }
+
+    if (/\bhello\b|\bhi\b|\bhey\b/i.test(message)) {
+        return {
+            answer: 'Hey. I can help you read Detection Engine updates, run Safe Scan summaries, inspect token activity, and prepare Smart Alert setup links. I will ask for confirmation before anything that changes saved app state.',
+            tool: 'conversation'
+        };
+    }
+
+    return {
+        answer: 'I can help with Atlaix workflows like “show detection updates”, “run a safe scan on this token”, or “help me set an alert for this address”. The model provider is not connected yet, so I am using the safe local tool router for now.',
+        tool: 'conversation'
+    };
+};
+
 async function fetchChainDexVolume(chain: string) {
     const chainId = chain.toLowerCase().replace(/[^a-z0-9-]/g, '');
     const chainLabel = CHAIN_DEX_VOLUME_LABELS[chainId];
@@ -826,6 +1346,50 @@ const server = createServer(async (request, response) => {
         const status = await detectionEngine.runNow();
         json(response, 200, status);
         return;
+    }
+
+    if (method === 'GET' && requestUrl.pathname === '/api/ai-assistant/notifications') {
+        try {
+            const notifications = await loadAssistantNotifications();
+            json(response, 200, {
+                notifications,
+                provider: getAssistantProvider(),
+                generatedAt: new Date().toISOString()
+            });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'Could not load assistant notifications.'
+            });
+            return;
+        }
+    }
+
+    if (method === 'POST' && requestUrl.pathname === '/api/ai-assistant/chat') {
+        try {
+            const body = await readJsonBody(request) as { message?: string; history?: AssistantConversationMessage[] };
+            const message = String(body.message || '').trim();
+            if (!message) {
+                json(response, 400, { error: 'message is required.' });
+                return;
+            }
+
+            const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
+            const result = await buildAssistantResponse(message, history);
+            json(response, 200, {
+                id: randomUUID(),
+                role: 'assistant',
+                createdAt: new Date().toISOString(),
+                provider: getAssistantProvider(),
+                ...result
+            });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'The assistant could not complete that request.'
+            });
+            return;
+        }
     }
 
     if (method === 'POST' && requestUrl.pathname === '/api/token-activity/watch') {
