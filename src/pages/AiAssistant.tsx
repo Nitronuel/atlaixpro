@@ -46,6 +46,66 @@ const SUGGESTED_PROMPTS = [
 ];
 
 const OFFICIAL_ANNOUNCEMENTS: AiAssistantNotification[] = [];
+const ASSISTANT_CHAT_CACHE_KEY = 'atlaix-ai-assistant-chat-v1';
+const ASSISTANT_CHAT_TTL_MS = 60 * 60 * 1000;
+
+type AssistantChatCache = {
+    messages: ChatMessage[];
+    draft: string;
+    activeMenu: 'assistant' | 'announcements';
+    provider: AiAssistantProvider | null;
+    savedAt: number;
+};
+
+const createWelcomeMessage = (): ChatMessage => ({
+    id: 'welcome',
+    role: 'assistant',
+    text: 'Hey, I am Atlaix AI. You can talk to me normally, and when the conversation touches tokens, wallets, risk, alerts, or market activity, I can help turn it into an Atlaix workflow.',
+    tool: 'conversation',
+    createdAt: Date.now()
+});
+
+const canUseLocalStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const loadAssistantChatCache = (): AssistantChatCache | null => {
+    if (!canUseLocalStorage()) return null;
+
+    try {
+        const raw = window.localStorage.getItem(ASSISTANT_CHAT_CACHE_KEY);
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw) as AssistantChatCache;
+        if (!Array.isArray(parsed.messages) || typeof parsed.savedAt !== 'number') return null;
+        if (Date.now() - parsed.savedAt > ASSISTANT_CHAT_TTL_MS) {
+            window.localStorage.removeItem(ASSISTANT_CHAT_CACHE_KEY);
+            return null;
+        }
+
+        return {
+            messages: parsed.messages.filter((message) => message?.id && message?.role && message?.text).slice(-40),
+            draft: typeof parsed.draft === 'string' ? parsed.draft : '',
+            activeMenu: parsed.activeMenu === 'announcements' ? 'announcements' : 'assistant',
+            provider: parsed.provider || null,
+            savedAt: parsed.savedAt
+        };
+    } catch {
+        return null;
+    }
+};
+
+const saveAssistantChatCache = (cache: Omit<AssistantChatCache, 'savedAt'>) => {
+    if (!canUseLocalStorage()) return;
+
+    try {
+        window.localStorage.setItem(ASSISTANT_CHAT_CACHE_KEY, JSON.stringify({
+            ...cache,
+            messages: cache.messages.slice(-40),
+            savedAt: Date.now()
+        }));
+    } catch {
+        // Chat persistence is a convenience; do not interrupt the assistant if storage is unavailable.
+    }
+};
 
 const splitLines = (text: string) => text.split('\n').filter(Boolean);
 
@@ -104,21 +164,14 @@ const promptToMessage = (prompt: string) => {
 
 export const AiAssistant: React.FC = () => {
     const navigate = useNavigate();
+    const cachedChatRef = useRef<AssistantChatCache | null>(loadAssistantChatCache());
     const [notifications, setNotifications] = useState<AiAssistantNotification[]>([]);
-    const [provider, setProvider] = useState<AiAssistantProvider | null>(null);
-    const [activeMenu, setActiveMenu] = useState<'assistant' | 'announcements'>('assistant');
+    const [provider, setProvider] = useState<AiAssistantProvider | null>(cachedChatRef.current?.provider || null);
+    const [activeMenu, setActiveMenu] = useState<'assistant' | 'announcements'>(cachedChatRef.current?.activeMenu || 'assistant');
     const [loadingNotifications, setLoadingNotifications] = useState(true);
     const [notificationError, setNotificationError] = useState('');
-    const [messages, setMessages] = useState<ChatMessage[]>([
-        {
-            id: 'welcome',
-            role: 'assistant',
-            text: 'Hey, I am Atlaix AI. You can talk to me normally, and when the conversation touches tokens, wallets, risk, alerts, or market activity, I can help turn it into an Atlaix workflow.',
-            tool: 'conversation',
-            createdAt: Date.now()
-        }
-    ]);
-    const [draft, setDraft] = useState('');
+    const [messages, setMessages] = useState<ChatMessage[]>(cachedChatRef.current?.messages?.length ? cachedChatRef.current.messages : [createWelcomeMessage()]);
+    const [draft, setDraft] = useState(cachedChatRef.current?.draft || '');
     const [sending, setSending] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -144,6 +197,10 @@ export const AiAssistant: React.FC = () => {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }, [messages, sending]);
+
+    useEffect(() => {
+        saveAssistantChatCache({ messages, draft, activeMenu, provider });
+    }, [activeMenu, draft, messages, provider]);
 
     const goToAction = (href: string) => {
         if (href.startsWith('/')) {
