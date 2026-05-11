@@ -275,6 +275,73 @@ const formatAssistantPrice = (value: string | number | undefined) => {
     }).format(numeric);
 };
 
+const formatAssistantCurrencyThreshold = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) return '';
+    if (value < 0.000001) return `$${value.toExponential(2)}`;
+    if (value < 1) return `$${value.toFixed(8).replace(/0+$/, '').replace(/\.$/, '')}`;
+    return `$${value.toFixed(value >= 100 ? 2 : 6).replace(/0+$/, '').replace(/\.$/, '')}`;
+};
+
+const extractAssistantAlertPercent = (message: string) => {
+    const match = message.match(/(-?\d+(?:\.\d+)?)\s*%/);
+    return match ? Math.abs(Number(match[1])) : null;
+};
+
+const extractAssistantAlertIntent = async (
+    message: string,
+    tokenQuery: string,
+    chain: string
+) => {
+    const lower = message.toLowerCase();
+    const percent = extractAssistantAlertPercent(message);
+    const token = tokenQuery ? await resolveAssistantTokenOverview(tokenQuery, chain) : null;
+    const currentPrice = parseAssistantMarketNumber((token as any)?.price);
+    const isDown = /\b(down|drops?|falls?|decrease|decreases|below|under)\b/.test(lower);
+    const isUp = /\b(up|rises?|increase|increases|above|over|pumps?)\b/.test(lower);
+
+    let alertType = 'price-target';
+    let condition: 'above' | 'below' | 'changes_by_percent' | 'buy_above' | 'sell_above' | 'buy_or_sell_above' = isDown ? 'below' : 'above';
+    let thresholdKind: 'currency' | 'percent' = 'currency';
+    let threshold = '';
+
+    if (/\bvolume\b/.test(lower)) {
+        alertType = 'volume';
+    } else if (/\bliquidity\b/.test(lower)) {
+        alertType = 'liquidity';
+    } else if (/\bwhale\b|\bbuy\b|\bsell\b/.test(lower) && /\$?\d/.test(message) && !/\bprice\b/.test(lower)) {
+        alertType = 'whale';
+        condition = lower.includes('sell') ? 'sell_above' : lower.includes('buy') ? 'buy_above' : 'buy_or_sell_above';
+    }
+
+    const currencyMatch = message.match(/\$?\d+(?:\.\d+)?\s*[kKmMbB]?/);
+    if (percent !== null && alertType === 'price-target' && currentPrice > 0 && (isUp || isDown || lower.includes('current price'))) {
+        const multiplier = isDown ? 1 - (percent / 100) : 1 + (percent / 100);
+        threshold = formatAssistantCurrencyThreshold(currentPrice * multiplier);
+        condition = isDown ? 'below' : 'above';
+    } else if (percent !== null && alertType !== 'whale') {
+        alertType = alertType === 'price-target' ? 'price-move' : alertType;
+        condition = 'changes_by_percent';
+        thresholdKind = 'percent';
+        threshold = String(percent);
+    } else if (currencyMatch) {
+        threshold = currencyMatch[0].trim();
+    }
+
+    if (!threshold) {
+        threshold = alertType === 'whale' ? '$50K' : alertType === 'volume' ? '$1M' : alertType === 'liquidity' ? '$100K' : '$0';
+    }
+
+    return {
+        token,
+        alertType,
+        condition,
+        thresholdKind,
+        threshold,
+        percent,
+        direction: isDown ? 'down' : isUp ? 'up' : ''
+    };
+};
+
 const pairToAssistantToken = (pair: any) => {
     if (!pair) return null;
     const token = pair.baseToken || {};
@@ -492,6 +559,10 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return { tool: 'get_token_activity', address, chain: address ? inferAssistantChain(message, address) : undefined };
     }
 
+    if (/\balert\b|\bnotify\b|\bwatch\b/.test(lower)) {
+        return { tool: 'prepare_alert_setup', address, query: extractAssistantTokenQuery(message, history), chain: address ? inferAssistantChain(message, address) : undefined };
+    }
+
     if (/\bprice\b|\bmarket\s*cap\b|\bliquidity\b|\bvolume\b|\boverview\b|\btoken details\b|\bdetails\b/.test(lower)) {
         return {
             tool: 'get_token_overview',
@@ -522,10 +593,6 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
 
     if (/\balert status\b|\bsmart alert status\b|\brunner\b/.test(lower)) {
         return { tool: 'get_smart_alert_status' };
-    }
-
-    if (/\balert\b|\bnotify\b|\bwatch\b/.test(lower)) {
-        return { tool: 'prepare_alert_setup', address, chain: address ? inferAssistantChain(message, address) : undefined };
     }
 
     return { tool: 'conversation' };
@@ -783,12 +850,33 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'prepare_alert_setup') {
-        const href = address
-            ? `/smart-alerts?${new URLSearchParams({ address, chain }).toString()}`
-            : '/smart-alerts';
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const alertIntent = await extractAssistantAlertIntent(message, tokenQuery, chain);
+        const token = alertIntent.token as any;
+        const alertAddress = address || token?.address || tokenQuery;
+        const alertChain = chain || token?.chain || '';
+        const params = new URLSearchParams();
+        if (alertAddress) params.set('address', alertAddress);
+        if (alertChain) params.set('chain', alertChain);
+        params.set('setup', '1');
+        params.set('type', alertIntent.alertType);
+        params.set('condition', alertIntent.condition);
+        params.set('thresholdKind', alertIntent.thresholdKind);
+        params.set('threshold', alertIntent.threshold);
+
+        const href = `/smart-alerts?${params.toString()}`;
+        const tokenLabel = token?.ticker || token?.name || (alertAddress ? 'this token' : '');
+        const currentPrice = token?.price ? formatAssistantPrice(token.price) : '';
+        const targetLine = alertIntent.thresholdKind === 'currency'
+            ? `${alertIntent.condition === 'below' ? 'below' : 'above'} ${alertIntent.threshold}`
+            : `by ${alertIntent.threshold}%`;
+
         return {
-            answer: address
-                ? 'I can help prepare this alert, but I will not save it silently. Open Smart Alerts, review the token and condition, then confirm it there.'
+            answer: alertAddress
+                ? [
+                    `I prepared a Smart Alert draft for ${tokenLabel || 'that token'}${currentPrice ? ` using the current price ${currentPrice}` : ''}.`,
+                    `Trigger: price ${targetLine}. Open Smart Alerts, review the setup, then confirm it there. I will not save it silently.`
+                ].join('\n')
                 : 'I can help set up an alert. Send the token address and condition, or open Smart Alerts to choose the alert type.',
             tool: 'alert_setup',
             actions: [{ label: 'Open Smart Alerts', href }]

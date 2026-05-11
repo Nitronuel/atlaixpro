@@ -280,6 +280,7 @@ export const SmartAlerts: React.FC = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const linkedTokenProcessedRef = useRef('');
+    const assistantSetupProcessedRef = useRef('');
     const { user, loading: authLoading } = useAuth();
     const [activeTypeKey, setActiveTypeKey] = useState('price-target');
     const [rules, setRules] = useState<SmartAlertRule[]>([]);
@@ -458,6 +459,27 @@ export const SmartAlerts: React.FC = () => {
             threshold: item.id === 'price-move' ? '30' : SETUP_DEFAULTS[item.type].threshold
     });
 
+    const getAssistantDraftFromParams = (item: BasicAlertType): AlertSetupDraft => {
+        const condition = searchParams.get('condition') as SmartAlertCondition | null;
+        const thresholdKind = searchParams.get('thresholdKind') as SmartAlertThresholdKind | null;
+        const threshold = searchParams.get('threshold');
+        const address = searchParams.get('address') || searchParams.get('token') || '';
+        const chainParam = searchParams.get('chain') || '';
+        const defaultDraft = getDefaultDraft(item);
+        const allowedCondition = CONDITION_OPTIONS[item.type].some((option) => option.value === condition);
+
+        return {
+            ...defaultDraft,
+            tokenAddress: address,
+            chainId: chainParam,
+            condition: allowedCondition && condition ? condition : defaultDraft.condition,
+            thresholdKind: thresholdKind || (allowedCondition && condition
+                ? CONDITION_OPTIONS[item.type].find((option) => option.value === condition)?.thresholdKind || defaultDraft.thresholdKind
+                : defaultDraft.thresholdKind),
+            threshold: threshold || defaultDraft.threshold
+        };
+    };
+
     const openSetupModal = (item: BasicAlertType) => {
         setActiveTypeKey(item.id);
         setSetupType(item);
@@ -468,6 +490,26 @@ export const SmartAlerts: React.FC = () => {
         setFormError(null);
         setError(null);
     };
+
+    useEffect(() => {
+        if (searchParams.get('setup') !== '1') return;
+
+        const setupKey = searchParams.toString();
+        if (!setupKey || assistantSetupProcessedRef.current === setupKey) return;
+        assistantSetupProcessedRef.current = setupKey;
+
+        const requestedType = searchParams.get('type') || 'price-target';
+        const nextType = BASIC_ALERT_TYPES.find((item) => item.id === requestedType) || BASIC_ALERT_TYPES[0];
+        setActiveTypeKey(nextType.id);
+        setSetupType(nextType);
+        setSetupMode('single');
+        setAlertMode('single');
+        setSetupDraft(getAssistantDraftFromParams(nextType));
+        setShowLinkedTypePicker(false);
+        setSetupTokenLookupError(null);
+        setFormError(null);
+        setError(null);
+    }, [searchParams]);
 
     const selectSetupType = (itemId: string) => {
         const nextType = BASIC_ALERT_TYPES.find((item) => item.id === itemId);
