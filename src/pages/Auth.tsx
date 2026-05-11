@@ -13,10 +13,15 @@ interface AuthScreenProps {
 const formatAuthError = (value: unknown, fallback = 'Authentication could not complete. Please try again.') => {
     const message = value instanceof Error ? value.message : String(value || '');
     if (!message) return fallback;
+    console.warn('[Auth] Sign-in flow error', value);
     if (/invalid login|invalid credentials|email.*password|password.*email/i.test(message)) return 'Email or password is incorrect.';
     if (/already registered|already exists|user already/i.test(message)) return 'An account already exists for this email.';
     if (/rate limit|too many|over email send rate/i.test(message)) return 'Too many attempts. Please wait a moment and try again.';
-    if (/supabase|api|provider|configured|configuration|network|fetch|server|database|endpoint/i.test(message)) return fallback;
+    if (/quota|setitem|storage|localstorage|sessionstorage/i.test(message)) {
+        return 'We could not finish signing you in on this browser. Refresh the page and try again.';
+    }
+    if (/supabase|api|provider|configured|configuration|network|fetch|server|database|endpoint|auth-token|jwt|token/i.test(message)) return fallback;
+    if (message.length > 120 || /['"`{}()[\]]|failed to execute|typeerror|referenceerror|syntaxerror/i.test(message)) return fallback;
     return message;
 };
 

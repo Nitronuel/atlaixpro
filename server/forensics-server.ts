@@ -146,12 +146,14 @@ type AssistantToolName =
     | 'run_safe_scan'
     | 'prepare_alert_setup'
     | 'get_token_activity'
+    | 'get_token_overview'
     | 'get_smart_alert_status';
 
 type AssistantToolRequest = {
     tool: AssistantToolName;
     address?: string;
     chain?: string;
+    query?: string;
     responseStyle?: 'brief' | 'detailed';
 };
 
@@ -198,6 +200,118 @@ const getRecentAssistantAddress = (messages: AssistantConversationMessage[] = []
         if (found) return found;
     }
     return '';
+};
+
+const TOKEN_QUERY_STOP_WORDS = new Set([
+    'what', 'is', 'the', 'current', 'price', 'of', 'coin', 'token', 'please', 'pls',
+    'show', 'me', 'tell', 'about', 'for', 'on', 'chain', 'details', 'overview', 'market',
+    'cap', 'liquidity', 'volume', 'this', 'that', 'yes', 'it', 'one', 'talking'
+]);
+
+const cleanAssistantTokenQuery = (value: string) => value
+    .replace(/\$([a-zA-Z0-9]+)/g, '$1')
+    .replace(/[^a-zA-Z0-9\s.-]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word && !TOKEN_QUERY_STOP_WORDS.has(word.toLowerCase()))
+    .join(' ')
+    .trim();
+
+const extractAssistantTokenQuery = (message: string, history: AssistantConversationMessage[] = []) => {
+    const address = extractAssistantAddress(message);
+    if (address) return address;
+
+    const directPatterns = [
+        /\b(?:price|details|overview|market\s*cap|liquidity|volume)\s+(?:of|for|on)?\s+(.+?)(?:\?|$)/i,
+        /\b(?:tell me about|show me)\s+(.+?)(?:\?|$)/i
+    ];
+
+    for (const pattern of directPatterns) {
+        const match = message.match(pattern)?.[1];
+        const cleaned = cleanAssistantTokenQuery(match || '');
+        if (cleaned) return cleaned;
+    }
+
+    const cleanedMessage = cleanAssistantTokenQuery(message);
+    if (cleanedMessage && !/\b(yes|that|this|it)\b/i.test(message)) return cleanedMessage;
+
+    for (const item of [...history].reverse()) {
+        if (item.role === 'assistant') continue;
+        const prior = extractAssistantAddress(String(item.text || '')) || extractAssistantTokenQuery(String(item.text || ''), []);
+        if (prior) return prior;
+    }
+
+    return '';
+};
+
+const normalizeAssistantChainLabel = (chain: string | undefined) => {
+    const lower = String(chain || '').toLowerCase();
+    if (lower === 'bsc') return 'BNB Chain';
+    if (lower === 'eth' || lower === 'ethereum') return 'Ethereum';
+    if (lower === 'sol' || lower === 'solana') return 'Solana';
+    return chain || 'Unknown Chain';
+};
+
+const parseAssistantMarketNumber = (value: string | number | undefined) => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const raw = String(value || '').replace(/[$,%+\s,]/g, '').toUpperCase();
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return 0;
+    if (raw.includes('T')) return parsed * 1e12;
+    if (raw.includes('B')) return parsed * 1e9;
+    if (raw.includes('M')) return parsed * 1e6;
+    if (raw.includes('K')) return parsed * 1e3;
+    return parsed;
+};
+
+const formatAssistantPrice = (value: string | number | undefined) => {
+    const numeric = parseAssistantMarketNumber(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return String(value || 'unavailable');
+    if (numeric < 0.000001) return `$${numeric.toExponential(2)}`;
+    if (numeric < 1) return `$${numeric.toFixed(8).replace(/0+$/, '').replace(/\.$/, '')}`;
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 6
+    }).format(numeric);
+};
+
+const pairToAssistantToken = (pair: any) => {
+    if (!pair) return null;
+    const token = pair.baseToken || {};
+    return {
+        name: token.name || 'Unknown Token',
+        ticker: token.symbol || 'TOKEN',
+        address: token.address || '',
+        pairAddress: pair.pairAddress,
+        chain: pair.chainId || 'unknown',
+        price: pair.priceUsd ? `$${pair.priceUsd}` : '$0',
+        h24: `${Number(pair.priceChange?.h24 || 0).toFixed(2)}%`,
+        volume24h: compactUsd(Number(pair.volume?.h24 || 0)),
+        liquidity: compactUsd(Number(pair.liquidity?.usd || 0)),
+        cap: compactUsd(Number(pair.marketCap || pair.fdv || 0))
+    };
+};
+
+const resolveAssistantTokenOverview = async (query: string, chain?: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return null;
+
+    const isAddress = isLikelyEvmAddress(trimmed) || isLikelySolanaAddress(trimmed);
+    if (isAddress) {
+        const pair = await DatabaseService.getTokenDetails(trimmed, chain);
+        const tokenFromPair = pairToAssistantToken(pair);
+        if (tokenFromPair) return tokenFromPair;
+    }
+
+    const searchResults = await DatabaseService.searchGlobalPairs(trimmed);
+    const normalizedChain = chain ? chain.toLowerCase() : '';
+    const preferred = searchResults.find((token: any) => {
+        if (!normalizedChain) return true;
+        const tokenChain = String(token.chain || '').toLowerCase();
+        return tokenChain === normalizedChain || normalizeAssistantChainLabel(tokenChain).toLowerCase() === normalizeAssistantChainLabel(chain).toLowerCase();
+    }) || searchResults[0];
+
+    return preferred || null;
 };
 
 const eventTokenHref = (event: any) => {
@@ -277,8 +391,9 @@ const buildAssistantSystemPrompt = () => [
     'Choose exactly one approved tool for the user request.',
     'You cannot modify source code, change app architecture, access secrets, run shell commands, or invent app data.',
     'Write actions must be confirmation-first. For alerts, choose prepare_alert_setup, not a direct save.',
-    'Return only valid JSON with keys: tool, address, chain, responseStyle.',
-    'Approved tools: conversation, get_detection_updates, run_safe_scan, prepare_alert_setup, get_token_activity, get_smart_alert_status.',
+    'Return only valid JSON with keys: tool, address, chain, query, responseStyle.',
+    'Approved tools: conversation, get_detection_updates, run_safe_scan, prepare_alert_setup, get_token_activity, get_token_overview, get_smart_alert_status.',
+    'Use get_token_overview for current price, token details, market cap, liquidity, volume, or overview questions.',
     'Use run_safe_scan only when the user asks for scan, safety, risk, security, or forensic analysis.',
     'Use get_detection_updates for Detection Engine, new updates, admitted tokens, market events, or alpha events.',
     'Use prepare_alert_setup for alerts, notifications, watching a token, or thresholds.',
@@ -308,6 +423,7 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
             'run_safe_scan',
             'prepare_alert_setup',
             'get_token_activity',
+            'get_token_overview',
             'get_smart_alert_status'
         ]);
         if (!allowed.has(parsed.tool)) return null;
@@ -315,6 +431,7 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
             tool: parsed.tool,
             address: typeof parsed.address === 'string' ? parsed.address : undefined,
             chain: typeof parsed.chain === 'string' ? parsed.chain : undefined,
+            query: typeof parsed.query === 'string' ? parsed.query : undefined,
             responseStyle: parsed.responseStyle === 'detailed' ? 'detailed' : 'brief'
         };
     } catch {
@@ -373,6 +490,30 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
 
     if (/\bactivity\b|\bwhale\b|\bbuy\b|\bsell\b|\bwallet movement\b|\btimeline\b/.test(lower)) {
         return { tool: 'get_token_activity', address, chain: address ? inferAssistantChain(message, address) : undefined };
+    }
+
+    if (/\bprice\b|\bmarket\s*cap\b|\bliquidity\b|\bvolume\b|\boverview\b|\btoken details\b|\bdetails\b/.test(lower)) {
+        return {
+            tool: 'get_token_overview',
+            address,
+            query: extractAssistantTokenQuery(message, history),
+            chain: lower.includes('solana') ? 'solana' : address ? inferAssistantChain(message, address) : undefined
+        };
+    }
+
+    if (/\b(yes|yeah|yep|correct|that token|this token|the token)\b/.test(lower)) {
+        const priorTokenQuery = extractAssistantTokenQuery('', history);
+        const priorWasTokenOverview = history.some((item) =>
+            item.role !== 'assistant' &&
+            /\bprice\b|\bmarket\s*cap\b|\bliquidity\b|\bvolume\b|\boverview\b|\btoken details\b|\bdetails\b/i.test(String(item.text || ''))
+        );
+        if (priorWasTokenOverview && priorTokenQuery) {
+            return {
+                tool: 'get_token_overview',
+                query: priorTokenQuery,
+                chain: lower.includes('solana') ? 'solana' : undefined
+            };
+        }
     }
 
     if (/\bdetection\b|\bupdate\b|\bnew\b|\bengine\b|\balpha\b/.test(lower)) {
@@ -572,6 +713,57 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
                 }))
             },
             actions
+        };
+    }
+
+    if (request.tool === 'get_token_overview') {
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        if (!tokenQuery) {
+            return {
+                answer: 'I can check token price and overview data, but I need the token symbol, name, or contract address first.',
+                tool: 'token_overview_needs_query',
+                actions: [{ label: 'Open Overview', href: '/dashboard' }]
+            };
+        }
+
+        const token = await resolveAssistantTokenOverview(tokenQuery, chain);
+        if (!token) {
+            return {
+                answer: `I could not find a current Atlaix token listing for "${tokenQuery}". Try the contract address or the exact ticker shown in the app.`,
+                tool: 'get_token_overview',
+                actions: [
+                    { label: 'Open Overview', href: '/dashboard' },
+                    { label: 'Open Detection Engine', href: '/detection' }
+                ]
+            };
+        }
+
+        const tokenAddress = token.address || tokenQuery;
+        const tokenHref = token.address
+            ? `/token/${encodeURIComponent(token.address)}`
+            : `/detection/token/${encodeURIComponent(tokenQuery)}`;
+
+        return {
+            answer: [
+                `${token.name || token.ticker} (${token.ticker}) is currently priced at ${formatAssistantPrice(token.price)} on ${normalizeAssistantChainLabel(token.chain)}.`,
+                `24h change: ${token.h24 || 'unavailable'}. 24h volume: ${token.volume24h || '$0'}. Liquidity: ${token.liquidity || '$0'}. Market cap: ${token.cap || '$0'}.`
+            ].join('\n'),
+            tool: 'get_token_overview',
+            data: {
+                token: token.ticker,
+                name: token.name,
+                address: tokenAddress,
+                chain: token.chain,
+                price: token.price,
+                change24h: token.h24,
+                volume24h: token.volume24h,
+                liquidity: token.liquidity,
+                marketCap: token.cap
+            },
+            actions: [
+                { label: 'Open Token Details', href: tokenHref },
+                { label: 'Open Overview', href: '/dashboard' }
+            ]
         };
     }
 

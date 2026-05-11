@@ -33,6 +33,36 @@ const getDisplayName = (user: User) => {
     return String(metadata.display_name || metadata.full_name || metadata.name || user.email?.split('@')[0] || 'Atlaix User');
 };
 
+const isStorageQuotaError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || '');
+    return /quota|setitem|storage/i.test(message);
+};
+
+const clearAtlaixLocalCaches = () => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+
+    const cacheKeys = [
+        'atlaix-live-alpha-cache',
+        'atlaix-detection-events-cache',
+        'atlaix-global-events-cache',
+        'atlaix-forensic-report:index'
+    ];
+    const cachePrefixes = [
+        'atlaix-token-activity-cache:',
+        'atlaix-safe-scan-report:',
+        'atlaix-forensic-report:'
+    ];
+
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.localStorage.key(index);
+        if (!key) continue;
+
+        if (cacheKeys.includes(key) || cachePrefixes.some((prefix) => key.startsWith(prefix))) {
+            window.localStorage.removeItem(key);
+        }
+    }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [session, setSession] = useState<Session | null>(null);
     const [user, setUser] = useState<User | null>(null);
@@ -96,7 +126,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const signIn = useCallback(async (email: string, password: string) => {
         const supabase = requireSupabase();
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (!error) return;
+
+        if (isStorageQuotaError(error)) {
+            clearAtlaixLocalCaches();
+            const retry = await supabase.auth.signInWithPassword({ email, password });
+            if (!retry.error) return;
+            throw retry.error;
+        }
+
+        throw error;
     }, []);
 
     const signUp = useCallback(async (email: string, password: string, displayName?: string) => {

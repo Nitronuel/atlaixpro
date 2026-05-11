@@ -4,14 +4,12 @@ import {
     AlertTriangle,
     ArrowRight,
     Bell,
-    Bot,
     CheckCircle2,
     Loader2,
     RefreshCw,
     Search,
     Send,
-    ShieldCheck,
-    Sparkles
+    ShieldCheck
 } from 'lucide-react';
 import {
     AiAssistantAction,
@@ -47,6 +45,8 @@ const SUGGESTED_PROMPTS = [
     'Token activity'
 ];
 
+const OFFICIAL_ANNOUNCEMENTS: AiAssistantNotification[] = [];
+
 const splitLines = (text: string) => text.split('\n').filter(Boolean);
 
 const toConversationHistory = (messages: ChatMessage[]): AiAssistantConversationMessage[] =>
@@ -70,13 +70,6 @@ const formatClock = (timestamp: number) => new Intl.DateTimeFormat('en-US', {
     minute: '2-digit'
 }).format(new Date(timestamp));
 
-const providerStatus = (provider: AiAssistantProvider | null) => {
-    if (!provider) return 'syncing';
-    if (provider.mode === 'model-ready' && provider.model) return provider.model;
-    if (provider.mode === 'model-ready') return 'model ready';
-    return 'local tools';
-};
-
 const toolLabel = (tool?: string) => {
     if (tool === 'run_safe_scan') return 'Safe Scan';
     if (tool === 'detection_updates') return 'Detection';
@@ -92,7 +85,7 @@ const toolIcon = (tool?: string) => {
     if (tool === 'detection_updates') return <CheckCircle2 size={15} />;
     if (tool === 'get_smart_alert_status' || tool === 'alert_setup') return <Bell size={15} />;
     if (tool === 'error') return <AlertTriangle size={15} />;
-    return <Bot size={15} />;
+    return <img src="/logo.png" alt="Atlaix" className="h-4 w-4 object-contain" />;
 };
 
 const notificationToneClass = (tone: AiAssistantNotification['tone']) => {
@@ -134,10 +127,11 @@ export const AiAssistant: React.FC = () => {
         setNotificationError('');
         try {
             const payload = await AiAssistantService.getNotifications();
-            setNotifications(payload.notifications || []);
+            setNotifications(OFFICIAL_ANNOUNCEMENTS);
             setProvider(payload.provider);
         } catch (error) {
-            setNotificationError(error instanceof Error ? error.message : 'Could not load assistant updates.');
+            setNotifications(OFFICIAL_ANNOUNCEMENTS);
+            setNotificationError('');
         } finally {
             setLoadingNotifications(false);
         }
@@ -210,18 +204,18 @@ export const AiAssistant: React.FC = () => {
             id: 'assistant',
             title: 'Atlaix AI',
             subtitle: messages[messages.length - 1]?.text || 'Ready to help',
-            meta: providerStatus(provider),
-            icon: <Bot size={18} />,
+            meta: '',
+            icon: <img src="/logo.png" alt="Atlaix" className="h-5 w-5 object-contain" />,
             active: activeMenu === 'assistant'
         },
         {
             id: 'announcements',
             title: 'Announcements',
-            subtitle: notifications[0]?.body || 'Platform updates and important signals',
-            meta: notifications[0] ? formatRelative(notifications[0].timestamp) : 'live',
+            subtitle: notifications[0]?.body || 'Official updates from Atlaix',
+            meta: notifications[0] ? formatRelative(notifications[0].timestamp) : '',
             icon: <Bell size={18} />,
             active: activeMenu === 'announcements',
-            unread: notifications.length
+            unread: notifications.length || undefined
         }
     ];
 
@@ -232,9 +226,6 @@ export const AiAssistant: React.FC = () => {
                     <div className="border-b border-border p-4">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div>
-                                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-primary-green">
-                                    <Sparkles size={14} /> AI Assistant
-                                </div>
                                 <h2 className="mt-1 text-xl font-bold text-text-light">Chats</h2>
                             </div>
                             <button
@@ -272,7 +263,7 @@ export const AiAssistant: React.FC = () => {
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="truncate text-sm font-bold">{item.title}</div>
-                                        <div className="shrink-0 text-[10px] font-mono text-text-dark">{item.meta}</div>
+                                        {item.meta && <div className="shrink-0 text-[10px] font-mono text-text-dark">{item.meta}</div>}
                                     </div>
                                     <div className="mt-0.5 line-clamp-1 text-xs text-text-dark">{item.subtitle}</div>
                                 </div>
@@ -290,7 +281,7 @@ export const AiAssistant: React.FC = () => {
                     <header className="flex h-17 shrink-0 items-center justify-between border-b border-border bg-card px-5 py-3">
                         <div className="flex min-w-0 items-center gap-3">
                             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary-green/40 bg-primary-green/10 text-primary-green">
-                                {activeMenu === 'announcements' ? <Bell size={21} /> : <Bot size={21} />}
+                                {activeMenu === 'announcements' ? <Bell size={21} /> : <img src="/logo.png" alt="Atlaix" className="h-6 w-6 object-contain" />}
                             </div>
                             <div className="min-w-0">
                                 <h2 className="truncate text-base font-bold text-text-light">
@@ -298,7 +289,7 @@ export const AiAssistant: React.FC = () => {
                                 </h2>
                                 <div className="mt-0.5 flex items-center gap-2 text-xs font-medium text-text-medium">
                                     <span className="h-2 w-2 rounded-full bg-primary-green" />
-                                    {activeMenu === 'announcements' ? `${notifications.length} updates` : providerStatus(provider)}
+                                    {activeMenu === 'announcements' ? `${notifications.length} updates` : 'Online'}
                                 </div>
                             </div>
                         </div>
@@ -314,7 +305,7 @@ export const AiAssistant: React.FC = () => {
                                     <div>
                                         <h3 className="text-lg font-bold text-text-light">Latest Announcements</h3>
                                         <p className="mt-1 text-sm font-medium text-text-medium">
-                                            Important platform updates and high-signal intelligence from Atlaix.
+                                            Official product notes and user-facing updates from Atlaix.
                                         </p>
                                     </div>
                                     <button
@@ -338,7 +329,7 @@ export const AiAssistant: React.FC = () => {
                                 )}
                                 {!notificationError && !loadingNotifications && notifications.length === 0 && (
                                     <div className="rounded-lg border border-border bg-card p-5 text-sm font-semibold text-text-medium">
-                                        No announcements are available right now.
+                                        No announcements have been published yet.
                                     </div>
                                 )}
                                 <div className="grid gap-3">
@@ -418,11 +409,11 @@ export const AiAssistant: React.FC = () => {
                                 <div className="flex justify-start">
                                     <div className="flex items-end gap-2">
                                         <div className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-primary-green">
-                                            <Bot size={15} />
+                                            <img src="/logo.png" alt="Atlaix" className="h-4 w-4 object-contain" />
                                         </div>
                                         <div className="rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 text-sm font-semibold text-text-medium">
                                             <Loader2 size={15} className="mr-2 inline animate-spin" />
-                                            Checking Atlaix tools
+                                            Thinking
                                         </div>
                                     </div>
                                 </div>
