@@ -257,7 +257,7 @@ export const TokenDetails: React.FC = () => {
     const quickActions = [
         {
             icon: Scan,
-            title: 'Risk Scan',
+            title: 'Safe Scan',
             subtitle: 'Identify threats',
             path: `/safe-scan?${new URLSearchParams({
                 address: tokenAddress,

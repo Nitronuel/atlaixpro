@@ -350,9 +350,6 @@ export const AiAssistant: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-                        <div className="hidden text-right text-xs text-text-dark sm:block">
-                            {activeMenu === 'announcements' ? 'Platform notices' : 'Smart app guidance'}
-                        </div>
                     </header>
 
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">

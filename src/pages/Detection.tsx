@@ -1,7 +1,7 @@
 // Route-level product screen for the Atlaix application.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, RefreshCw, Search, ShieldAlert } from 'lucide-react';
+import { Check, ChevronDown, Filter, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { AlphaGauntletEvent } from '../types';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { DatabaseService } from '../services/DatabaseService';
@@ -157,10 +157,13 @@ export const Detection: React.FC = () => {
     const navigate = useNavigate();
     const watchedTokenKeysRef = useRef<Set<string>>(new Set());
     const activeDetectedAtRef = useRef<Map<string, number>>(new Map());
+    const eventFilterRef = useRef<HTMLDivElement | null>(null);
     const [events, setEvents] = useState<AlphaGauntletEvent[]>([]);
     const [loading, setLoading] = useState(true);
     const [tokenQuery, setTokenQuery] = useState('');
     const [chain, setChain] = useState('All Chains');
+    const [eventFilterOpen, setEventFilterOpen] = useState(false);
+    const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>([]);
     const [cachedGlobalEvents, setCachedGlobalEventsState] = useState<GlobalTokenEvent[]>(() => getCachedGlobalEvents());
 
     const stabilizeEvents = (nextEvents: AlphaGauntletEvent[], replaceActiveSet = true) => {
@@ -338,6 +341,46 @@ export const Detection: React.FC = () => {
     }, [recentGlobalEvents]);
 
     const globalEventsToRender = recentGlobalEvents.length > 0 ? recentGlobalEvents : cachedGlobalEvents;
+    const eventTypeOptions = useMemo(() => {
+        return Array.from(new Set(globalEventsToRender.map((globalEvent) => globalEvent.title)))
+            .sort((a, b) => a.localeCompare(b));
+    }, [globalEventsToRender]);
+    const activeEventTypeSet = useMemo(() => new Set(selectedEventTypes), [selectedEventTypes]);
+    const visibleGlobalEvents = useMemo(() => {
+        if (activeEventTypeSet.size === 0) return globalEventsToRender;
+        return globalEventsToRender.filter((globalEvent) => activeEventTypeSet.has(globalEvent.title));
+    }, [activeEventTypeSet, globalEventsToRender]);
+    const activeFilterCount = selectedEventTypes.length;
+
+    useEffect(() => {
+        if (eventTypeOptions.length === 0 || selectedEventTypes.length === 0) return;
+        const optionSet = new Set(eventTypeOptions);
+        const validSelections = selectedEventTypes.filter((eventType) => optionSet.has(eventType));
+        if (validSelections.length !== selectedEventTypes.length) {
+            setSelectedEventTypes(validSelections);
+        }
+    }, [eventTypeOptions, selectedEventTypes]);
+
+    useEffect(() => {
+        if (!eventFilterOpen) return;
+
+        const handleClickOutside = (event: MouseEvent) => {
+            if (!eventFilterRef.current?.contains(event.target as Node)) {
+                setEventFilterOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [eventFilterOpen]);
+
+    const toggleEventType = (eventType: string) => {
+        setSelectedEventTypes((current) => (
+            current.includes(eventType)
+                ? current.filter((selectedType) => selectedType !== eventType)
+                : [...current, eventType]
+        ));
+    };
 
     useEffect(() => {
         const watchCandidates = qualifiedEvents
@@ -400,7 +443,69 @@ export const Detection: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex flex-wrap justify-end gap-3">
+                    <div ref={eventFilterRef} className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setEventFilterOpen((isOpen) => !isOpen)}
+                            className={`w-fit flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-bold transition-colors ${activeFilterCount > 0
+                                ? 'border-primary-green/50 bg-primary-green/10 text-primary-green'
+                                : 'border-border bg-card text-text-light hover:border-primary-green/50 hover:text-primary-green'
+                            }`}
+                        >
+                            <Filter size={16} />
+                            Filter
+                            {activeFilterCount > 0 && (
+                                <span className="rounded-full bg-primary-green px-1.5 py-0.5 text-[10px] font-black text-main">
+                                    {activeFilterCount}
+                                </span>
+                            )}
+                        </button>
+
+                        {eventFilterOpen && (
+                            <div className="absolute right-0 z-30 mt-2 w-[min(320px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-[#171A1D] shadow-2xl">
+                                <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                                    <div>
+                                        <div className="text-sm font-black text-text-light">Event types</div>
+                                        <div className="text-xs text-text-medium">Choose what appears in the feed</div>
+                                    </div>
+                                    {activeFilterCount > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedEventTypes([])}
+                                            className="text-xs font-bold text-primary-green hover:text-primary-green-darker"
+                                        >
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="max-h-72 overflow-y-auto p-2">
+                                    {eventTypeOptions.length === 0 ? (
+                                        <div className="px-3 py-6 text-center text-xs font-bold text-text-medium">
+                                            No event types available yet
+                                        </div>
+                                    ) : (
+                                        eventTypeOptions.map((eventType) => {
+                                            const selected = activeEventTypeSet.has(eventType);
+                                            return (
+                                                <button
+                                                    key={eventType}
+                                                    type="button"
+                                                    onClick={() => toggleEventType(eventType)}
+                                                    className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-bold text-text-light transition-colors hover:bg-card"
+                                                >
+                                                    <span className="min-w-0 truncate">{eventType}</span>
+                                                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? 'border-primary-green bg-primary-green text-main' : 'border-border text-transparent'}`}>
+                                                        <Check size={13} strokeWidth={3} />
+                                                    </span>
+                                                </button>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                     <button
                         onClick={refreshEvents}
                         className="w-fit flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-bold text-text-light hover:border-primary-green/50 hover:text-primary-green transition-colors"
@@ -431,9 +536,20 @@ export const Detection: React.FC = () => {
                                 <div className="text-sm font-bold text-text-light">No global events yet</div>
                                 <div className="mt-1 text-xs text-text-medium">Events will appear when detected tokens show activity.</div>
                             </div>
+                        ) : visibleGlobalEvents.length === 0 ? (
+                            <div className="rounded-lg border border-border bg-[#1C1F22] p-8 text-center">
+                                <div className="text-sm font-bold text-text-light">No events match this filter</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedEventTypes([])}
+                                    className="mt-2 text-xs font-bold text-primary-green hover:text-primary-green-darker"
+                                >
+                                    Clear filters
+                                </button>
+                            </div>
                         ) : (
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                                {globalEventsToRender.map((globalEvent) => {
+                                {visibleGlobalEvents.map((globalEvent) => {
                                     const event = globalEvent.source;
                                     return (
                                     <button

@@ -87,7 +87,7 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
     const quickActions = [
         {
             icon: Scan,
-            label: 'Risk Scan',
+            label: 'Safe Scan',
             iconClass: 'group-hover:text-primary-green',
             path: `/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: safeScanChain }).toString()}`
         },
