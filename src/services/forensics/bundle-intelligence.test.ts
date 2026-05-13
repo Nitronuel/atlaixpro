@@ -50,6 +50,24 @@ describe('bundle intelligence classification', () => {
         expect(result.confidence).toBe('high');
     });
 
+    it('does not escalate weak graph proximity into bundle risk by itself', () => {
+        const result = buildBundleIntelligence({
+            walletsInvolved: 0,
+            supplyControlledPct: 0,
+            retentionPct: null,
+            inferredBundleCount: 0,
+            insiderClusterCount: 0,
+            tier1EvidenceCount: 0,
+            tier2EvidenceCount: 0,
+            weakEvidenceCount: 5,
+            coverageLevel: 'full'
+        });
+
+        expect(result.detected).toBe(false);
+        expect(result.riskLevel).toBe('low');
+        expect(result.reasons.join(' ')).toMatch(/No coordinated|weak graph/i);
+    });
+
     it('labels concentrated low-retention insider activity as exploitative', () => {
         const result = buildBundleIntelligence({
             walletsInvolved: 20,

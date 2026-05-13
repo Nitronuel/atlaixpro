@@ -1,6 +1,6 @@
 // Regression coverage for forensic intelligence behavior.
 import { describe, expect, it } from 'vitest';
-import { classifySolanaConnector, filterPublicSolanaFundingEdges } from './alchemy-hub';
+import { buildCoordinatedWalletUnion, buildWeakLinkedWalletUnion, classifySolanaConnector, filterPublicSolanaFundingEdges } from './alchemy-hub';
 
 describe('lite Solana public source filtering', () => {
     it('keeps low-degree private connector candidates risk eligible', () => {
@@ -69,5 +69,61 @@ describe('lite Solana public source filtering', () => {
 
         expect(result.edges).toHaveLength(0);
         expect(result.excludedConnectors[0].decisionClass).toBe('high_degree_noisy');
+    });
+
+    it('keeps shared connector-only wallets out of confirmed coordinated supply', () => {
+        const confirmed = buildCoordinatedWalletUnion({
+            walletClusters: []
+        });
+        const weak = buildWeakLinkedWalletUnion({
+            confirmedWallets: confirmed,
+            connectorEdges: [
+                {
+                    from: 'HolderA111111111111111111111111111111111',
+                    to: 'HolderB111111111111111111111111111111111',
+                    riskEligible: true
+                }
+            ],
+            secondHopConnectorEdges: []
+        });
+
+        expect(confirmed).toEqual([]);
+        expect(weak).toEqual([
+            'HolderA111111111111111111111111111111111',
+            'HolderB111111111111111111111111111111111'
+        ]);
+    });
+
+    it('counts only proven cluster wallets as confirmed coordinated supply', () => {
+        const confirmed = buildCoordinatedWalletUnion({
+            walletClusters: [
+                {
+                    clusterId: 'cluster-1',
+                    clusterName: 'Confirmed Cluster',
+                    evidenceTier: 'TIER_1',
+                    userEvidenceLabel: 'Proven Connection',
+                    walletCount: 2,
+                    supplyHeldPct: 4,
+                    supplyHeldTokens: '4000000',
+                    whyGrouped: 'Direct funding link.',
+                    corroboratingSignals: ['direct funding'],
+                    wallets: ['HolderA111111111111111111111111111111111', 'HolderB111111111111111111111111111111111'],
+                    walletDetails: []
+                }
+            ],
+            connectorEdges: [
+                {
+                    from: 'HolderC111111111111111111111111111111111',
+                    to: 'HolderD111111111111111111111111111111111',
+                    riskEligible: true
+                }
+            ],
+            secondHopConnectorEdges: []
+        });
+
+        expect(confirmed).toEqual([
+            'HolderA111111111111111111111111111111111',
+            'HolderB111111111111111111111111111111111'
+        ]);
     });
 });

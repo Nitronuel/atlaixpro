@@ -76,7 +76,7 @@ const SafeScanSummary: React.FC<{
     const buyPct = totalTrades ? (buys / totalTrades) * 100 : 0;
     const sellPct = totalTrades ? 100 - buyPct : 0;
     const clusterLiquidityRatio = lp?.totalLiquidity
-        ? (report.supplyAttribution.estimatedCombinedValueUsd || report.supplyAttribution.estimatedClusterValueUsd || 0) / lp.totalLiquidity
+        ? (report.supplyAttribution.estimatedClusterValueUsd || report.supplyAttribution.estimatedCombinedValueUsd || 0) / lp.totalLiquidity
         : null;
     const lpSafe = lp ? lp.burnPercent + lp.lockedPercent >= 80 : null;
     const drainSupported = Boolean(lp?.totalLiquidity);
@@ -183,8 +183,8 @@ const SafeScanSummary: React.FC<{
                         <div className="grid gap-4">
                             <div className="rounded-xl border border-border bg-[#16181A] p-5">
                                 <div className="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#8FA0BF]">Cluster Supply Value</div>
-                                <div className="text-2xl font-black text-text-light">{formatUsd(report.supplyAttribution.estimatedCombinedValueUsd)}</div>
-                                <div className="mt-2 text-sm text-[#A6B4CF]">{formatPct(report.supplyAttribution.combinedCoordinatedPct)} coordinated supply</div>
+                                <div className="text-2xl font-black text-text-light">{formatUsd(report.supplyAttribution.estimatedClusterValueUsd || report.supplyAttribution.estimatedCombinedValueUsd)}</div>
+                                <div className="mt-2 text-sm text-[#A6B4CF]">{formatPct(report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.combinedCoordinatedPct)} confirmed coordinated supply</div>
                             </div>
                             <div className="rounded-xl border border-border bg-[#16181A] p-5">
                                 <div className="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#8FA0BF]">Live Liquidity</div>

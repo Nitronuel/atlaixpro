@@ -26,6 +26,7 @@ export function buildBundleIntelligence(args: {
     insiderClusterCount: number;
     tier1EvidenceCount: number;
     tier2EvidenceCount: number;
+    weakEvidenceCount?: number;
     deployerLinkedPct?: number;
     coverageLevel?: 'full' | 'degraded_history' | 'degraded_enrichment' | 'degraded_history_and_enrichment';
 }): BundleIntelligence {
@@ -37,6 +38,7 @@ export function buildBundleIntelligence(args: {
         insiderClusterCount,
         tier1EvidenceCount,
         tier2EvidenceCount,
+        weakEvidenceCount = 0,
         deployerLinkedPct = 0,
         coverageLevel = 'full'
     } = args;
@@ -64,7 +66,7 @@ export function buildBundleIntelligence(args: {
     if (exitPressure === 'high') riskScore += 3;
     else if (exitPressure === 'medium') riskScore += 1;
     if (tier1EvidenceCount > 0) riskScore += 2;
-    if (tier2EvidenceCount > 0) riskScore += 1;
+    if (tier2EvidenceCount > 0 && (tier1EvidenceCount > 0 || supplyControlledPct >= 5 || deployerLinkedPct >= 1)) riskScore += 1;
     if (insiderClusterCount > 0) riskScore += 1;
     if (deployerLinkedPct >= 1) riskScore += 2;
 
@@ -110,6 +112,9 @@ export function buildBundleIntelligence(args: {
         pushUnique(reasons, 'Strong wallet-link evidence was found through funding or transfer relationships.');
     } else if (tier2EvidenceCount > 0) {
         pushUnique(reasons, 'Moderate wallet-link evidence connects part of the bundle cohort.');
+    }
+    if (weakEvidenceCount > 0 && tier1EvidenceCount === 0 && tier2EvidenceCount === 0) {
+        pushUnique(reasons, `${weakEvidenceCount} weak graph-proximity signal${weakEvidenceCount === 1 ? '' : 's'} were kept out of coordinated-supply risk.`);
     }
     if (!reasons.length) {
         pushUnique(reasons, 'Coordinated launch activity was detected, but supporting evidence is limited.');

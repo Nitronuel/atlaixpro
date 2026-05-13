@@ -1055,20 +1055,28 @@ function tierLabel(tier: EvidenceTier): ForensicWalletCluster['userEvidenceLabel
     return 'Moderate Signal';
 }
 
-function buildCoordinatedWalletUnion(args: {
+export function buildCoordinatedWalletUnion(args: {
     walletClusters: ForensicWalletCluster[];
-    fundingEdges: Array<{ sourceWallet: string; targetWallet: string }>;
-    transferEdges: Array<{ sourceWallet: string; targetWallet: string }>;
-    connectorEdges: Array<{ from: string; to: string }>;
-    secondHopConnectorEdges: Array<{ from: string; to: string }>;
+    fundingEdges?: Array<{ sourceWallet: string; targetWallet: string }>;
+    transferEdges?: Array<{ sourceWallet: string; targetWallet: string }>;
+    connectorEdges?: Array<{ from: string; to: string; riskEligible?: boolean }>;
+    secondHopConnectorEdges?: Array<{ from: string; to: string; riskEligible?: boolean }>;
 }) {
     return dedupe([
-        ...args.walletClusters.flatMap((cluster) => cluster.wallets),
-        ...args.fundingEdges.flatMap((edge) => [edge.sourceWallet, edge.targetWallet]),
-        ...args.transferEdges.flatMap((edge) => [edge.sourceWallet, edge.targetWallet]),
-        ...args.connectorEdges.flatMap((edge) => [edge.from, edge.to]),
-        ...args.secondHopConnectorEdges.flatMap((edge) => [edge.from, edge.to])
+        ...args.walletClusters.flatMap((cluster) => cluster.wallets)
     ]);
+}
+
+export function buildWeakLinkedWalletUnion(args: {
+    confirmedWallets: string[];
+    connectorEdges: Array<{ from: string; to: string; riskEligible?: boolean }>;
+    secondHopConnectorEdges: Array<{ from: string; to: string; riskEligible?: boolean }>;
+}) {
+    const confirmed = new Set(args.confirmedWallets);
+    return dedupe([
+        ...args.connectorEdges.filter((edge) => edge.riskEligible).flatMap((edge) => [edge.from, edge.to]),
+        ...args.secondHopConnectorEdges.filter((edge) => edge.riskEligible).flatMap((edge) => [edge.from, edge.to])
+    ]).filter((wallet) => !confirmed.has(wallet));
 }
 
 type GraphFundingLinkCandidate = Pick<ForensicGraphEdge, 'sourceWallet' | 'targetWallet' | 'relationshipType' | 'displayLabel' | 'strengthScore'> & {
@@ -1279,9 +1287,7 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
 
     const componentEdges = [
         ...fundingEdges.map((edge) => ({ from: edge.sourceWallet, to: edge.targetWallet })),
-        ...transferEdges.map((edge) => ({ from: edge.sourceWallet, to: edge.targetWallet })),
-        ...connectorEdges.filter((edge) => edge.riskEligible).map((edge) => ({ from: edge.from, to: edge.to })),
-        ...secondHopConnectorEdges.filter((edge) => edge.riskEligible).map((edge) => ({ from: edge.from, to: edge.to }))
+        ...transferEdges.map((edge) => ({ from: edge.sourceWallet, to: edge.targetWallet }))
     ];
     const components = buildComponents(trackedWallets, componentEdges);
 
@@ -1305,12 +1311,10 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
             corroboratingSignals.push('1 direct funding link');
         }
         if (sharedConnectors.length) {
-            evidenceTiers.push('TIER_2');
-            corroboratingSignals.push(`${dedupe(sharedConnectors.map((edge) => edge.connector)).length} private-candidate shared connector wallets`);
+            corroboratingSignals.push(`${dedupe(sharedConnectors.map((edge) => edge.connector)).length} weak shared connector signal${dedupe(sharedConnectors.map((edge) => edge.connector)).length === 1 ? '' : 's'} kept as context`);
         }
         if (sharedSecondHopSources.length) {
-            evidenceTiers.push('TIER_2');
-            corroboratingSignals.push(`${dedupe(sharedSecondHopSources.map((edge) => edge.source)).length} shared 2-hop funding sources`);
+            corroboratingSignals.push(`${dedupe(sharedSecondHopSources.map((edge) => edge.source)).length} weak 2-hop source signal${dedupe(sharedSecondHopSources.map((edge) => edge.source)).length === 1 ? '' : 's'} kept as context`);
         }
         if (directTransferEdges.length) {
             evidenceTiers.push('TIER_2');
@@ -1322,13 +1326,9 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
         const tier = strongestTier(evidenceTiers);
         const reason = directFundingEdges.length >= 2
             ? 'These wallets received funds from each other or through closely linked funding transactions, suggesting coordinated control.'
-            : sharedConnectors.length
-                ? 'These wallets repeatedly interact through the same non-public intermediary wallet.'
-                : sharedSecondHopSources.length
-                    ? 'These wallets trace back to the same funding source through an intermediary wallet.'
-                : directTransferEdges.length
+            : directTransferEdges.length
                     ? 'These wallets have recently transferred this token between each other, suggesting coordinated holder activity.'
-                    : 'These wallets form a connected holder group based on transfer and funding relationships.';
+                    : 'These wallets form a connected holder group based on direct transfer and funding relationships.';
 
         return {
             clusterId,
@@ -1352,9 +1352,10 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
 
     const clusterWalletUnion = dedupe(walletClusters.flatMap((cluster) => cluster.wallets));
     const coordinatedWalletUnion = buildCoordinatedWalletUnion({
-        walletClusters,
-        fundingEdges,
-        transferEdges,
+        walletClusters
+    });
+    const weakLinkedWalletUnion = buildWeakLinkedWalletUnion({
+        confirmedWallets: coordinatedWalletUnion,
         connectorEdges,
         secondHopConnectorEdges
     });
@@ -1362,6 +1363,10 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
         wallets.reduce((sum, wallet) => sum + (balancesByWallet.get(wallet) || 0n), 0n);
     const clusteredRaw = sumWalletBalances(clusterWalletUnion);
     const coordinatedRaw = sumWalletBalances(coordinatedWalletUnion);
+    const weakLinkedRaw = sumWalletBalances(weakLinkedWalletUnion);
+    const concentrationOnlyRaw = sumWalletBalances(trackedWallets.filter((wallet) =>
+        !coordinatedWalletUnion.includes(wallet) && !weakLinkedWalletUnion.includes(wallet)
+    ));
     const divisor = 10 ** metadata.decimals;
     const toUsd = (amount: bigint) =>
         metadata.currentPriceUsd === null
@@ -1439,12 +1444,13 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
     const coverageLevel = mintAccounts.length > 0 ? 'full' : 'degraded_history';
     const bundleIntelligence = buildBundleIntelligence({
         walletsInvolved: 0,
-        supplyControlledPct: 0,
+        supplyControlledPct: calculatePct(coordinatedRaw, metadata.totalSupplyRaw),
         retentionPct: null,
         inferredBundleCount: 0,
         insiderClusterCount: 0,
         tier1EvidenceCount: evidenceByTier.tier1,
         tier2EvidenceCount: evidenceByTier.tier2,
+        weakEvidenceCount: connectorEdges.length + secondHopConnectorEdges.length,
         coverageLevel
     });
 
@@ -1475,6 +1481,11 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
             clusteredPct: calculatePct(clusteredRaw, metadata.totalSupplyRaw),
             networkLinkedPct: 0,
             remainingPct: calculatePct(metadata.totalSupplyRaw > coordinatedRaw ? metadata.totalSupplyRaw - coordinatedRaw : 0n, metadata.totalSupplyRaw),
+            confirmedCoordinatedPct: calculatePct(coordinatedRaw, metadata.totalSupplyRaw),
+            probableCoordinatedPct: 0,
+            weakLinkedPct: calculatePct(weakLinkedRaw, metadata.totalSupplyRaw),
+            contextOnlyPct: 0,
+            concentrationOnlyPct: calculatePct(concentrationOnlyRaw, metadata.totalSupplyRaw),
             combinedCoordinatedPct: calculatePct(coordinatedRaw, metadata.totalSupplyRaw),
             estimatedClusterValueUsd: toUsd(clusteredRaw),
             estimatedCombinedValueUsd: toUsd(coordinatedRaw)

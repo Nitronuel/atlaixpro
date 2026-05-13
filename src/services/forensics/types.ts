@@ -1,5 +1,12 @@
 // Forensic analysis helper for SafeScan intelligence workflows.
 export type EvidenceTier = 'TIER_1' | 'TIER_2' | 'TIER_3';
+export type EvidenceClass =
+    | 'proven_control'
+    | 'strong_control_indicator'
+    | 'behavioral_coordination'
+    | 'weak_graph_proximity'
+    | 'context_only'
+    | 'concentration_only';
 
 export type ParsedInstruction = {
     program?: string;
@@ -103,6 +110,7 @@ export type ClusterEdge = {
     from: string;
     to: string;
     tier: EvidenceTier;
+    evidenceClass?: EvidenceClass;
     label: string;
     reason: string;
     txHash?: string;
@@ -211,6 +219,8 @@ export type ForensicGraphEdge = {
     relationshipType: 'funding' | 'transfer' | 'launch' | 'distribution';
     displayLabel: string;
     strengthScore: number;
+    evidenceClass?: EvidenceClass;
+    riskEligible?: boolean;
 };
 
 export type ForensicGraphCluster = {
@@ -260,6 +270,11 @@ export type ForensicBundleReport = {
         clusteredPct: number;
         networkLinkedPct: number;
         remainingPct: number;
+        confirmedCoordinatedPct: number;
+        probableCoordinatedPct: number;
+        weakLinkedPct: number;
+        contextOnlyPct: number;
+        concentrationOnlyPct: number;
         combinedCoordinatedPct: number;
         estimatedClusterValueUsd: number | null;
         estimatedCombinedValueUsd: number | null;

@@ -821,14 +821,19 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
 
     const clusterWalletUnion = dedupe(walletClusters.flatMap((cluster) => cluster.wallets));
     const coordinatedWalletUnion = dedupe([
-        ...clusterWalletUnion,
-        ...transferEdges.flatMap((edge) => [edge.sourceWallet, edge.targetWallet]),
-        ...sharedFunderEdges.flatMap((edge) => [edge.from, edge.to])
+        ...clusterWalletUnion
     ]).filter((wallet) => trackedWalletSet.has(wallet));
+    const weakLinkedWalletUnion = dedupe([
+        ...sharedFunderEdges.filter((edge) => edge.riskEligible).flatMap((edge) => [edge.from, edge.to])
+    ]).filter((wallet) => trackedWalletSet.has(wallet) && !coordinatedWalletUnion.includes(wallet));
     const sumWalletBalances = (wallets: string[]) =>
         wallets.reduce((sum, wallet) => sum + (balancesByWallet.get(wallet) || 0n), 0n);
     const clusteredRaw = sumWalletBalances(clusterWalletUnion);
     const coordinatedRaw = sumWalletBalances(coordinatedWalletUnion);
+    const weakLinkedRaw = sumWalletBalances(weakLinkedWalletUnion);
+    const concentrationOnlyRaw = sumWalletBalances(trackedWallets.filter((wallet) =>
+        !coordinatedWalletUnion.includes(wallet) && !weakLinkedWalletUnion.includes(wallet)
+    ));
     const toUsd = (amount: bigint) =>
         metadata.currentPriceUsd === null
             ? null
@@ -929,6 +934,7 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         insiderClusterCount: blockZeroBundleClusterCount,
         tier1EvidenceCount: evidenceByTier.tier1,
         tier2EvidenceCount: evidenceByTier.tier2,
+        weakEvidenceCount: sharedFunderEdges.length + excludedConnectorCount,
         coverageLevel
     });
 
@@ -969,6 +975,11 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
             clusteredPct: calculatePct(clusteredRaw, metadata.totalSupplyRaw),
             networkLinkedPct: 0,
             remainingPct: calculatePct(metadata.totalSupplyRaw > coordinatedRaw ? metadata.totalSupplyRaw - coordinatedRaw : 0n, metadata.totalSupplyRaw),
+            confirmedCoordinatedPct: calculatePct(coordinatedRaw, metadata.totalSupplyRaw),
+            probableCoordinatedPct: 0,
+            weakLinkedPct: calculatePct(weakLinkedRaw, metadata.totalSupplyRaw),
+            contextOnlyPct: 0,
+            concentrationOnlyPct: calculatePct(concentrationOnlyRaw, metadata.totalSupplyRaw),
             combinedCoordinatedPct: calculatePct(coordinatedRaw, metadata.totalSupplyRaw),
             estimatedClusterValueUsd: toUsd(clusteredRaw),
             estimatedCombinedValueUsd: toUsd(coordinatedRaw)

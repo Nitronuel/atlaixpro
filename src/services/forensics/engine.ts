@@ -1828,6 +1828,11 @@ export async function analyzeForensicToken(tokenAddress: string): Promise<Forens
             clusteredPct: calculatePct(clusteredRaw, metadata.totalSupplyRaw),
             networkLinkedPct: calculatePct(networkRaw, metadata.totalSupplyRaw),
             remainingPct: calculatePct(remainingRaw, metadata.totalSupplyRaw),
+            confirmedCoordinatedPct: calculatePct(coordinatedRaw, metadata.totalSupplyRaw),
+            probableCoordinatedPct: 0,
+            weakLinkedPct: calculatePct(networkRaw, metadata.totalSupplyRaw),
+            contextOnlyPct: 0,
+            concentrationOnlyPct: 0,
             combinedCoordinatedPct: calculatePct(coordinatedRaw, metadata.totalSupplyRaw),
             estimatedClusterValueUsd: toUsd(clusteredRaw),
             estimatedCombinedValueUsd: toUsd(coordinatedRaw)

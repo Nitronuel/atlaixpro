@@ -315,7 +315,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
         if (!report) {
             return {
                 title: 'Supply attribution breakdown',
-                description: 'A modern view of how supply is distributed across linked wallets, launch-window actors, and the remaining float.',
+                description: 'A conservative view that separates proven clusters from weak graph proximity and ordinary holder concentration.',
                 items: []
             };
         }
@@ -326,14 +326,14 @@ export const ForensicBundleSection: React.FC<Props> = ({
                 description: '',
                 items: [
                     {
-                        label: 'Cluster-held',
-                        value: report.supplyAttribution.clusteredPct,
+                        label: 'Confirmed',
+                        value: report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.combinedCoordinatedPct,
                         accent: '#F97316',
                         glow: 'rgba(249,115,22,0.35)'
                     },
                     {
-                        label: 'Connected network',
-                        value: report.supplyAttribution.combinedCoordinatedPct,
+                        label: 'Weak links',
+                        value: report.supplyAttribution.weakLinkedPct ?? 0,
                         accent: '#EC4899',
                         glow: 'rgba(236,72,153,0.35)'
                     },
@@ -366,7 +366,8 @@ export const ForensicBundleSection: React.FC<Props> = ({
                 { label: 'Deployer-linked', value: report.supplyAttribution.deployerLinkedPct, accent: '#5EF38C', glow: 'rgba(94,243,140,0.35)' },
                 { label: 'Block 0-2 wallets', value: report.supplyAttribution.blockZeroPct, accent: '#FFD166', glow: 'rgba(255,209,102,0.35)' },
                 { label: 'Block 0-2 entrants', value: report.supplyAttribution.sniperPct, accent: '#FF7A59', glow: 'rgba(255,122,89,0.35)' },
-                { label: 'Confirmed clusters', value: report.supplyAttribution.clusteredPct, accent: '#6FDBFF', glow: 'rgba(111,219,255,0.35)' },
+                { label: 'Confirmed clusters', value: report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.clusteredPct, accent: '#6FDBFF', glow: 'rgba(111,219,255,0.35)' },
+                { label: 'Weak graph links', value: report.supplyAttribution.weakLinkedPct ?? 0, accent: '#EC4899', glow: 'rgba(236,72,153,0.28)' },
                 { label: 'Remaining circulating', value: report.supplyAttribution.remainingPct, accent: '#5EF38C', glow: 'rgba(94,243,140,0.28)' }
             ]
         };
@@ -573,13 +574,13 @@ export const ForensicBundleSection: React.FC<Props> = ({
                         <div className="bg-card-hover/20 border border-border rounded-2xl p-5">
                             <div className="flex items-center gap-2 text-text-medium text-sm mb-3">
                                 <Radar size={16} className="text-text-medium" />
-                                Coordinated supply
+                                Confirmed coordinated supply
                             </div>
                             <div className="text-3xl font-extrabold text-text-light mb-1">
-                                {formatPct(report.supplyAttribution.combinedCoordinatedPct)}
+                                {formatPct(report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.combinedCoordinatedPct)}
                             </div>
                             <div className="text-xs text-text-medium">
-                                Estimated value {formatUsd(report.supplyAttribution.estimatedCombinedValueUsd)}
+                                Weak links kept separate: {formatPct(report.supplyAttribution.weakLinkedPct ?? 0)}
                             </div>
                         </div>
 
