@@ -2,14 +2,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     AlertTriangle,
+    Activity,
     ArrowRight,
     Bell,
     CheckCircle2,
     Loader2,
+    Radar,
     RefreshCw,
     Search,
     Send,
-    ShieldCheck
+    ShieldCheck,
+    User
 } from 'lucide-react';
 import {
     AiAssistantAction,
@@ -131,6 +134,9 @@ const formatClock = (timestamp: number) => new Intl.DateTimeFormat('en-US', {
 }).format(new Date(timestamp));
 
 const toolLabel = (tool?: string) => {
+    if (tool === 'get_token_deep_brief') return 'Token Brief';
+    if (tool === 'get_wallet_deep_brief') return 'Wallet Brief';
+    if (tool === 'get_platform_updates') return 'Platform Update';
     if (tool === 'run_safe_scan') return 'Safe Scan';
     if (tool === 'detection_updates') return 'Detection';
     if (tool === 'get_token_activity') return 'Token Activity';
@@ -141,6 +147,9 @@ const toolLabel = (tool?: string) => {
 };
 
 const toolIcon = (tool?: string) => {
+    if (tool === 'get_token_deep_brief') return <Activity size={15} />;
+    if (tool === 'get_wallet_deep_brief') return <User size={15} />;
+    if (tool === 'get_platform_updates') return <Radar size={15} />;
     if (tool === 'run_safe_scan') return <ShieldCheck size={15} />;
     if (tool === 'detection_updates') return <CheckCircle2 size={15} />;
     if (tool === 'get_smart_alert_status' || tool === 'alert_setup') return <Bell size={15} />;
@@ -440,12 +449,13 @@ export const AiAssistant: React.FC = () => {
                                                     <div className="mt-3 flex flex-wrap gap-2">
                                                         {message.actions.map((action) => (
                                                             <button
-                                                                key={`${message.id}-${action.href}`}
+                                                                key={`${message.id}-${action.label}-${action.href}`}
                                                                 type="button"
                                                                 onClick={() => goToAction(action.href)}
                                                                 className="inline-flex items-center gap-2 rounded-full border border-primary-green/30 bg-primary-green/10 px-3 py-1.5 text-xs font-bold text-primary-green transition-colors hover:border-primary-green"
+                                                                title={action.confirmationRequired ? 'Opens a review step before anything is saved' : undefined}
                                                             >
-                                                                {action.label} <ArrowRight size={13} />
+                                                                {action.label}{action.confirmationRequired ? ' (review)' : ''} <ArrowRight size={13} />
                                                             </button>
                                                         ))}
                                                     </div>

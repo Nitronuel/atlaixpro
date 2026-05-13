@@ -342,7 +342,8 @@ export const Detection: React.FC = () => {
 
     const globalEventsToRender = recentGlobalEvents.length > 0 ? recentGlobalEvents : cachedGlobalEvents;
     const eventTypeOptions = useMemo(() => {
-        return Array.from(new Set(globalEventsToRender.map((globalEvent) => globalEvent.title)))
+        return (Array.from(new Set(globalEventsToRender.map((globalEvent) => String(globalEvent.title || '')))) as string[])
+            .filter(Boolean)
             .sort((a, b) => a.localeCompare(b));
     }, [globalEventsToRender]);
     const activeEventTypeSet = useMemo(() => new Set(selectedEventTypes), [selectedEventTypes]);

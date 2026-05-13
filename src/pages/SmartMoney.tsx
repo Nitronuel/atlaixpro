@@ -251,6 +251,7 @@ export const SmartMoney: React.FC = () => {
             setRecentEvents(eventRows.slice(0, 8));
 
             const outflowMap = new Map<string, {
+                address: string;
                 ticker: string;
                 name: string;
                 totalUsd: number;
@@ -266,6 +267,7 @@ export const SmartMoney: React.FC = () => {
                 const totalUsd = sells.reduce((sum, event) => sum + parseUsd(event.usd), 0);
                 const sellWallets = new Set(sells.map((event) => event.wallet.toLowerCase()));
                 outflowMap.set(token.address, {
+                    address: token.address,
                     ticker: token.ticker,
                     name: token.name,
                     totalUsd,

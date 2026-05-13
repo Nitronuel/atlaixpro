@@ -127,6 +127,9 @@ type AssistantNotification = {
 type AssistantChatAction = {
     label: string;
     href: string;
+    kind?: 'navigate' | 'draft' | 'confirmable';
+    confirmationRequired?: boolean;
+    payload?: unknown;
 };
 
 type AssistantProvider = {
@@ -142,6 +145,9 @@ type AssistantConversationMessage = {
 
 type AssistantToolName =
     | 'conversation'
+    | 'get_token_deep_brief'
+    | 'get_wallet_deep_brief'
+    | 'get_platform_updates'
     | 'get_detection_updates'
     | 'run_safe_scan'
     | 'prepare_alert_setup'
@@ -403,6 +409,429 @@ const formatAssistantDetectionLine = (event: any) => {
     return `${label}: ${event.eventType || 'Detection'} (${event.severity || 'Medium'}) with score ${event.score || 0}. 24h volume ${volume}, liquidity ${liquidity}.`;
 };
 
+type AssistantEntityResolution = {
+    kind: 'token' | 'wallet' | 'unknown';
+    confidence: 'high' | 'medium' | 'low';
+    query: string;
+    address?: string;
+    chain?: string;
+    token?: any;
+    candidates?: any[];
+    reason?: string;
+};
+
+const normalizeAssistantChainId = (chain?: string) => {
+    const lower = String(chain || '').trim().toLowerCase();
+    if (!lower) return '';
+    if (lower === 'eth') return 'ethereum';
+    if (lower === 'sol') return 'solana';
+    if (lower === 'bnb' || lower === 'binance') return 'bsc';
+    return lower;
+};
+
+const toAlchemyAssistantChain = (chain?: string, address?: string): 'solana' | 'eth' | 'base' | 'bsc' | 'polygon' | 'arbitrum' | 'optimism' => {
+    const normalized = normalizeAssistantChainId(chain || (address ? inferAssistantChain('', address) : ''));
+    if (normalized === 'ethereum') return 'eth';
+    if (normalized === 'base') return 'base';
+    if (normalized === 'bsc') return 'bsc';
+    if (normalized === 'polygon') return 'polygon';
+    if (normalized === 'arbitrum') return 'arbitrum';
+    if (normalized === 'optimism') return 'optimism';
+    return 'solana';
+};
+
+const toPortfolioChain = (chain?: string, address?: string) => {
+    const normalized = normalizeAssistantChainId(chain);
+    if (normalized === 'solana') return 'Solana';
+    if (normalized === 'bsc') return 'BSC';
+    if (normalized === 'base') return 'Base';
+    if (normalized === 'polygon') return 'Polygon';
+    if (normalized === 'arbitrum') return 'Arbitrum';
+    if (normalized === 'optimism') return 'Optimism';
+    if (normalized === 'avalanche') return 'Avalanche';
+    if (normalized === 'ethereum') return 'Ethereum';
+    return address && isLikelyEvmAddress(address) ? 'All Chains' : 'Solana';
+};
+
+const safeAssistantText = (value: unknown, fallback = 'unavailable') => {
+    const text = String(value ?? '').trim();
+    return text || fallback;
+};
+
+const pctLabel = (value: unknown) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return safeAssistantText(value);
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}%`;
+};
+
+const withAssistantTimeout = async <T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((resolve) => {
+                timeoutId = setTimeout(() => resolve(fallback), timeoutMs);
+            })
+        ]);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+};
+
+const matchesAssistantTokenEvent = (event: any, addressOrQuery: string, chain?: string) => {
+    const query = String(addressOrQuery || '').toLowerCase();
+    if (!query) return false;
+    const token = event?.token || {};
+    const normalizedChain = normalizeAssistantChainId(chain);
+    const eventChain = normalizeAssistantChainId(token.chain);
+    if (normalizedChain && eventChain && normalizedChain !== eventChain) return false;
+
+    return [
+        token.address,
+        token.pairAddress,
+        token.ticker,
+        token.name
+    ].filter(Boolean).some((value) => String(value).toLowerCase() === query || String(value).toLowerCase().includes(query));
+};
+
+const resolveAssistantEntity = async (
+    query: string,
+    chain?: string,
+    preferredKind?: 'token' | 'wallet'
+): Promise<AssistantEntityResolution> => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+        return { kind: 'unknown', confidence: 'low', query, reason: 'No entity query was provided.' };
+    }
+
+    const normalizedChain = normalizeAssistantChainId(chain);
+    const isAddress = isLikelyEvmAddress(trimmed) || isLikelySolanaAddress(trimmed);
+
+    if (preferredKind === 'wallet' && isAddress) {
+        return {
+            kind: 'wallet',
+            confidence: 'high',
+            query: trimmed,
+            address: trimmed,
+            chain: normalizedChain || inferAssistantChain('', trimmed)
+        };
+    }
+
+    const token = await withAssistantTimeout(resolveAssistantTokenOverview(trimmed, normalizedChain), 8_000, null);
+    if (token) {
+        return {
+            kind: 'token',
+            confidence: token.address ? 'high' : 'medium',
+            query: trimmed,
+            address: token.address || (isAddress ? trimmed : ''),
+            chain: normalizeAssistantChainId(token.chain || normalizedChain || (isAddress ? inferAssistantChain('', trimmed) : '')),
+            token
+        };
+    }
+
+    if (isAddress) {
+        return {
+            kind: preferredKind === 'wallet' ? 'wallet' : 'token',
+            confidence: preferredKind === 'wallet' ? 'high' : 'medium',
+            query: trimmed,
+            address: trimmed,
+            chain: normalizedChain || inferAssistantChain('', trimmed),
+            reason: preferredKind === 'wallet'
+                ? 'Address matched wallet format.'
+                : 'Address matched token format, but no market pair was found yet.'
+        };
+    }
+
+    const candidates = await withAssistantTimeout(DatabaseService.searchGlobalPairs(trimmed).catch(() => []), 6_000, []);
+    if (candidates.length) {
+        const preferred = candidates[0];
+        return {
+            kind: 'token',
+            confidence: candidates.length === 1 ? 'high' : 'medium',
+            query: trimmed,
+            address: preferred.address,
+            chain: normalizeAssistantChainId(preferred.chain),
+            token: preferred,
+            candidates
+        };
+    }
+
+    return { kind: 'unknown', confidence: 'low', query: trimmed, reason: 'No matching token or wallet was found in the accessible app data.' };
+};
+
+const getAssistantDetectionContext = async (addressOrQuery: string, chain?: string) => {
+    const normalizedChain = normalizeAssistantChainId(chain);
+    if (addressOrQuery && normalizedChain) {
+        const event = await DetectionSnapshotStore.getToken(normalizedChain, addressOrQuery).catch(() => null);
+        if (event) return [event];
+    }
+
+    const feed = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+    return (feed || []).filter((event: any) => matchesAssistantTokenEvent(event, addressOrQuery, normalizedChain)).slice(0, 5);
+};
+
+const getAssistantSafeScanSummary = async (address: string, chain: string) => {
+    if (!address) return null;
+    try {
+        const selectedChain = toAlchemyAssistantChain(chain, address);
+        const report = isEvmChain(selectedChain)
+            ? await analyzeAlchemyHubEvmToken(address, selectedChain, { depth: 'balanced', holderSeeds: [], seedOnly: true })
+            : await analyzeAlchemyHubToken(address, { depth: 'balanced', holderSeeds: [], seedOnly: true });
+
+        return {
+            report,
+            riskLevel: report?.bundleIntelligence?.riskLevel || 'unknown',
+            confidence: report?.bundleIntelligence?.confidence || 'unknown',
+            coordinatedSupplyPct: Number(report?.supplyAttribution?.combinedCoordinatedPct || 0),
+            top10Pct: Number(report?.holderConcentration?.top10Pct || 0),
+            reasons: Array.isArray(report?.bundleIntelligence?.reasons) ? report.bundleIntelligence.reasons.slice(0, 4) : [],
+            highlights: Array.isArray(report?.evidenceHighlights) ? report.evidenceHighlights.slice(0, 4) : []
+        };
+    } catch (error) {
+        return {
+            error: error instanceof Error ? error.message : 'Safe Scan context is unavailable.'
+        };
+    }
+};
+
+const summarizeAssistantLiquidity = (token: any, detectionEvents: any[]) => {
+    const liquidityUsd = parseAssistantMarketNumber(token?.liquidity);
+    const marketCapUsd = parseAssistantMarketNumber(token?.cap);
+    const volumeUsd = parseAssistantMarketNumber(token?.volume24h);
+    const lpRatio = marketCapUsd > 0 ? liquidityUsd / marketCapUsd : 0;
+    const latestLiquidityDelta = detectionEvents
+        .flatMap((event: any) => Array.isArray(event?.snapshotDeltas) ? event.snapshotDeltas : [])
+        .find((delta: any) => Number.isFinite(Number(delta?.liquidityChangePct)));
+
+    let quality = 'thin or unknown';
+    if (liquidityUsd >= 1_000_000) quality = 'deep';
+    else if (liquidityUsd >= 250_000) quality = 'healthy';
+    else if (liquidityUsd >= 50_000) quality = 'moderate';
+    else if (liquidityUsd > 0) quality = 'thin';
+
+    const notes = [
+        `Liquidity is ${safeAssistantText(token?.liquidity, '$0')}, which looks ${quality} for this market context.`,
+        marketCapUsd > 0 && liquidityUsd > 0 ? `Liquidity-to-market-cap is about ${(lpRatio * 100).toFixed(2)}%.` : '',
+        volumeUsd > 0 && liquidityUsd > 0 ? `24h volume is ${(volumeUsd / liquidityUsd).toFixed(2)}x current liquidity.` : '',
+        latestLiquidityDelta ? `Recent liquidity delta: ${pctLabel(latestLiquidityDelta.liquidityChangePct)} over ${latestLiquidityDelta.window}.` : ''
+    ].filter(Boolean);
+
+    return { liquidityUsd, marketCapUsd, volumeUsd, quality, notes };
+};
+
+const buildTokenDeepBrief = async (query: string, chain: string, message: string, history: AssistantConversationMessage[] = []) => {
+    const resolution = await resolveAssistantEntity(query, chain, 'token');
+    if (resolution.kind !== 'token') {
+        return {
+            answer: [
+                `I could not resolve "${query}" as a token from the app data I can access.`,
+                resolution.reason || 'Try a contract address, ticker, or exact token name from Atlaix.'
+            ].join('\n'),
+            tool: 'get_token_deep_brief',
+            data: { resolution },
+            actions: [
+                { label: 'Open Detection Engine', href: '/detection', kind: 'navigate' },
+                { label: 'Open Safe Scan', href: '/safe-scan', kind: 'navigate' }
+            ]
+        };
+    }
+
+    const token = resolution.token || await withAssistantTimeout(resolveAssistantTokenOverview(resolution.address || query, resolution.chain), 8_000, null);
+    const tokenAddress = resolution.address || token?.address || query;
+    const tokenChain = normalizeAssistantChainId(resolution.chain || chain || token?.chain || inferAssistantChain(message, tokenAddress));
+    const [detectionEvents, activities, safeScan] = await Promise.all([
+        withAssistantTimeout(getAssistantDetectionContext(tokenAddress || query, tokenChain), 6_000, []),
+        tokenAddress ? withAssistantTimeout(ImpactfulTokenActivityStore.getActivities(tokenChain, tokenAddress).catch(() => []), 5_000, []) : Promise.resolve([]),
+        tokenAddress ? withAssistantTimeout(getAssistantSafeScanSummary(tokenAddress, tokenChain), 12_000, { error: 'Safe Scan context timed out before the brief was ready.' }) : Promise.resolve(null)
+    ]);
+
+    const liquidity = summarizeAssistantLiquidity(token, detectionEvents);
+    const recentEvents = detectionEvents.slice(0, 3);
+    const recentActivities = activities.slice(0, 4);
+    const riskReasons = Array.isArray((safeScan as any)?.reasons) ? (safeScan as any).reasons : [];
+    const safeError = (safeScan as any)?.error;
+    const highSeverityEvent = recentEvents.find((event: any) => event?.severity === 'High');
+    const riskLevel = (safeScan as any)?.riskLevel || token?.riskLevel || 'unknown';
+    const confidenceBits = [
+        token ? 'market data' : '',
+        recentEvents.length ? 'detection context' : '',
+        recentActivities.length ? 'activity timeline' : '',
+        safeScan && !safeError ? 'Safe Scan context' : ''
+    ].filter(Boolean);
+    const confidence = confidenceBits.length >= 3 ? 'High' : confidenceBits.length >= 2 ? 'Medium' : 'Low';
+
+    const interpretation = highSeverityEvent
+        ? `Interpretation: mixed-to-risky. The strongest caution is a High severity ${highSeverityEvent.eventType || 'detection'} signal, so I would treat momentum claims carefully until the risk context improves.`
+        : riskLevel && /high|critical/i.test(String(riskLevel))
+            ? `Interpretation: risk-first. The scan context is elevated, so price action should be weighed against holder and supply quality before trusting the move.`
+            : recentEvents.some((event: any) => /Accumulation|Recovery/i.test(String(event?.eventType)))
+                ? `Interpretation: constructive but still needs confirmation. Detection context points to interest building, and liquidity/activity should be watched for follow-through.`
+                : `Interpretation: watchable, but not conclusive. I can summarize the available data, but I do not see enough strong recent app signals to call it cleanly bullish or bearish.`;
+
+    const tokenLabel = `${token?.name || token?.ticker || 'Token'}${token?.ticker ? ` (${token.ticker})` : ''}`;
+    const answer = [
+        `Atlaix Brief: ${tokenLabel}`,
+        '',
+        'Current read',
+        `${tokenLabel} is on ${normalizeAssistantChainLabel(tokenChain)} at ${formatAssistantPrice(token?.price)}. 24h move: ${safeAssistantText(token?.h24)}. Volume: ${safeAssistantText(token?.volume24h, '$0')}. Liquidity: ${safeAssistantText(token?.liquidity, '$0')}. Market cap: ${safeAssistantText(token?.cap, '$0')}.`,
+        '',
+        'Liquidity and market quality',
+        ...liquidity.notes,
+        '',
+        'Recent activity',
+        recentEvents.length
+            ? recentEvents.map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionLine(event)}`).join('\n')
+            : 'No matching Detection Engine event is currently stored for this token.',
+        recentActivities.length
+            ? recentActivities.map((activity: any, index: number) => `${index + 1}. ${activity.title}: ${activity.description} (${compactUsd(activity.usdValue)}).`).join('\n')
+            : 'No reportable whale/impact activity is currently stored for this token.',
+        '',
+        'Risk picture',
+        safeError
+            ? `Safe Scan context is unavailable right now: ${safeError}`
+            : safeScan
+                ? `Risk level: ${(safeScan as any).riskLevel} with ${(safeScan as any).confidence} confidence. Coordinated supply estimate: ${Number((safeScan as any).coordinatedSupplyPct || 0).toFixed(2)}%. Top 10 holders: ${Number((safeScan as any).top10Pct || 0).toFixed(2)}%.`
+                : 'Safe Scan context was not available for this token.',
+        riskReasons.length ? `Main risk reasons: ${riskReasons.join(' ')}` : '',
+        '',
+        interpretation,
+        `Confidence: ${confidence}. Based on ${confidenceBits.length ? confidenceBits.join(', ') : 'limited accessible app data'}.`,
+        '',
+        'Suggested next moves',
+        'Open the token page for chart context, run or review Safe Scan for holder/supply risk, and set an alert if you want Atlaix to watch liquidity, price, or whale movement.'
+    ].filter((line) => line !== '').join('\n');
+
+    const params = new URLSearchParams({ address: tokenAddress, chain: tokenChain });
+    const safeScanChain = toAlchemyAssistantChain(tokenChain, tokenAddress);
+    return {
+        answer,
+        tool: 'get_token_deep_brief',
+        data: {
+            resolution,
+            token,
+            detectionEvents: recentEvents,
+            activities: recentActivities,
+            safeScan: safeScan && !safeError ? {
+                riskLevel: (safeScan as any).riskLevel,
+                confidence: (safeScan as any).confidence,
+                coordinatedSupplyPct: (safeScan as any).coordinatedSupplyPct,
+                top10Pct: (safeScan as any).top10Pct
+            } : null,
+            confidence
+        },
+        actions: [
+            { label: 'Open Token Details', href: tokenAddress ? `/token/${encodeURIComponent(tokenAddress)}` : '/dashboard', kind: 'navigate' },
+            { label: 'Open Detection View', href: tokenAddress ? `/detection/token/${encodeURIComponent(tokenAddress)}?${params.toString()}` : '/detection', kind: 'navigate' },
+            { label: 'Run Safe Scan', href: `/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: safeScanChain, autoScan: '1' }).toString()}`, kind: 'draft', confirmationRequired: true },
+            { label: 'Set Alert', href: `/smart-alerts?${new URLSearchParams({ address: tokenAddress, chain: tokenChain, setup: '1' }).toString()}`, kind: 'draft', confirmationRequired: true }
+        ] as AssistantChatAction[]
+    };
+};
+
+const buildWalletDeepBrief = async (address: string, chain: string) => {
+    const resolution = await resolveAssistantEntity(address, chain, 'wallet');
+    if (!resolution.address) {
+        return {
+            answer: 'I can analyze a wallet, but I need a valid EVM or Solana wallet address first.',
+            tool: 'get_wallet_deep_brief',
+            data: { resolution },
+            actions: [{ label: 'Open Wallet Tracker', href: '/wallet', kind: 'navigate' }]
+        };
+    }
+
+    const portfolioChain = toPortfolioChain(resolution.chain || chain, resolution.address);
+    try {
+        const [portfolio, smartWallets] = await Promise.all([
+            ChainRouter.fetchPortfolio(portfolioChain, resolution.address, false),
+            DatabaseService.fetchSmartMoneyWallets().catch(() => [])
+        ]);
+        const matchedSmartWallet = smartWallets.find((wallet: any) => String(wallet.addr || '').toLowerCase() === resolution.address!.toLowerCase());
+        const topAssets = (portfolio.assets || []).slice(0, 5);
+        const activePositions = (portfolio.assets || []).filter((asset: any) => Number(asset.rawValue || 0) > 1).length;
+        const profitableAssets = (portfolio.assets || []).filter((asset: any) => Number(asset.pnlPercent || 0) > 0).length;
+
+        const answer = [
+            `Wallet Brief: ${resolution.address}`,
+            '',
+            'Current read',
+            `Tracked value: ${portfolio.netWorth || '$0'} across ${activePositions} active position${activePositions === 1 ? '' : 's'} on ${portfolioChain}.`,
+            matchedSmartWallet
+                ? `Smart Money status: tracked as ${Array.isArray(matchedSmartWallet.categories) ? matchedSmartWallet.categories.join(', ') : 'Smart Money'}.`
+                : 'Smart Money status: not currently listed in the global smart-money wallet set.',
+            '',
+            'Top holdings',
+            topAssets.length
+                ? topAssets.map((asset: any, index: number) => `${index + 1}. ${asset.symbol || 'TOKEN'}: ${asset.value || '$0'} (${asset.balance || '0'} tokens).`).join('\n')
+                : 'No priced holdings were returned by the accessible portfolio providers.',
+            '',
+            'Behavior read',
+            `${profitableAssets} position${profitableAssets === 1 ? '' : 's'} currently show positive PnL where PnL is available. Recent activity data is ${portfolio.recentActivity?.length ? 'available' : 'not currently populated'} in this wallet view.`,
+            '',
+            'Suggested next moves',
+            'Open the wallet profile, track the wallet if it matters to you, or inspect the top token positions one by one for liquidity and risk.'
+        ].join('\n');
+
+        return {
+            answer,
+            tool: 'get_wallet_deep_brief',
+            data: { resolution, portfolio, smartWallet: matchedSmartWallet || null },
+            actions: [
+                { label: 'Open Wallet', href: `/wallet/${encodeURIComponent(resolution.address)}?chain=${encodeURIComponent(portfolioChain)}`, kind: 'navigate' },
+                { label: 'Track Wallet', href: `/wallet/${encodeURIComponent(resolution.address)}?chain=${encodeURIComponent(portfolioChain)}`, kind: 'confirmable', confirmationRequired: true }
+            ] as AssistantChatAction[]
+        };
+    } catch (error) {
+        return {
+            answer: `I found the wallet address, but the portfolio providers could not return a clean wallet brief right now. ${error instanceof Error ? error.message : ''}`.trim(),
+            tool: 'get_wallet_deep_brief',
+            data: { resolution },
+            actions: [{ label: 'Open Wallet Tracker', href: `/wallet/${encodeURIComponent(resolution.address)}?chain=${encodeURIComponent(portfolioChain)}`, kind: 'navigate' }]
+        };
+    }
+};
+
+const buildPlatformUpdateBrief = async () => {
+    const [events, smartStatus, marketResponse] = await Promise.all([
+        DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents()),
+        Promise.resolve(smartAlertRunner.getStatus()),
+        DatabaseService.getMarketData(false, true).catch(() => null)
+    ]);
+    const topEvents = (events || []).slice(0, 6);
+    const highSeverity = topEvents.filter((event: any) => event?.severity === 'High').length;
+    const topMarketTokens = (marketResponse?.data || []).slice(0, 5);
+
+    return {
+        answer: [
+            'Atlaix Platform Update',
+            '',
+            'Detection Engine',
+            topEvents.length
+                ? `There are ${topEvents.length} recent detection highlights in the current feed, including ${highSeverity} High severity item${highSeverity === 1 ? '' : 's'}.`
+                : 'No current detection events are available from the local feed.',
+            ...topEvents.slice(0, 4).map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionLine(event)}`),
+            '',
+            'Market watchlist',
+            topMarketTokens.length
+                ? topMarketTokens.map((token: any, index: number) => `${index + 1}. ${token.name || token.ticker}: ${token.h24} over 24h, ${token.volume24h} volume, ${token.liquidity} liquidity.`).join('\n')
+                : 'Market data is not currently available from the app cache.',
+            '',
+            'Smart Alerts',
+            `Runner: ${smartStatus.enabled ? 'enabled' : 'disabled'}. Last run: ${smartStatus.lastRunStatus || 'not run yet'}. Rules checked: ${smartStatus.rulesChecked || 0}. Triggers created: ${smartStatus.triggersCreated || 0}.`,
+            smartStatus.lastError ? `Latest alert issue: ${smartStatus.lastError}` : '',
+            '',
+            'Suggested next moves',
+            'Review high-severity Detection Engine events first, then set alerts for tokens where liquidity or whale movement matters.'
+        ].filter(Boolean).join('\n'),
+        tool: 'get_platform_updates',
+        data: { events: topEvents, smartStatus, market: topMarketTokens },
+        actions: [
+            { label: 'Open Detection Engine', href: '/detection', kind: 'navigate' },
+            { label: 'Open Smart Alerts', href: '/smart-alerts', kind: 'navigate' },
+            { label: 'Open Overview', href: '/dashboard', kind: 'navigate' }
+        ] as AssistantChatAction[]
+    };
+};
+
 const loadAssistantNotifications = async (): Promise<AssistantNotification[]> => {
     const events = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
     const notifications: AssistantNotification[] = (events || []).slice(0, 6).map((event: any, index: number) => ({
@@ -459,7 +888,10 @@ const buildAssistantSystemPrompt = () => [
     'You cannot modify source code, change app architecture, access secrets, run shell commands, or invent app data.',
     'Write actions must be confirmation-first. For alerts, choose prepare_alert_setup, not a direct save.',
     'Return only valid JSON with keys: tool, address, chain, query, responseStyle.',
-    'Approved tools: conversation, get_detection_updates, run_safe_scan, prepare_alert_setup, get_token_activity, get_token_overview, get_smart_alert_status.',
+    'Approved tools: conversation, get_token_deep_brief, get_wallet_deep_brief, get_platform_updates, get_detection_updates, run_safe_scan, prepare_alert_setup, get_token_activity, get_token_overview, get_smart_alert_status.',
+    'Use get_token_deep_brief for broad token questions, token addresses, performance, liquidity, recent events, deep analysis, or "tell me everything" requests.',
+    'Use get_wallet_deep_brief for wallet analysis, holdings, portfolio, PnL, smart-money, or wallet behavior questions.',
+    'Use get_platform_updates for broad Atlaix updates, today updates, market summaries, or "what should I pay attention to" requests.',
     'Use get_token_overview for current price, token details, market cap, liquidity, volume, or overview questions.',
     'Use run_safe_scan only when the user asks for scan, safety, risk, security, or forensic analysis.',
     'Use get_detection_updates for Detection Engine, new updates, admitted tokens, market events, or alpha events.',
@@ -486,6 +918,9 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
         const parsed = JSON.parse(cleaned);
         const allowed = new Set<AssistantToolName>([
             'conversation',
+            'get_token_deep_brief',
+            'get_wallet_deep_brief',
+            'get_platform_updates',
             'get_detection_updates',
             'run_safe_scan',
             'prepare_alert_setup',
@@ -551,6 +986,19 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
     const lower = message.toLowerCase();
     const address = extractAssistantAddress(message) || (/\b(that|this)\s+token\b/i.test(message) ? getRecentAssistantAddress(history) : '');
 
+    if (/\b(wallet|holdings|portfolio|pnl|win rate|smart money wallet|track this wallet|analy[sz]e this wallet)\b/.test(lower)) {
+        return {
+            tool: 'get_wallet_deep_brief',
+            address,
+            chain: address ? inferAssistantChain(message, address) : undefined,
+            query: address || extractAssistantTokenQuery(message, history)
+        };
+    }
+
+    if (/\b(today'?s?|daily|platform|overall|what changed|what should i pay attention|market update|comprehensive updates?|update brief)\b/.test(lower) && !address) {
+        return { tool: 'get_platform_updates' };
+    }
+
     if (/\bsafe scan\b|\bscan\b|\brisk\b|\bsecurity\b|\bforensic\b|\bscam\b|\brug\b|\bhoneypot\b|\baudit\b|\bsketchy\b/.test(lower)) {
         return { tool: 'run_safe_scan', address, chain: address ? inferAssistantChain(message, address) : undefined };
     }
@@ -563,9 +1011,29 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return { tool: 'prepare_alert_setup', address, query: extractAssistantTokenQuery(message, history), chain: address ? inferAssistantChain(message, address) : undefined };
     }
 
+    if (address && /\b(token|tell|about|perform|performance|liquidity|recent|event|deep|analysis|analy[sz]e|everything|full information|what.*know)\b/.test(lower)) {
+        return {
+            tool: 'get_token_deep_brief',
+            address,
+            query: address,
+            chain: inferAssistantChain(message, address),
+            responseStyle: 'detailed'
+        };
+    }
+
+    if (/\b(deep|analysis|analy[sz]e|performing|performance|recent events?|what happened|full information|everything|tell me about|what do you know)\b/.test(lower)) {
+        return {
+            tool: 'get_token_deep_brief',
+            address,
+            query: address || extractAssistantTokenQuery(message, history),
+            chain: address ? inferAssistantChain(message, address) : undefined,
+            responseStyle: 'detailed'
+        };
+    }
+
     if (/\bprice\b|\bmarket\s*cap\b|\bliquidity\b|\bvolume\b|\boverview\b|\btoken details\b|\bdetails\b/.test(lower)) {
         return {
-            tool: 'get_token_overview',
+            tool: /\bliquidity\b|\bvolume\b|\bmarket\s*cap\b/.test(lower) ? 'get_token_deep_brief' : 'get_token_overview',
             address,
             query: extractAssistantTokenQuery(message, history),
             chain: lower.includes('solana') ? 'solana' : address ? inferAssistantChain(message, address) : undefined
@@ -678,6 +1146,31 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     const chain = request.chain || (address ? inferAssistantChain(message, address) : '');
     const actions: AssistantChatAction[] = [];
 
+    if (request.tool === 'get_token_deep_brief') {
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        if (!tokenQuery) {
+            return {
+                answer: 'I can build a full Atlaix token brief, but I need a token contract address, ticker, or name first.',
+                tool: 'token_deep_brief_needs_query',
+                actions: [
+                    { label: 'Open Detection Engine', href: '/detection', kind: 'navigate' },
+                    { label: 'Open Safe Scan', href: '/safe-scan', kind: 'navigate' }
+                ]
+            };
+        }
+
+        return buildTokenDeepBrief(tokenQuery, chain, message, history);
+    }
+
+    if (request.tool === 'get_wallet_deep_brief') {
+        const walletAddress = address || request.query || extractAssistantAddress(message);
+        return buildWalletDeepBrief(walletAddress, chain);
+    }
+
+    if (request.tool === 'get_platform_updates') {
+        return buildPlatformUpdateBrief();
+    }
+
     if (request.tool === 'run_safe_scan') {
         if (!address) {
             return {
@@ -687,13 +1180,14 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             };
         }
 
-        const report = isEvmChain(chain)
-            ? await analyzeAlchemyHubEvmToken(address, chain, { depth: 'balanced', holderSeeds: [], seedOnly: true })
+        const safeScanChain = toAlchemyAssistantChain(chain, address);
+        const report = isEvmChain(safeScanChain)
+            ? await analyzeAlchemyHubEvmToken(address, safeScanChain, { depth: 'balanced', holderSeeds: [], seedOnly: true })
             : await analyzeAlchemyHubToken(address, { depth: 'balanced', holderSeeds: [], seedOnly: true });
 
         actions.push({
             label: 'Open Safe Scan',
-            href: `/safe-scan?${new URLSearchParams({ address, chain, autoScan: '1' }).toString()}`
+            href: `/safe-scan?${new URLSearchParams({ address, chain: safeScanChain, autoScan: '1' }).toString()}`
         });
 
         return {
@@ -701,7 +1195,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             tool: 'run_safe_scan',
             data: {
                 tokenAddress: address,
-                chain,
+                chain: safeScanChain,
                 tokenSymbol: report?.tokenSymbol,
                 riskLevel: report?.bundleIntelligence?.riskLevel,
                 confidence: report?.bundleIntelligence?.confidence
@@ -1069,7 +1563,7 @@ async function scanSmartMoneyWallet(walletAddress: string, requestedChain?: stri
     const wallet = {
         addr: normalizedAddress,
         name: `Tracked ${normalizedAddress.slice(0, 6)}...${normalizedAddress.slice(-4)}`,
-        categories: qualification.qualified ? ['Smart Money'] : [],
+        categories: qualification.qualified ? ['Smart Money' as const] : [],
         timestamp: Date.now(),
         lastBalance: stats.netWorth,
         lastWinRate: stats.winRate,

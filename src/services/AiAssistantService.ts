@@ -14,6 +14,9 @@ export type AiAssistantNotification = {
 export type AiAssistantAction = {
     label: string;
     href: string;
+    kind?: 'navigate' | 'draft' | 'confirmable';
+    confirmationRequired?: boolean;
+    payload?: unknown;
 };
 
 export type AiAssistantProvider = {

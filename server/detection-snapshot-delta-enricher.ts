@@ -1,5 +1,6 @@
 import type {
     AlphaGauntletEvent,
+    DetectionConfidence,
     DetectionSnapshotDelta,
     DetectionTriggerDetail,
     DetectionWatchCondition
@@ -302,7 +303,7 @@ export const enrichEventWithSnapshotDeltas = async (event: AlphaGauntletEvent): 
             .filter((trigger): trigger is DetectionTriggerDetail => Boolean(trigger));
         const snapshotInsights = buildSnapshotInsights(deltas);
         const classification = applySnapshotClassification(event, deltas);
-        const confidence = event.confidence
+        const confidence: DetectionConfidence | undefined = event.confidence
             ? {
                 ...event.confidence,
                 score: Math.min(100, event.confidence.score + 8),
