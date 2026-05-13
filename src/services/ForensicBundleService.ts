@@ -1,4 +1,3 @@
-// Intelligence service module for Atlaix data workflows.
 import { extractJitoTipTransfers, FORENSIC_MAX_TRACKED_HOPS, inferJitoLaunchSignals } from './forensics/engine';
 import type { ForensicBundleReport } from './forensics/types';
 export type {
@@ -83,7 +82,7 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
         throw new Error(
             typeof payload?.error === 'string'
                 ? payload.error
-                : 'Forensic analysis could not complete right now. Please try again shortly.'
+                : `Forensic backend request failed with status ${response.status}.`
         );
     }
     return payload;
@@ -104,7 +103,7 @@ async function runBackendForensicJob(tokenAddress: string) {
 
     const jobId = startPayload.jobId;
     if (!jobId) {
-        throw new Error('Forensic analysis could not start right now.');
+        throw new Error('Forensic backend did not return a job id.');
     }
 
     const startedAt = Date.now();
@@ -121,13 +120,13 @@ async function runBackendForensicJob(tokenAddress: string) {
         }
 
         if (payload.status === 'failed') {
-            throw new Error(payload.error || 'Forensic analysis could not complete right now.');
+            throw new Error(payload.error || 'Forensic backend job failed.');
         }
 
         await wait(JOB_POLL_INTERVAL_MS);
     }
 
-    throw new Error('Forensic analysis is taking longer than expected. Please try again shortly.');
+    throw new Error('Forensic backend job timed out before completion.');
 }
 
 export { extractJitoTipTransfers, FORENSIC_MAX_TRACKED_HOPS, inferJitoLaunchSignals };

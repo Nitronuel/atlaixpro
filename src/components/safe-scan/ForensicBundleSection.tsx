@@ -1,4 +1,3 @@
-// Reusable interface component for Atlaix product workflows.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Activity,
@@ -79,16 +78,12 @@ const formatTokenAmount = (
 const shortenAddress = (value: string) => `${value.slice(0, 4)}...${value.slice(-4)}`;
 
 const formatForensicError = (value: string) => {
-    if (/backend|api key|not configured|alchemy|supabase|database|job id|migration/i.test(value)) {
-        return 'Forensic analysis could not complete right now. Please try again shortly.';
-    }
-
     if (/\b429\b|too many requests|compute units per second/i.test(value)) {
-        return 'Solana forensic providers are rate-limiting this scan right now. Retry in a moment and we will use a lighter analysis path if needed.';
+        return 'Solana forensic providers are rate-limiting this scan right now. Retry in a moment and the reduced-mode safeguards should keep the report from hard-failing.';
     }
 
     if (/\b503\b|unable to complete request at this time|temporarily unavailable/i.test(value)) {
-        return 'The Solana forensic providers were temporarily unavailable during this scan. Retry shortly to continue the deeper launch-window checks.';
+        return 'The Solana forensic providers were temporarily unavailable during this scan. Retry shortly and the engine will resume the deeper launch-window checks.';
     }
 
     return value;
@@ -106,16 +101,8 @@ const tierRiskLabel = (tier: string) => {
     return 'Watchlist';
 };
 
-const bundleTypeLabel = (type: string) => {
-    if (type === 'operational') return 'Operational';
-    if (type === 'suspicious') return 'Suspicious';
-    if (type === 'exploitative') return 'Exploitative';
-    return 'None';
-};
-
 const CLUSTER_PALETTE = ['#4CC9F0', '#8B5CF6', '#F59E0B', '#10B981', '#EC4899', '#F97316', '#22D3EE', '#A3E635'];
 const ALCHEMY_CLUSTER_PALETTE = ['#F97316', '#EC4899', '#8B5CF6', '#4CC9F0', '#10B981', '#F59E0B', '#22D3EE', '#A3E635'];
-const CLUSTER_WALLET_DETAIL_BATCH_SIZE = 8;
 
 const hashString = (value: string) => {
     let hash = 2166136261;
@@ -191,7 +178,6 @@ export const ForensicBundleSection: React.FC<Props> = ({
 }) => {
     const tokenDecimals = report?.tokenDecimals ?? 0;
     const [expandedClusters, setExpandedClusters] = useState<Record<string, boolean>>({});
-    const [visibleClusterWalletRows, setVisibleClusterWalletRows] = useState<Record<string, number>>({});
     const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
     const [graphZoom, setGraphZoom] = useState(1.2);
     const [graphPan, setGraphPan] = useState({ x: 0, y: 0 });
@@ -206,29 +192,9 @@ export const ForensicBundleSection: React.FC<Props> = ({
     });
 
     const toggleCluster = (clusterId: string) => {
-        setExpandedClusters((current) => {
-            const nextExpanded = !current[clusterId];
-            if (nextExpanded) {
-                setVisibleClusterWalletRows((rows) => ({
-                    ...rows,
-                    [clusterId]: rows[clusterId] || CLUSTER_WALLET_DETAIL_BATCH_SIZE
-                }));
-            }
-
-            return {
-                ...current,
-                [clusterId]: nextExpanded
-            };
-        });
-    };
-
-    const showMoreClusterWallets = (clusterId: string, walletCount: number) => {
-        setVisibleClusterWalletRows((current) => ({
+        setExpandedClusters((current) => ({
             ...current,
-            [clusterId]: Math.min(
-                walletCount,
-                (current[clusterId] || CLUSTER_WALLET_DETAIL_BATCH_SIZE) + CLUSTER_WALLET_DETAIL_BATCH_SIZE
-            )
+            [clusterId]: !current[clusterId]
         }));
     };
 
@@ -315,25 +281,25 @@ export const ForensicBundleSection: React.FC<Props> = ({
         if (!report) {
             return {
                 title: 'Supply attribution breakdown',
-                description: 'A conservative view that separates proven clusters from weak graph proximity and ordinary holder concentration.',
+                description: 'A modern view of how supply is distributed across linked wallets, launch-window actors, and the remaining float.',
                 items: []
             };
         }
 
         if (graphLayoutStyle === 'cluster-packed') {
             return {
-                title: 'Supply map',
-                description: '',
+                title: 'Alchemy supply map',
+                description: 'A cleaner Alchemy-focused view of clustered holder supply, connected wallet flow, concentration, and remaining circulating float.',
                 items: [
                     {
-                        label: 'Confirmed',
-                        value: report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.combinedCoordinatedPct,
+                        label: 'Cluster-held',
+                        value: report.supplyAttribution.clusteredPct,
                         accent: '#F97316',
                         glow: 'rgba(249,115,22,0.35)'
                     },
                     {
-                        label: 'Weak links',
-                        value: report.supplyAttribution.weakLinkedPct ?? 0,
+                        label: 'Connected network',
+                        value: report.supplyAttribution.combinedCoordinatedPct,
                         accent: '#EC4899',
                         glow: 'rgba(236,72,153,0.35)'
                     },
@@ -364,10 +330,9 @@ export const ForensicBundleSection: React.FC<Props> = ({
             description: 'A modern view of how supply is distributed across linked wallets, launch-window actors, and the remaining float.',
             items: [
                 { label: 'Deployer-linked', value: report.supplyAttribution.deployerLinkedPct, accent: '#5EF38C', glow: 'rgba(94,243,140,0.35)' },
-                { label: 'Block 0-2 wallets', value: report.supplyAttribution.blockZeroPct, accent: '#FFD166', glow: 'rgba(255,209,102,0.35)' },
-                { label: 'Block 0-2 entrants', value: report.supplyAttribution.sniperPct, accent: '#FF7A59', glow: 'rgba(255,122,89,0.35)' },
-                { label: 'Confirmed clusters', value: report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.clusteredPct, accent: '#6FDBFF', glow: 'rgba(111,219,255,0.35)' },
-                { label: 'Weak graph links', value: report.supplyAttribution.weakLinkedPct ?? 0, accent: '#EC4899', glow: 'rgba(236,72,153,0.28)' },
+                { label: 'Block-zero wallets', value: report.supplyAttribution.blockZeroPct, accent: '#FFD166', glow: 'rgba(255,209,102,0.35)' },
+                { label: 'Sniper-window wallets', value: report.supplyAttribution.sniperPct, accent: '#FF7A59', glow: 'rgba(255,122,89,0.35)' },
+                { label: 'Confirmed clusters', value: report.supplyAttribution.clusteredPct, accent: '#6FDBFF', glow: 'rgba(111,219,255,0.35)' },
                 { label: 'Remaining circulating', value: report.supplyAttribution.remainingPct, accent: '#5EF38C', glow: 'rgba(94,243,140,0.28)' }
             ]
         };
@@ -485,27 +450,6 @@ export const ForensicBundleSection: React.FC<Props> = ({
     const selectedCluster = selectedNode?.clusterId
         ? report?.ecosystemGraph.clusters.find((cluster) => cluster.clusterId === selectedNode.clusterId) ?? null
         : null;
-    const bundleIntelligence = report?.bundleIntelligence ?? {
-        detected: Boolean(report && (report.launchSummary.blockZeroWallets.length || report.launchSummary.launchBuyerCount)),
-        type: 'none' as const,
-        riskLevel: 'low' as const,
-        confidence: 'low' as const,
-        walletsInvolved: report ? Math.max(report.launchSummary.blockZeroWallets.length, report.launchSummary.launchBuyerCount) : 0,
-        supplyControlledPct: report?.supplyAttribution.blockZeroPct ?? 0,
-        retentionPct: null,
-        exitPressure: 'unknown' as const,
-        reasons: ['Bundle intelligence will refresh on the next scan.']
-    };
-    const bundledWalletCount = bundleIntelligence.walletsInvolved;
-    const detectedBundleClusterCount = report?.bundleInsights.blockZeroBundleClusterCount ?? 0;
-    const detectedBundleCandidateCount = report?.bundleInsights.inferredBundleCount ?? 0;
-    const bundleSummaryText = detectedBundleClusterCount > 0
-        ? `${detectedBundleClusterCount} bundle cluster${detectedBundleClusterCount === 1 ? '' : 's'} detected`
-        : detectedBundleCandidateCount > 0
-            ? `${detectedBundleCandidateCount} bundle candidate${detectedBundleCandidateCount === 1 ? '' : 's'} detected`
-            : bundleIntelligence.detected
-                ? `${bundleTypeLabel(bundleIntelligence.type)} activity`
-                : `Earliest observed block ${report?.launchSummary.earliestObservedSlot ?? 'N/A'}`;
 
     return (
         <div className="flex flex-col gap-6">
@@ -517,7 +461,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                     </div>
                     <h3 className="text-xl font-bold text-text-light mb-2">Bundle and coordinated-wallet intelligence</h3>
                     <p className="text-sm text-text-medium max-w-3xl leading-relaxed">
-                        This layer extends Safe Scan with first-three-block launch forensics, wallet-link clustering, bundle-wallet detection, and coordinated supply attribution.
+                        This layer extends Safe Scan with sampled launch-window forensics, wallet-link clustering, block-zero and sniper detection, and coordinated supply attribution.
                     </p>
                 </div>
                 {report ? (
@@ -534,9 +478,9 @@ export const ForensicBundleSection: React.FC<Props> = ({
                         <Clock3 size={20} />
                     </div>
                     <div>
-                        <div className="text-text-light font-bold mb-1">Advanced analysis is not available for this network yet</div>
+                        <div className="text-text-light font-bold mb-1">This feature is coming soon</div>
                         <p className="text-sm text-text-medium leading-relaxed">
-                            Current Safe Scan checks still ran normally for <span className="font-mono text-text-light">{contract}</span>.
+                            Advanced forensic bundle analysis will be added for non-Solana assets in a later release. Current Safe Scan checks still ran normally for <span className="font-mono text-text-light">{contract}</span>.
                         </p>
                     </div>
                 </div>
@@ -574,26 +518,26 @@ export const ForensicBundleSection: React.FC<Props> = ({
                         <div className="bg-card-hover/20 border border-border rounded-2xl p-5">
                             <div className="flex items-center gap-2 text-text-medium text-sm mb-3">
                                 <Radar size={16} className="text-text-medium" />
-                                Confirmed coordinated supply
+                                Coordinated supply
                             </div>
                             <div className="text-3xl font-extrabold text-text-light mb-1">
-                                {formatPct(report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.combinedCoordinatedPct)}
+                                {formatPct(report.supplyAttribution.combinedCoordinatedPct)}
                             </div>
                             <div className="text-xs text-text-medium">
-                                Weak links kept separate: {formatPct(report.supplyAttribution.weakLinkedPct ?? 0)}
+                                Estimated value {formatUsd(report.supplyAttribution.estimatedCombinedValueUsd)}
                             </div>
                         </div>
 
                         <div className="bg-card-hover/20 border border-border rounded-2xl p-5">
                             <div className="flex items-center gap-2 text-text-medium text-sm mb-3">
                                 <Activity size={16} className="text-text-medium" />
-                                Bundled wallets
+                                Launch buyers
                             </div>
                             <div className="text-3xl font-extrabold text-text-light mb-1">
-                                {bundledWalletCount}
+                                {report.launchSummary.launchBuyerCount}
                             </div>
                             <div className="text-xs text-text-medium">
-                                {bundleSummaryText}
+                                Earliest observed slot {report.launchSummary.earliestObservedSlot ?? 'N/A'}
                             </div>
                         </div>
 
@@ -631,11 +575,9 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                     <Sparkles size={16} className="text-text-medium" />
                                     <h4 className="font-bold text-lg">{supplyAttributionConfig.title}</h4>
                                 </div>
-                                {supplyAttributionConfig.description ? (
-                                    <p className="text-sm text-text-medium leading-relaxed max-w-3xl">
-                                        {supplyAttributionConfig.description}
-                                    </p>
-                                ) : null}
+                                <p className="text-sm text-text-medium leading-relaxed max-w-3xl">
+                                    {supplyAttributionConfig.description}
+                                </p>
                             </div>
                             {graphLayoutStyle === 'cluster-packed' ? (
                                 <div className="grid min-w-[260px] grid-cols-2 gap-2 rounded-2xl border border-border bg-card/60 p-3 text-sm">
@@ -646,6 +588,15 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                     <div>
                                         <div className="text-[10px] uppercase tracking-wide text-text-medium">Wallets</div>
                                         <div className="text-text-light font-extrabold">{report.ecosystemGraph.nodes.length}</div>
+                                    </div>
+                                    <div className="col-span-2 h-2 overflow-hidden rounded-full bg-white/10">
+                                        <div
+                                            className="h-full rounded-full bg-primary-green"
+                                            style={{ width: `${clamp(report.supplyAttribution.combinedCoordinatedPct, 0, 100)}%` }}
+                                        />
+                                    </div>
+                                    <div className="col-span-2 text-xs text-text-medium">
+                                        {formatPct(report.supplyAttribution.combinedCoordinatedPct)} connected supply mapped by Alchemy.
                                     </div>
                                 </div>
                             ) : null}
@@ -675,7 +626,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                 </div>
                                 <h4 className="font-bold text-xl text-text-light mb-2">Interactive cluster ecosystem map</h4>
                                 <p className="text-sm text-text-medium max-w-3xl leading-relaxed">
-                                    Cluster cores, network-linked wallets, block 0-2 entrants, and deployer-linked nodes are arranged into a visual investigation surface. Select a node or focus a cluster to inspect relationships in context.
+                                    Cluster cores, network-linked wallets, sniper entrants, and deployer-linked nodes are arranged into a visual investigation surface. Select a node or focus a cluster to inspect relationships in context.
                                 </p>
                             </div>
                         </div>
@@ -989,9 +940,6 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                     </div>
                                     {report.walletClusters.map((cluster) => {
                                         const expanded = !!expandedClusters[cluster.clusterId];
-                                        const visibleWalletLimit = visibleClusterWalletRows[cluster.clusterId] || CLUSTER_WALLET_DETAIL_BATCH_SIZE;
-                                        const visibleWalletDetails = cluster.walletDetails.slice(0, visibleWalletLimit);
-                                        const remainingWalletCount = Math.max(0, cluster.walletDetails.length - visibleWalletDetails.length);
                                         return (
                                             <div key={cluster.clusterId} className="border-t border-border first:border-t-0">
                                                 <div
@@ -1103,7 +1051,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody>
-                                                                    {visibleWalletDetails.map((wallet) => (
+                                                                    {cluster.walletDetails.slice(0, 8).map((wallet) => (
                                                                         <tr key={wallet.walletAddress} className="border-b border-border last:border-0">
                                                                             <td className="py-2.5 pr-2 sm:pr-3 lg:pr-4 text-text-light font-mono text-[11px] sm:text-[12px] lg:text-[13px] whitespace-nowrap">{shortenAddress(wallet.walletAddress)}</td>
                                                                             <td className="py-2.5 px-2 sm:px-3 lg:px-4 text-text-light text-[11px] sm:text-[12px] lg:text-[13px] text-right whitespace-nowrap">{formatPct(wallet.currentHoldingsPct)}</td>
@@ -1114,27 +1062,6 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                                 </tbody>
                                                             </table>
                                                         </div>
-                                                        {remainingWalletCount > 0 ? (
-                                                            <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-                                                                <div className="text-xs text-text-medium">
-                                                                    Showing {visibleWalletDetails.length} of {cluster.walletDetails.length} wallets
-                                                                </div>
-                                                                <button
-                                                                    type="button"
-                                                                    className="inline-flex items-center justify-center rounded-lg border border-border bg-card px-4 py-2 text-xs font-bold text-primary-green transition-colors hover:border-primary-green/40 hover:bg-primary-green/10 hover:text-text-light"
-                                                                    onClick={(event) => {
-                                                                        event.stopPropagation();
-                                                                        showMoreClusterWallets(cluster.clusterId, cluster.walletDetails.length);
-                                                                    }}
-                                                                >
-                                                                    See more ({Math.min(CLUSTER_WALLET_DETAIL_BATCH_SIZE, remainingWalletCount)} more)
-                                                                </button>
-                                                            </div>
-                                                        ) : cluster.walletDetails.length > CLUSTER_WALLET_DETAIL_BATCH_SIZE ? (
-                                                            <div className="mt-4 border-t border-border pt-4 text-xs text-text-medium">
-                                                                All {cluster.walletDetails.length} wallets shown
-                                                            </div>
-                                                        ) : null}
                                                     </div>
                                                 ) : null}
                                             </div>

@@ -1,10 +1,8 @@
-// Route-level product screen for the Atlaix application.
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { CheckCircle2, Copy, Loader2, ShieldCheck } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
 import { ForensicBundleSection } from '../components/safe-scan/ForensicBundleSection';
 import { SafeScanService, type AlchemyHubChain, type ForensicBundleReport } from '../services/SafeScanService';
-import { ALCHEMY_HUB_CHAINS, getAlchemyHubChain } from '../services/forensics/alchemy-hub-chains';
+import { ALCHEMY_HUB_CHAINS } from '../services/forensics/alchemy-hub-chains';
 import { GoPlusService, type SecurityReport } from '../services/GoPlusService';
 
 const shortenAddress = (value: string) => `${value.slice(0, 4)}...${value.slice(-4)}`;
@@ -26,22 +24,6 @@ const formatPct = (value: number | null | undefined) => {
 const scanSecurityChain = (chain: AlchemyHubChain) => {
     if (chain === 'eth') return 'ethereum';
     return chain;
-};
-
-const normalizeSafeScanChain = (value: string | null | undefined): AlchemyHubChain => {
-    if (!value) return 'solana';
-    const normalized = value === 'ethereum' ? 'eth' : value;
-    return getAlchemyHubChain(normalized).id;
-};
-
-const formatSafeScanError = (value: unknown) => {
-    const message = value instanceof Error ? value.message : String(value || '');
-    if (!message) return 'Safe Scan analysis failed.';
-    if (/valid Solana token address|valid 0x token contract address/i.test(message)) return message;
-    if (/backend|api|provider|rpc|alchemy|moralis|goplus|configured|configuration|server|database|endpoint|job|payload|fetch/i.test(message)) {
-        return 'Safe Scan could not complete right now. Please try again shortly.';
-    }
-    return message;
 };
 
 const statusTone = (safe: boolean | null) => {
@@ -76,7 +58,7 @@ const SafeScanSummary: React.FC<{
     const buyPct = totalTrades ? (buys / totalTrades) * 100 : 0;
     const sellPct = totalTrades ? 100 - buyPct : 0;
     const clusterLiquidityRatio = lp?.totalLiquidity
-        ? (report.supplyAttribution.estimatedClusterValueUsd || report.supplyAttribution.estimatedCombinedValueUsd || 0) / lp.totalLiquidity
+        ? (report.supplyAttribution.estimatedCombinedValueUsd || report.supplyAttribution.estimatedClusterValueUsd || 0) / lp.totalLiquidity
         : null;
     const lpSafe = lp ? lp.burnPercent + lp.lockedPercent >= 80 : null;
     const drainSupported = Boolean(lp?.totalLiquidity);
@@ -183,8 +165,8 @@ const SafeScanSummary: React.FC<{
                         <div className="grid gap-4">
                             <div className="rounded-xl border border-border bg-[#16181A] p-5">
                                 <div className="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#8FA0BF]">Cluster Supply Value</div>
-                                <div className="text-2xl font-black text-text-light">{formatUsd(report.supplyAttribution.estimatedClusterValueUsd || report.supplyAttribution.estimatedCombinedValueUsd)}</div>
-                                <div className="mt-2 text-sm text-[#A6B4CF]">{formatPct(report.supplyAttribution.confirmedCoordinatedPct ?? report.supplyAttribution.combinedCoordinatedPct)} confirmed coordinated supply</div>
+                                <div className="text-2xl font-black text-text-light">{formatUsd(report.supplyAttribution.estimatedCombinedValueUsd)}</div>
+                                <div className="mt-2 text-sm text-[#A6B4CF]">{formatPct(report.supplyAttribution.combinedCoordinatedPct)} coordinated supply</div>
                             </div>
                             <div className="rounded-xl border border-border bg-[#16181A] p-5">
                                 <div className="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#8FA0BF]">Live Liquidity</div>
@@ -219,35 +201,20 @@ const SafeScanSummary: React.FC<{
 };
 
 export const SafeScan: React.FC = () => {
-    const [searchParams] = useSearchParams();
-    const requestedAddress = useMemo(() => searchParams.get('address') || searchParams.get('token') || '', [searchParams]);
-    const requestedChain = useMemo(() => normalizeSafeScanChain(searchParams.get('chain')), [searchParams]);
-    const shouldAutoScan = useMemo(() => ['1', 'true', 'yes'].includes((searchParams.get('autoScan') || '').toLowerCase()), [searchParams]);
-    const [contract, setContract] = useState(requestedAddress);
+    const [contract, setContract] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [report, setReport] = useState<ForensicBundleReport | null>(null);
     const [securityReport, setSecurityReport] = useState<SecurityReport | null>(null);
-    const [chain, setChain] = useState<AlchemyHubChain>(requestedChain);
-    const autoScanKeyRef = useRef('');
-
-    useEffect(() => {
-        if (!requestedAddress) return;
-        setContract(requestedAddress);
-        setChain(requestedChain);
-        setError(null);
-        setReport(null);
-        setSecurityReport(null);
-    }, [requestedAddress, requestedChain]);
+    const [chain, setChain] = useState<AlchemyHubChain>('solana');
 
     const normalizedContract = contract.trim();
     const isSupported = SafeScanService.isSupported(normalizedContract, chain);
     const chainLabel = ALCHEMY_HUB_CHAINS.find((option) => option.id === chain)?.label ?? 'Chain';
 
-    const handleScan = useCallback(async (scanContract = contract, scanChain = chain) => {
-        const tokenAddress = scanContract.trim();
+    const handleScan = async () => {
+        const tokenAddress = contract.trim();
         if (!tokenAddress) return;
-        if (!SafeScanService.isSupported(tokenAddress, scanChain)) return;
 
         setLoading(true);
         setError(null);
@@ -256,29 +223,17 @@ export const SafeScan: React.FC = () => {
 
         try {
             const [nextReport, nextSecurity] = await Promise.all([
-                SafeScanService.analyzeToken(tokenAddress, scanChain),
-                GoPlusService.fetchTokenSecurity(tokenAddress, scanSecurityChain(scanChain)).catch(() => null)
+                SafeScanService.analyzeToken(tokenAddress, chain),
+                GoPlusService.fetchTokenSecurity(tokenAddress, scanSecurityChain(chain)).catch(() => null)
             ]);
             setReport(nextReport);
             setSecurityReport(nextSecurity);
         } catch (nextError) {
-            setError(formatSafeScanError(nextError));
+            setError(nextError instanceof Error ? nextError.message : 'Safe Scan analysis failed.');
         } finally {
             setLoading(false);
         }
-    }, [chain, contract]);
-
-    useEffect(() => {
-        const tokenAddress = requestedAddress.trim();
-        if (!shouldAutoScan || !tokenAddress) return;
-        if (!SafeScanService.isSupported(tokenAddress, requestedChain)) return;
-
-        const autoScanKey = `${requestedChain}:${tokenAddress}`;
-        if (autoScanKeyRef.current === autoScanKey) return;
-
-        autoScanKeyRef.current = autoScanKey;
-        void handleScan(tokenAddress, requestedChain);
-    }, [handleScan, requestedAddress, requestedChain, shouldAutoScan]);
+    };
 
     const resetScan = () => {
         setContract('');
@@ -374,11 +329,20 @@ export const SafeScan: React.FC = () => {
             <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0">
                     <div className="mb-3 flex flex-wrap items-center gap-3">
+                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
+                            Safe Scan
+                        </div>
                         <div className="rounded-full border border-primary-green/20 bg-primary-green/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-primary-green">
                             {report.tokenSymbol}
                         </div>
                         <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
                             {chainLabel}
+                        </div>
+                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
+                            Moralis top 300
+                        </div>
+                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
+                            Lite scan
                         </div>
                     </div>
                     <div className="mb-2 flex min-w-0 flex-wrap items-center gap-4">

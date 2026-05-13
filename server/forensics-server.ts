@@ -578,13 +578,14 @@ const getAssistantSafeScanSummary = async (address: string, chain: string) => {
             ? await analyzeAlchemyHubEvmToken(address, selectedChain, { depth: 'balanced', holderSeeds: [], seedOnly: true })
             : await analyzeAlchemyHubToken(address, { depth: 'balanced', holderSeeds: [], seedOnly: true });
 
+        const intelligence = (report as any)?.bundleIntelligence || {};
         return {
             report,
-            riskLevel: report?.bundleIntelligence?.riskLevel || 'unknown',
-            confidence: report?.bundleIntelligence?.confidence || 'unknown',
-            coordinatedSupplyPct: Number(report?.supplyAttribution?.confirmedCoordinatedPct ?? report?.supplyAttribution?.combinedCoordinatedPct ?? 0),
+            riskLevel: intelligence.riskLevel || 'unknown',
+            confidence: intelligence.confidence || 'unknown',
+            coordinatedSupplyPct: Number(report?.supplyAttribution?.combinedCoordinatedPct || 0),
             top10Pct: Number(report?.holderConcentration?.top10Pct || 0),
-            reasons: Array.isArray(report?.bundleIntelligence?.reasons) ? report.bundleIntelligence.reasons.slice(0, 4) : [],
+            reasons: Array.isArray(intelligence.reasons) ? intelligence.reasons.slice(0, 4) : [],
             highlights: Array.isArray(report?.evidenceHighlights) ? report.evidenceHighlights.slice(0, 4) : []
         };
     } catch (error) {
@@ -876,7 +877,7 @@ const summarizeSafeScanReport = (report: any) => {
     return [
         `Safe Scan completed for ${report?.tokenSymbol || report?.tokenName || 'this token'}.`,
         `Risk level: ${intelligence.riskLevel || 'unknown'} with ${intelligence.confidence || 'unknown'} confidence.`,
-        `Confirmed coordinated supply: ${Number(attribution.confirmedCoordinatedPct ?? attribution.combinedCoordinatedPct ?? 0).toFixed(2)}%. Weak graph links: ${Number(attribution.weakLinkedPct || 0).toFixed(2)}%. Top 10 holders: ${Number(holder.top10Pct || 0).toFixed(2)}%.`,
+        `Coordinated supply estimate: ${Number(attribution.combinedCoordinatedPct || 0).toFixed(2)}%. Top 10 holders: ${Number(holder.top10Pct || 0).toFixed(2)}%.`,
         reasons.length ? `Main reasons: ${reasons.join(' ')}` : '',
         highlights.length ? `Evidence highlights: ${highlights.map((item: any) => item.title).join(', ')}.` : ''
     ].filter(Boolean).join('\n');
@@ -1197,8 +1198,8 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
                 tokenAddress: address,
                 chain: safeScanChain,
                 tokenSymbol: report?.tokenSymbol,
-                riskLevel: report?.bundleIntelligence?.riskLevel,
-                confidence: report?.bundleIntelligence?.confidence
+                riskLevel: (report as any)?.bundleIntelligence?.riskLevel,
+                confidence: (report as any)?.bundleIntelligence?.confidence
             },
             actions
         };

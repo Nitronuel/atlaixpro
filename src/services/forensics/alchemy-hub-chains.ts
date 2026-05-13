@@ -1,4 +1,3 @@
-// Forensic analysis helper for SafeScan intelligence workflows.
 export type AlchemyHubChain = 'solana' | 'eth' | 'base' | 'bsc' | 'polygon' | 'arbitrum' | 'optimism';
 export type AlchemyHubScanDepth = 'balanced' | 'deep';
 

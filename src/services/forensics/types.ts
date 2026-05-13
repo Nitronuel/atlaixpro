@@ -1,12 +1,4 @@
-// Forensic analysis helper for SafeScan intelligence workflows.
 export type EvidenceTier = 'TIER_1' | 'TIER_2' | 'TIER_3';
-export type EvidenceClass =
-    | 'proven_control'
-    | 'strong_control_indicator'
-    | 'behavioral_coordination'
-    | 'weak_graph_proximity'
-    | 'context_only'
-    | 'concentration_only';
 
 export type ParsedInstruction = {
     program?: string;
@@ -103,14 +95,13 @@ export type LaunchBuyer = BuyerEvent & {
     sourceWallets: string[];
     sourceTokenAccounts: string[];
     programs: string[];
-    launchBand: 'block_0' | 'block_1' | 'block_2' | 'block_3_plus';
+    launchBand: 'block_0' | 'block_1_5' | 'block_6_50' | 'block_51_plus';
 };
 
 export type ClusterEdge = {
     from: string;
     to: string;
     tier: EvidenceTier;
-    evidenceClass?: EvidenceClass;
     label: string;
     reason: string;
     txHash?: string;
@@ -219,8 +210,6 @@ export type ForensicGraphEdge = {
     relationshipType: 'funding' | 'transfer' | 'launch' | 'distribution';
     displayLabel: string;
     strengthScore: number;
-    evidenceClass?: EvidenceClass;
-    riskEligible?: boolean;
 };
 
 export type ForensicGraphCluster = {
@@ -229,18 +218,6 @@ export type ForensicGraphCluster = {
     walletCount: number;
     supplyHeldPct: number;
     tier: EvidenceTier;
-};
-
-export type BundleIntelligence = {
-    detected: boolean;
-    type: 'none' | 'operational' | 'suspicious' | 'exploitative';
-    riskLevel: 'low' | 'medium' | 'high';
-    confidence: 'low' | 'medium' | 'high';
-    walletsInvolved: number;
-    supplyControlledPct: number;
-    retentionPct: number | null;
-    exitPressure: 'low' | 'medium' | 'high' | 'unknown';
-    reasons: string[];
 };
 
 export type ForensicBundleReport = {
@@ -270,11 +247,6 @@ export type ForensicBundleReport = {
         clusteredPct: number;
         networkLinkedPct: number;
         remainingPct: number;
-        confirmedCoordinatedPct: number;
-        probableCoordinatedPct: number;
-        weakLinkedPct: number;
-        contextOnlyPct: number;
-        concentrationOnlyPct: number;
         combinedCoordinatedPct: number;
         estimatedClusterValueUsd: number | null;
         estimatedCombinedValueUsd: number | null;
@@ -294,7 +266,6 @@ export type ForensicBundleReport = {
             tier3: number;
         };
     };
-    bundleIntelligence: BundleIntelligence;
     scanStats: {
         walletsExpanded: number;
         transactionsDecoded: number;

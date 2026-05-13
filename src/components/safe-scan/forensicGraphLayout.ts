@@ -1,4 +1,3 @@
-// Reusable interface component for Atlaix product workflows.
 import {
     forceCenter,
     forceCollide,

@@ -1,4 +1,3 @@
-// Intelligence service module for Atlaix data workflows.
 import type { ForensicBundleReport } from './ForensicBundleService';
 import { APP_CONFIG } from '../config';
 import { getAlchemyHubChain, type AlchemyHubChain } from './forensics/alchemy-hub-chains';
@@ -60,7 +59,7 @@ async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
         throw new Error(
             typeof payload?.error === 'string'
                 ? payload.error
-                : 'Safe Scan could not complete right now. Please try again shortly.'
+                : `Safe Scan backend request failed with status ${response.status}.`
         );
     }
     return payload;
@@ -102,7 +101,7 @@ export const SafeScanService = {
             .then((payload) => {
                 const report = payload.report as ForensicBundleReport | undefined;
                 if (!report) {
-                    throw new Error('Safe Scan could not generate a report for this token.');
+                    throw new Error('Safe Scan backend did not return a report.');
                 }
                 writeCachedReport(normalizedAddress, selectedChain, report);
                 return report;
