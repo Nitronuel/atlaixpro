@@ -49,14 +49,6 @@ const getAgeLabel = (timestamp?: number) => {
     return `${Math.floor(diff / (1000 * 60))}m`;
 };
 
-const getActivityAccent = (item: RealActivity) => {
-    if (item.type === 'Buy' || item.tag === 'Add Liq') return { bg: 'bg-primary-green/15', text: 'text-primary-green' };
-    if (item.type === 'Sell' || item.tag === 'Remove Liq') return { bg: 'bg-primary-red/15', text: 'text-primary-red' };
-    if (item.tag === 'Whale') return { bg: 'bg-primary-yellow/15', text: 'text-primary-yellow' };
-    if (item.tag === 'Burn') return { bg: 'bg-purple-400/15', text: 'text-purple-400' };
-    return { bg: 'bg-primary-blue/15', text: 'text-primary-blue' };
-};
-
 const parseActivityUsd = (value?: string) => {
     if (!value) return 0;
     const numeric = Number(value.replace(/[^0-9.-]/g, ''));
@@ -93,7 +85,6 @@ export const TokenDetails: React.FC = () => {
     const [copied, setCopied] = useState(false);
     const [chartExpanded, setChartExpanded] = useState(false);
     const [visibleWalletRows, setVisibleWalletRows] = useState(8);
-    const [showAllActivity, setShowAllActivity] = useState(false);
     const [compactChartLoaded, setCompactChartLoaded] = useState(false);
     const [activityRefreshing, setActivityRefreshing] = useState(false);
     const lastActivityLoadKeyRef = useRef('');
@@ -136,7 +127,6 @@ export const TokenDetails: React.FC = () => {
             setLoading(true);
             setActivityFeed([]);
             setVisibleWalletRows(8);
-            setShowAllActivity(false);
             lastActivityLoadKeyRef.current = '';
 
             try {
@@ -249,7 +239,6 @@ export const TokenDetails: React.FC = () => {
     const netVolume = buyVolume - sellVolume;
     const displayedActivity = activityFeed
         .filter(item => parseActivityUsd(item.usd) >= MIN_DISPLAY_ACTIVITY_USD);
-    const visibleOnChainEvents = showAllActivity ? displayedActivity : displayedActivity.slice(0, 7);
     const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
     const tokenAddress = enrichedData?.baseToken.address || address || '';
     const tokenChain = enrichedData?.chainId || preferredChain || 'solana';
@@ -459,63 +448,8 @@ export const TokenDetails: React.FC = () => {
                 </div>
             </section>
 
-            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,0.95fr)_minmax(0,1.15fr)]">
+            <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,2.1fr)]">
                 {tokenIntelligencePanel}
-
-                <div className="rounded-lg border border-border bg-card p-5">
-                    <div className="mb-4 flex items-center justify-between gap-3">
-                        <h3 className="text-base font-bold text-text-light">On-Chain Activity</h3>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={refreshActivity}
-                                disabled={activityRefreshing}
-                                className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-main text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green disabled:cursor-not-allowed disabled:opacity-60"
-                                title="Refresh activity"
-                            >
-                                <RefreshCw size={14} className={activityRefreshing ? 'animate-spin' : ''} />
-                            </button>
-                            <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
-                                All Events
-                            </span>
-                        </div>
-                    </div>
-                    <div className="relative flex flex-col gap-1">
-                        {visibleOnChainEvents.length === 0 ? (
-                            <div className="rounded-lg border border-border bg-main/50 p-6 text-center text-sm text-text-medium">
-                                {activityRefreshing ? 'Loading on-chain activity...' : 'Activity will appear as it is detected.'}
-                            </div>
-                        ) : visibleOnChainEvents.map((item, index) => {
-                            const accent = getActivityAccent(item);
-                            return (
-                                <div key={`${item.hash}-${index}`} className="flex items-start justify-between gap-4 border-b border-border/50 py-3 last:border-b-0">
-                                    <div className="flex min-w-0 gap-3">
-                                        <span className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${accent.bg} ${accent.text}`}>
-                                            <Activity size={15} />
-                                        </span>
-                                        <div className="min-w-0">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className="font-bold text-text-light">{item.tag || item.type}</span>
-                                                <span className="text-xs text-text-medium">{item.time}</span>
-                                            </div>
-                                            <div className="mt-1 truncate text-xs text-text-medium">
-                                                {shortAddress(item.wallet)} {item.desc}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <span className={`shrink-0 text-sm font-bold ${accent.text}`}>{item.usd || item.val || '-'}</span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    {displayedActivity.length > 7 && (
-                        <button
-                            onClick={() => setShowAllActivity((current) => !current)}
-                            className="mt-4 w-full rounded-lg border border-border bg-main/60 py-2.5 text-sm font-bold text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green"
-                        >
-                            {showAllActivity ? 'Show Less Activity' : 'View All Activity'}
-                        </button>
-                    )}
-                </div>
 
                 <div className="rounded-lg border border-border bg-card p-5">
                     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -538,11 +472,12 @@ export const TokenDetails: React.FC = () => {
                         </div>
                     </div>
                     <div className="overflow-x-auto">
-                        <table className="w-full min-w-[620px] text-sm">
+                        <table className="w-full min-w-[720px] text-sm">
                             <thead>
                                 <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-text-medium">
                                     <th className="pb-3 font-bold">Action</th>
                                     <th className="pb-3 font-bold">Amount</th>
+                                    <th className="pb-3 font-bold">Cost</th>
                                     <th className="pb-3 font-bold">Time</th>
                                     <th className="pb-3 font-bold">Wallet</th>
                                     <th className="pb-3 text-right font-bold">Track</th>
@@ -551,7 +486,7 @@ export const TokenDetails: React.FC = () => {
                             <tbody className="divide-y divide-border/50">
                                 {walletEvents.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="py-8 text-center text-sm text-text-medium">
+                                        <td colSpan={6} className="py-8 text-center text-sm text-text-medium">
                                             {activityRefreshing ? 'Loading wallet activity...' : 'Wallet activity will appear as it is detected.'}
                                         </td>
                                     </tr>
@@ -563,6 +498,7 @@ export const TokenDetails: React.FC = () => {
                                             </span>
                                         </td>
                                         <td className="py-3 text-xs font-bold text-text-light">{row.val} {tokenSymbol}</td>
+                                        <td className="py-3 text-xs font-bold text-text-light">{row.usd || '-'}</td>
                                         <td className="py-3 text-xs text-text-medium">{row.time}</td>
                                         <td className="py-3 font-mono text-xs text-primary-blue">{shortAddress(row.wallet)}</td>
                                         <td className="py-3 text-right">

@@ -102,7 +102,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
     if (path.includes('/detection/token/')) return 'Detection context, scoring signals, and market activity for this admitted token';
     if (path.includes('/detection')) return 'Surface qualified token events from buy pressure, sell pressure, liquidity shifts, and unusual activity';
     if (path.includes('/token-smart-money/')) return 'Wallet activity and smart-money context for this token';
-    if (path.includes('/token/')) return 'Live market data, chart, token intelligence, and on-chain activity';
+    if (path.includes('/token/')) return 'Live market data, chart, token intelligence, and wallet interactions';
 
     if (path.includes('/heatmap')) return 'Visualize concentration of normal vs. abnormal activity';
     if (path.includes('/sentiment')) return 'Monitor user opinions, reviews, and feedback trends.';
