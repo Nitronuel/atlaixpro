@@ -11,7 +11,10 @@
     "start:backend": "tsx server/forensics-server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "video:studio": "remotion studio src/video/index.ts",
+    "video:still": "remotion still src/video/index.ts AtlaixInvestorFilm out/atlaix-investor-film-frame.png --frame=450",
+    "video:render": "remotion render src/video/index.ts AtlaixInvestorFilm out/atlaix-investor-film.mp4 --codec=h264 --crf=14"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
@@ -24,6 +27,10 @@
     "tsx": "^4.20.5"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.461",
+    "@remotion/media": "^4.0.461",
+    "@remotion/media-utils": "^4.0.461",
+    "@remotion/shapes": "^4.0.461",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -31,6 +38,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.0",
     "jsdom": "^29.0.2",
+    "remotion": "^4.0.461",
     "ts-node": "^10.9.2",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",

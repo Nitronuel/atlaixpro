@@ -143,6 +143,8 @@ export const TokenDetails: React.FC = () => {
     const [copied, setCopied] = useState(false);
     const [chartExpanded, setChartExpanded] = useState(false);
     const [visibleWalletRows, setVisibleWalletRows] = useState(8);
+    const [visibleHolderRows, setVisibleHolderRows] = useState(10);
+    const [marketPanelTab, setMarketPanelTab] = useState<'activity' | 'holders'>('activity');
     const [compactChartLoaded, setCompactChartLoaded] = useState(false);
     const [activityRefreshing, setActivityRefreshing] = useState(false);
     const lastActivityLoadKeyRef = useRef('');
@@ -185,6 +187,7 @@ export const TokenDetails: React.FC = () => {
             setLoading(true);
             setActivityFeed([]);
             setVisibleWalletRows(8);
+            setVisibleHolderRows(10);
             lastActivityLoadKeyRef.current = '';
 
             try {
@@ -218,6 +221,7 @@ export const TokenDetails: React.FC = () => {
                         topHolders = supply > 0
                             ? largestAccounts.map((account: any) => ({
                                 address: String(account.address || ''),
+                                amount: Number(account.uiAmount ?? account.amount) || 0,
                                 percent: ((Number(account.uiAmount ?? account.amount) || 0) / supply) * 100
                             })).filter((holder: { address: string; percent: number }) => holder.address && holder.percent > 0)
                             : [];
@@ -305,6 +309,21 @@ export const TokenDetails: React.FC = () => {
     const displayedActivity = activityFeed
         .filter(item => parseActivityUsd(item.usd) >= MIN_DISPLAY_ACTIVITY_USD);
     const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell'].includes(item.type));
+    const topHolderRows = (enrichedData?.topHolders || [])
+        .map((holder) => {
+            const percent = clampPercent(Number(holder.percent) || 0);
+            const amount = Number.isFinite(Number(holder.amount))
+                ? Number(holder.amount)
+                : ((enrichedData?.totalSupply || 0) * percent) / 100;
+            return {
+                address: holder.address,
+                percent,
+                amount,
+                valueUsd: amount * priceNumber
+            };
+        })
+        .filter((holder) => holder.address)
+        .sort((a, b) => b.percent - a.percent);
     const holderDistribution = getHolderDistribution(enrichedData?.topHolders);
     const top10Pct = holderDistribution.top10 ?? 0;
     const top11To50Pct = Math.max(0, (holderDistribution.top50 ?? 0) - top10Pct);
@@ -315,7 +334,6 @@ export const TokenDetails: React.FC = () => {
             value: holderDistribution.top10,
             segmentValue: top10Pct,
             color: '#FF5C35',
-            dotClass: 'bg-[#FF5C35]',
             labelPosition: 'right-0 top-2 text-right'
         },
         {
@@ -323,7 +341,6 @@ export const TokenDetails: React.FC = () => {
             value: holderDistribution.top50,
             segmentValue: top11To50Pct,
             color: '#16D7FF',
-            dotClass: 'bg-[#16D7FF]',
             labelPosition: 'left-0 bottom-8 text-left'
         },
         {
@@ -331,7 +348,6 @@ export const TokenDetails: React.FC = () => {
             value: holderDistribution.rest,
             segmentValue: restHolderPct,
             color: '#32F06A',
-            dotClass: 'bg-[#32F06A]',
             labelPosition: 'right-1 bottom-3 text-right'
         }
     ];
@@ -416,6 +432,41 @@ export const TokenDetails: React.FC = () => {
                         ) : (
                             <span className={`shrink-0 text-sm font-bold ${item.valueClass}`}>{item.value}</span>
                         )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+    const holderDistributionPanel = (
+        <div className="rounded-lg border border-border bg-card p-5">
+            <div className="mb-2 flex items-center justify-between gap-3">
+                <h3 className="text-base font-bold text-text-light">Holder Distribution</h3>
+                <span className="text-xs font-bold text-text-medium">{enrichedData?.holders ? enrichedData.holders.toLocaleString() : 'N/A'}</span>
+            </div>
+            <div className="relative mx-auto h-[178px] max-w-[250px]">
+                <div className="absolute inset-x-0 top-6 mx-auto h-[138px] w-[138px]">
+                    <svg viewBox="0 0 140 140" className="h-full w-full overflow-visible drop-shadow-[0_0_26px_rgba(22,215,255,0.20)]" role="img" aria-label="Holder distribution chart">
+                        <circle cx="70" cy="70" r="38.5" fill="none" stroke="rgba(148,163,184,0.10)" strokeWidth="19" />
+                        {holderDonutSegments.map((segment) => (
+                            <path
+                                key={segment.label}
+                                d={segment.path}
+                                fill={segment.color}
+                            />
+                        ))}
+                        <circle cx="70" cy="70" r="30" fill="#181C20" stroke="rgba(255,255,255,0.07)" />
+                    </svg>
+                    <div className="absolute inset-0 grid place-items-center text-center">
+                        <div>
+                            <div className="text-[10px] font-black uppercase text-text-medium">Holders</div>
+                            <div className="text-base font-black text-text-light">{holderDistribution.availableCount || '-'}</div>
+                        </div>
+                    </div>
+                </div>
+                {holderDistributionRows.map((row) => (
+                    <div key={row.label} className={`absolute ${row.labelPosition}`}>
+                        <div className="text-xs font-black" style={{ color: row.color }}>{formatPercent(row.value)}</div>
+                        <div className="text-[9px] font-bold uppercase tracking-wide text-text-medium">{row.label}</div>
                     </div>
                 ))}
             </div>
@@ -559,117 +610,177 @@ export const TokenDetails: React.FC = () => {
                             </button>
                         ))}
                     </div>
-
-                    <div className="mt-5 border-t border-border pt-4">
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                            <h3 className="text-base font-bold text-text-light">Holder Distribution</h3>
-                            <span className="text-xs font-bold text-text-medium">{enrichedData?.holders ? enrichedData.holders.toLocaleString() : 'N/A'}</span>
-                        </div>
-                        <div className="relative mx-auto h-[178px] max-w-[250px]">
-                            <div className="absolute inset-x-0 top-6 mx-auto h-[138px] w-[138px]">
-                                <svg viewBox="0 0 140 140" className="h-full w-full overflow-visible drop-shadow-[0_0_26px_rgba(22,215,255,0.20)]" role="img" aria-label="Holder distribution chart">
-                                    <circle cx="70" cy="70" r="38.5" fill="none" stroke="rgba(148,163,184,0.10)" strokeWidth="19" />
-                                    {holderDonutSegments.map((segment) => (
-                                        <path
-                                            key={segment.label}
-                                            d={segment.path}
-                                            fill={segment.color}
-                                        />
-                                    ))}
-                                    <circle cx="70" cy="70" r="30" fill="#181C20" stroke="rgba(255,255,255,0.07)" />
-                                </svg>
-                                <div className="absolute inset-0 grid place-items-center text-center">
-                                    <div>
-                                        <div className="text-[10px] font-black uppercase text-text-medium">Holders</div>
-                                        <div className="text-base font-black text-text-light">{holderDistribution.availableCount || '-'}</div>
-                                    </div>
-                                </div>
-                            </div>
-                            {holderDistributionRows.map((row) => (
-                                <div key={row.label} className={`absolute ${row.labelPosition}`}>
-                                    <div className="text-xs font-black" style={{ color: row.color }}>{formatPercent(row.value)}</div>
-                                    <div className="text-[9px] font-bold uppercase tracking-wide text-text-medium">{row.label}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
                 </div>
             </section>
 
             <section className="relative grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,2.1fr)]">
-                {tokenIntelligencePanel}
+                <div className="grid gap-4">
+                    {tokenIntelligencePanel}
+                    {holderDistributionPanel}
+                </div>
 
-                <div className="rounded-lg border border-border bg-card p-5">
-                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <h3 className="text-base font-bold text-text-light">On Chain Activities</h3>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={refreshActivity}
-                                disabled={activityRefreshing}
-                                className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-main text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green disabled:cursor-not-allowed disabled:opacity-60"
-                                title="Refresh activity"
-                            >
-                                <RefreshCw size={14} className={activityRefreshing ? 'animate-spin' : ''} />
-                            </button>
-                            <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
-                                All Actions
-                            </span>
-                            <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
-                                24H
-                            </span>
+                <div className="atlaix-folder-shell">
+                        <div className="mb-0 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                            <div className="min-w-0">
+                                <div className="atlaix-folder-strip">
+                                {[
+                                    { id: 'activity' as const, label: 'On Chain Activities' },
+                                    { id: 'holders' as const, label: 'Top Holders' }
+                                ].map((tab, index) => {
+                                    const active = marketPanelTab === tab.id;
+                                    return (
+                                        <button
+                                            key={tab.id}
+                                            onClick={() => setMarketPanelTab(tab.id)}
+                                            className={`atlaix-folder-tab ${active ? 'is-active' : 'is-idle'} ${index === 0 ? 'is-first' : ''}`}
+                                        >
+                                            <span className="atlaix-folder-label">{tab.label}</span>
+                                        </button>
+                                    );
+                                })}
+                                </div>
+                            </div>
+                            {marketPanelTab === 'activity' && (
+                                <div className="flex gap-2 sm:pb-2">
+                                    <button
+                                        onClick={refreshActivity}
+                                        disabled={activityRefreshing}
+                                        className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-main text-text-light transition-colors hover:border-primary-green/50 hover:text-primary-green disabled:cursor-not-allowed disabled:opacity-60"
+                                        title="Refresh activity"
+                                    >
+                                        <RefreshCw size={14} className={activityRefreshing ? 'animate-spin' : ''} />
+                                    </button>
+                                    <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
+                                        All Actions
+                                    </span>
+                                    <span className="flex items-center gap-2 rounded-md border border-border bg-main px-3 py-2 text-xs font-bold text-text-light">
+                                        24H
+                                    </span>
+                                </div>
+                            )}
                         </div>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full min-w-[720px] text-sm">
-                            <thead>
-                                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-text-medium">
-                                    <th className="pb-3 font-bold">Action</th>
-                                    <th className="pb-3 font-bold">Amount</th>
-                                    <th className="pb-3 font-bold">Cost</th>
-                                    <th className="pb-3 font-bold">Time</th>
-                                    <th className="pb-3 font-bold">Wallet</th>
-                                    <th className="pb-3 text-right font-bold">Track</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border/50">
-                                {walletEvents.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={6} className="py-8 text-center text-sm text-text-medium">
-                                            {activityRefreshing ? 'Loading on-chain activities...' : 'Buy and sell activity will appear as it is detected.'}
-                                        </td>
-                                    </tr>
-                                ) : walletEvents.slice(0, visibleWalletRows).map((row, index) => (
-                                    <tr key={`${row.hash}-${index}`} className="hover:bg-card-hover/30">
-                                        <td className="py-3">
-                                            <span className={`rounded px-2.5 py-1 text-[10px] font-black uppercase ${row.type === 'Buy' ? 'bg-primary-green/10 text-primary-green' : row.type === 'Sell' ? 'bg-primary-red/10 text-primary-red' : 'bg-primary-blue/10 text-primary-blue'}`}>
-                                                {row.type}
-                                            </span>
-                                        </td>
-                                        <td className="py-3 text-xs font-bold text-text-light">{row.val} {tokenSymbol}</td>
-                                        <td className="py-3 text-xs font-bold text-text-light">{row.usd || '-'}</td>
-                                        <td className="py-3 text-xs text-text-medium">{row.time}</td>
-                                        <td className="py-3 font-mono text-xs text-primary-blue">{shortAddress(row.wallet)}</td>
-                                        <td className="py-3 text-right">
-                                            <button
-                                                onClick={() => navigate(`/wallet/${encodeURIComponent(row.wallet)}?chain=${encodeURIComponent(tokenChain)}`)}
-                                                className="rounded-md border border-border px-3 py-1 text-xs font-bold text-text-light transition-colors hover:border-primary-green/40 hover:text-primary-green"
-                                            >
-                                                View
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    {walletEvents.length > visibleWalletRows && (
-                        <button
-                            onClick={() => setVisibleWalletRows((current) => current + 8)}
-                            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-bold text-text-light transition-colors hover:text-primary-green"
-                        >
-                            Show more <ChevronDown size={16} />
-                        </button>
+                    <div className="atlaix-folder-panel">
+                    <div className="atlaix-folder-accent" />
+                    {marketPanelTab === 'activity' ? (
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full min-w-[720px] text-sm">
+                                    <thead>
+                                        <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-text-medium">
+                                            <th className="pb-3 font-bold">Action</th>
+                                            <th className="pb-3 font-bold">Amount</th>
+                                            <th className="pb-3 font-bold">Cost</th>
+                                            <th className="pb-3 font-bold">Time</th>
+                                            <th className="pb-3 font-bold">Wallet</th>
+                                            <th className="pb-3 text-right font-bold">Track</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/50">
+                                        {walletEvents.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={6} className="py-8 text-center text-sm text-text-medium">
+                                                    {activityRefreshing ? 'Loading on-chain activities...' : 'Buy and sell activity will appear as it is detected.'}
+                                                </td>
+                                            </tr>
+                                        ) : walletEvents.slice(0, visibleWalletRows).map((row, index) => (
+                                            <tr key={`${row.hash}-${index}`} className="hover:bg-card-hover/30">
+                                                <td className="py-3">
+                                                    <span className={`rounded px-2.5 py-1 text-[10px] font-black uppercase ${row.type === 'Buy' ? 'bg-primary-green/10 text-primary-green' : row.type === 'Sell' ? 'bg-primary-red/10 text-primary-red' : 'bg-primary-blue/10 text-primary-blue'}`}>
+                                                        {row.type}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 text-xs font-bold text-text-light">{row.val} {tokenSymbol}</td>
+                                                <td className="py-3 text-xs font-bold text-text-light">{row.usd || '-'}</td>
+                                                <td className="py-3 text-xs text-text-medium">{row.time}</td>
+                                                <td className="py-3 font-mono text-xs text-primary-blue">{shortAddress(row.wallet)}</td>
+                                                <td className="py-3 text-right">
+                                                    <button
+                                                        onClick={() => navigate(`/wallet/${encodeURIComponent(row.wallet)}?chain=${encodeURIComponent(tokenChain)}`)}
+                                                        className="rounded-md border border-border px-3 py-1 text-xs font-bold text-text-light transition-colors hover:border-primary-green/40 hover:text-primary-green"
+                                                    >
+                                                        View
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {walletEvents.length > visibleWalletRows && (
+                                <button
+                                    onClick={() => setVisibleWalletRows((current) => current + 8)}
+                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-bold text-text-light transition-colors hover:text-primary-green"
+                                >
+                                    Show more <ChevronDown size={16} />
+                                </button>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <div className="overflow-x-auto rounded-lg border border-border/70">
+                                <div className="min-w-[920px]">
+                                    <div className="grid grid-cols-[70px_minmax(0,1fr)_150px_130px_130px_150px] gap-3 border-b border-border bg-main/60 px-4 py-3 text-[11px] font-black uppercase tracking-wide text-text-medium">
+                                        <span>Rank</span>
+                                        <span>Wallet</span>
+                                        <span className="text-right">Amount</span>
+                                        <span className="text-right">Value</span>
+                                        <span className="text-right">Supply</span>
+                                        <span className="text-right">Action</span>
+                                    </div>
+                                    <div className="divide-y divide-border/50">
+                                        {topHolderRows.length === 0 ? (
+                                            <div className="px-4 py-10 text-center text-sm text-text-medium">
+                                                Top holder data is not available for this token yet.
+                                            </div>
+                                        ) : topHolderRows.slice(0, visibleHolderRows).map((holder, index) => (
+                                            <div key={`${holder.address}-${index}`} className="grid grid-cols-[70px_minmax(0,1fr)_150px_130px_130px_150px] items-center gap-3 px-4 py-3 transition-colors hover:bg-card-hover/30">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="flex h-7 w-7 items-center justify-center rounded-md border border-primary-green/25 bg-primary-green/10 text-xs font-black text-primary-green">
+                                                        {index + 1}
+                                                    </span>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="font-mono text-xs font-bold text-text-light">{shortAddress(holder.address, 8, 6)}</div>
+                                                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-main">
+                                                        <div
+                                                            className={`h-full rounded-full ${holder.percent >= 10 ? 'bg-primary-red' : 'bg-primary-green'}`}
+                                                            style={{ width: `${Math.max(3, holder.percent)}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="text-right text-xs font-black text-text-light">
+                                                    {formatCompactNumber(holder.amount)}
+                                                </div>
+                                                <div className="text-right text-xs font-black text-text-light">
+                                                    {formatCompactNumber(holder.valueUsd, '$')}
+                                                </div>
+                                                <div className={`text-right text-sm font-black ${holder.percent >= 10 ? 'text-primary-red' : 'text-text-light'}`}>
+                                                    {formatPercent(holder.percent)}
+                                                </div>
+                                                <div className="text-right">
+                                                    <button
+                                                        onClick={() => navigate(`/wallet/${encodeURIComponent(holder.address)}?chain=${encodeURIComponent(tokenChain)}`)}
+                                                        className="rounded-md border border-border px-3 py-1 text-xs font-bold text-text-light transition-colors hover:border-primary-green/40 hover:text-primary-green"
+                                                    >
+                                                        Inspect
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            {topHolderRows.length > visibleHolderRows && (
+                                <button
+                                    onClick={() => setVisibleHolderRows((current) => current + 10)}
+                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-bold text-text-light transition-colors hover:text-primary-green"
+                                >
+                                    Show more holders <ChevronDown size={16} />
+                                </button>
+                            )}
+                        </>
                     )}
+                    </div>
                 </div>
             </section>
 
