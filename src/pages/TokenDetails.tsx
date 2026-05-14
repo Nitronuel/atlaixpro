@@ -55,6 +55,64 @@ const parseActivityUsd = (value?: string) => {
     return Number.isFinite(numeric) ? Math.abs(numeric) : 0;
 };
 
+const clampPercent = (value: number) => Math.min(Math.max(value, 0), 100);
+
+const formatPercent = (value?: number) => {
+    if (value === undefined || !Number.isFinite(value)) return 'N/A';
+    return `${clampPercent(value).toFixed(value >= 10 ? 1 : 2)}%`;
+};
+
+const getHolderDistribution = (topHolders?: Array<{ address: string; percent: number }>) => {
+    const holders = (topHolders || [])
+        .map((holder) => ({ ...holder, percent: clampPercent(Number(holder.percent) || 0) }))
+        .filter((holder) => holder.percent > 0)
+        .sort((a, b) => b.percent - a.percent);
+    const top10 = holders.length
+        ? holders.slice(0, 10).reduce((sum, holder) => sum + holder.percent, 0)
+        : undefined;
+    const top50 = holders.length
+        ? holders.slice(0, 50).reduce((sum, holder) => sum + holder.percent, 0)
+        : undefined;
+    const rest = top50 === undefined ? undefined : Math.max(0, 100 - top50);
+
+    return {
+        availableCount: holders.length,
+        top10,
+        top50,
+        rest
+    };
+};
+
+const polarToCartesian = (centerX: number, centerY: number, radius: number, angleInDegrees: number) => {
+    const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180;
+    return {
+        x: centerX + radius * Math.cos(angleInRadians),
+        y: centerY + radius * Math.sin(angleInRadians)
+    };
+};
+
+const describeDonutSlice = (
+    centerX: number,
+    centerY: number,
+    outerRadius: number,
+    innerRadius: number,
+    startAngle: number,
+    endAngle: number
+) => {
+    const outerStart = polarToCartesian(centerX, centerY, outerRadius, endAngle);
+    const outerEnd = polarToCartesian(centerX, centerY, outerRadius, startAngle);
+    const innerStart = polarToCartesian(centerX, centerY, innerRadius, startAngle);
+    const innerEnd = polarToCartesian(centerX, centerY, innerRadius, endAngle);
+    const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+    return [
+        `M ${outerStart.x} ${outerStart.y}`,
+        `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 0 ${outerEnd.x} ${outerEnd.y}`,
+        `L ${innerStart.x} ${innerStart.y}`,
+        `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 1 ${innerEnd.x} ${innerEnd.y}`,
+        'Z'
+    ].join(' ');
+};
+
 const getDexscreenerChartUrl = (chainId?: string, pairAddress?: string, compact = true) => {
     if (!chainId || !pairAddress) return '';
     const params = new URLSearchParams({
@@ -150,12 +208,19 @@ export const TokenDetails: React.FC = () => {
                     let topHolders: EnrichedTokenData['topHolders'] = [];
 
                     if (isSolana) {
-                        const [h, s] = await Promise.all([
+                        const [h, s, largestAccounts] = await Promise.all([
                             SolanaRpcService.getHolderCount(mintAddress),
-                            SolanaRpcService.getTokenSupply(mintAddress)
+                            SolanaRpcService.getTokenSupply(mintAddress),
+                            SolanaRpcService.getTokenLargestAccounts(mintAddress)
                         ]);
                         holders = h || 0;
                         supply = s || 0;
+                        topHolders = supply > 0
+                            ? largestAccounts.map((account: any) => ({
+                                address: String(account.address || ''),
+                                percent: ((Number(account.uiAmount ?? account.amount) || 0) / supply) * 100
+                            })).filter((holder: { address: string; percent: number }) => holder.address && holder.percent > 0)
+                            : [];
                     } else {
                         try {
                             const [metadata, holderInsights, activeWalletCount] = await Promise.all([
@@ -239,7 +304,56 @@ export const TokenDetails: React.FC = () => {
     const netVolume = buyVolume - sellVolume;
     const displayedActivity = activityFeed
         .filter(item => parseActivityUsd(item.usd) >= MIN_DISPLAY_ACTIVITY_USD);
-    const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell', 'Transfer'].includes(item.type));
+    const walletEvents = displayedActivity.filter(item => ['Buy', 'Sell'].includes(item.type));
+    const holderDistribution = getHolderDistribution(enrichedData?.topHolders);
+    const top10Pct = holderDistribution.top10 ?? 0;
+    const top11To50Pct = Math.max(0, (holderDistribution.top50 ?? 0) - top10Pct);
+    const restHolderPct = holderDistribution.rest ?? (holderDistribution.availableCount ? Math.max(0, 100 - top10Pct - top11To50Pct) : 100);
+    const holderDistributionRows = [
+        {
+            label: 'Top 10',
+            value: holderDistribution.top10,
+            segmentValue: top10Pct,
+            color: '#FF5C35',
+            dotClass: 'bg-[#FF5C35]',
+            labelPosition: 'right-0 top-2 text-right'
+        },
+        {
+            label: 'Top 50',
+            value: holderDistribution.top50,
+            segmentValue: top11To50Pct,
+            color: '#16D7FF',
+            dotClass: 'bg-[#16D7FF]',
+            labelPosition: 'left-0 bottom-8 text-left'
+        },
+        {
+            label: 'Rest',
+            value: holderDistribution.rest,
+            segmentValue: restHolderPct,
+            color: '#32F06A',
+            dotClass: 'bg-[#32F06A]',
+            labelPosition: 'right-1 bottom-3 text-right'
+        }
+    ];
+    const holderDonutSegments = (() => {
+        if (!holderDistribution.availableCount) return [];
+        const gapDegrees = 8;
+        let cursor = -42;
+        return holderDistributionRows.flatMap((row) => {
+            const rawSpan = (clampPercent(row.segmentValue) / 100) * 360;
+            if (rawSpan <= 0) return [];
+            const segmentGap = Math.min(gapDegrees, Math.max(2, rawSpan * 0.32));
+            const visibleSpan = Math.max(0, rawSpan - segmentGap);
+            const startAngle = cursor + segmentGap / 2;
+            const endAngle = startAngle + visibleSpan;
+            cursor += rawSpan;
+            if (visibleSpan <= 0) return [];
+            return [{
+                ...row,
+                path: describeDonutSlice(70, 70, 48, 29, startAngle, endAngle)
+            }];
+        });
+    })();
     const tokenAddress = enrichedData?.baseToken.address || address || '';
     const tokenChain = enrichedData?.chainId || preferredChain || 'solana';
     const tokenPair = enrichedData?.pairAddress || preferredPairAddress || '';
@@ -445,6 +559,40 @@ export const TokenDetails: React.FC = () => {
                             </button>
                         ))}
                     </div>
+
+                    <div className="mt-5 border-t border-border pt-4">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                            <h3 className="text-base font-bold text-text-light">Holder Distribution</h3>
+                            <span className="text-xs font-bold text-text-medium">{enrichedData?.holders ? enrichedData.holders.toLocaleString() : 'N/A'}</span>
+                        </div>
+                        <div className="relative mx-auto h-[178px] max-w-[250px]">
+                            <div className="absolute inset-x-0 top-6 mx-auto h-[138px] w-[138px]">
+                                <svg viewBox="0 0 140 140" className="h-full w-full overflow-visible drop-shadow-[0_0_26px_rgba(22,215,255,0.20)]" role="img" aria-label="Holder distribution chart">
+                                    <circle cx="70" cy="70" r="38.5" fill="none" stroke="rgba(148,163,184,0.10)" strokeWidth="19" />
+                                    {holderDonutSegments.map((segment) => (
+                                        <path
+                                            key={segment.label}
+                                            d={segment.path}
+                                            fill={segment.color}
+                                        />
+                                    ))}
+                                    <circle cx="70" cy="70" r="30" fill="#181C20" stroke="rgba(255,255,255,0.07)" />
+                                </svg>
+                                <div className="absolute inset-0 grid place-items-center text-center">
+                                    <div>
+                                        <div className="text-[10px] font-black uppercase text-text-medium">Holders</div>
+                                        <div className="text-base font-black text-text-light">{holderDistribution.availableCount || '-'}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            {holderDistributionRows.map((row) => (
+                                <div key={row.label} className={`absolute ${row.labelPosition}`}>
+                                    <div className="text-xs font-black" style={{ color: row.color }}>{formatPercent(row.value)}</div>
+                                    <div className="text-[9px] font-bold uppercase tracking-wide text-text-medium">{row.label}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -453,7 +601,7 @@ export const TokenDetails: React.FC = () => {
 
                 <div className="rounded-lg border border-border bg-card p-5">
                     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <h3 className="text-base font-bold text-text-light">Wallet Interactions</h3>
+                        <h3 className="text-base font-bold text-text-light">On Chain Activities</h3>
                         <div className="flex gap-2">
                             <button
                                 onClick={refreshActivity}
@@ -487,7 +635,7 @@ export const TokenDetails: React.FC = () => {
                                 {walletEvents.length === 0 ? (
                                     <tr>
                                         <td colSpan={6} className="py-8 text-center text-sm text-text-medium">
-                                            {activityRefreshing ? 'Loading wallet activity...' : 'Wallet activity will appear as it is detected.'}
+                                            {activityRefreshing ? 'Loading on-chain activities...' : 'Buy and sell activity will appear as it is detected.'}
                                         </td>
                                     </tr>
                                 ) : walletEvents.slice(0, visibleWalletRows).map((row, index) => (

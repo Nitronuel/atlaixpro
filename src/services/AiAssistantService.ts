@@ -42,9 +42,27 @@ export type AiAssistantConversationMessage = {
 };
 
 const apiUrl = (path: string) => `${APP_CONFIG.apiBaseUrl || ''}${path}`;
+const CHAT_TIMEOUT_MS = 25_000;
 
-const fetchJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
-    const response = await fetch(input, init);
+const fetchJson = async <T>(input: RequestInfo | URL, init?: RequestInit, timeoutMs?: number): Promise<T> => {
+    const controller = timeoutMs ? new AbortController() : null;
+    const timeoutId = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : 0;
+
+    let response: Response;
+    try {
+        response = await fetch(input, {
+            ...init,
+            signal: controller?.signal || init?.signal
+        });
+    } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+            throw new Error('That took longer than expected, so I stopped waiting. Please try again in a moment.');
+        }
+        throw error;
+    } finally {
+        if (timeoutId) window.clearTimeout(timeoutId);
+    }
+
     const payload = await response.json().catch(() => ({}));
 
     if (!response.ok) {
@@ -68,6 +86,6 @@ export const AiAssistantService = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message, history: history.slice(-12) })
-        });
+        }, CHAT_TIMEOUT_MS);
     }
 };

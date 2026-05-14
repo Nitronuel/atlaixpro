@@ -12,13 +12,13 @@ interface TokenTransactionsProps {
 
 export const TokenTransactions: React.FC<TokenTransactionsProps> = ({ activityFeed, enrichedData, isRealData }) => {
     const navigate = useNavigate();
-    const marketEvents = activityFeed.filter(a => ['Buy', 'Sell', 'Transfer'].includes(a.type) && a.tag !== 'Burn');
+    const marketEvents = activityFeed.filter(a => ['Buy', 'Sell'].includes(a.type) && a.tag !== 'Burn');
 
     return (
         <div className="w-full h-[600px]">
             <div className="min-w-0 bg-card border border-border rounded-xl p-4 h-full flex flex-col">
                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-sm font-bold text-text-light uppercase tracking-wide">Wallet Interactions</h3>
+                    <h3 className="text-sm font-bold text-text-light uppercase tracking-wide">On Chain Activities</h3>
                 </div>
                 <div className="overflow-x-auto flex-grow custom-scrollbar pb-2">
                     <table className="w-full min-w-[720px] text-sm">

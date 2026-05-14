@@ -75,6 +75,12 @@ const getTimeAgo = (timestamp: string) => {
     return `${Math.floor(seconds / 86400)}d ago`;
 };
 
+const normalizeHolderPercent = (value: unknown) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.min(numeric, 100);
+};
+
 const mapChainToMoralisEVM = (chain: string) => {
     switch (chain.toLowerCase()) {
         case 'ethereum': return '0x1';
@@ -148,28 +154,44 @@ export const MoralisService = {
                     0
                 );
                 const rawTopHolders = stats.topHolders || stats.top_holders || stats.holderDistribution || stats.holder_distribution || [];
-                const topHolders = Array.isArray(rawTopHolders)
-                    ? rawTopHolders.slice(0, 5).map((holder: any) => ({
+                let topHolders = Array.isArray(rawTopHolders)
+                    ? rawTopHolders.slice(0, 50).map((holder: any) => ({
                         address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
-                        percent: Number(holder.percentage ?? holder.percent ?? holder.balance_percentage ?? 0)
+                        percent: normalizeHolderPercent(holder.percentage ?? holder.percent ?? holder.balance_percentage ?? 0)
                     })).filter((holder) => holder.address)
                     : [];
+
+                if (topHolders.length < 50) {
+                    const ownersUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/owners?chain=${hexChain}&limit=50&order=DESC`;
+                    const ownersResponse = await fetchProvider('moralis', ownersUrl, { headers });
+                    if (ownersResponse.ok) {
+                        const owners = await ownersResponse.json();
+                        const result = Array.isArray(owners.result) ? owners.result : Array.isArray(owners) ? owners : [];
+                        const ownerTopHolders = result.slice(0, 50).map((holder: any) => ({
+                            address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
+                            percent: normalizeHolderPercent(holder.percentage_relative_to_total_supply ?? holder.percentage ?? holder.percent ?? 0)
+                        })).filter((holder: { address: string }) => holder.address);
+                        if (ownerTopHolders.length > topHolders.length) {
+                            topHolders = ownerTopHolders;
+                        }
+                    }
+                }
 
                 if (Number.isFinite(holderCount) && holderCount > 0) {
                     return { holderCount, topHolders };
                 }
             }
 
-            const ownersUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/owners?chain=${hexChain}&limit=100&order=DESC`;
+            const ownersUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/owners?chain=${hexChain}&limit=50&order=DESC`;
             const ownersResponse = await fetchProvider('moralis', ownersUrl, { headers });
             if (!ownersResponse.ok) return null;
 
             const owners = await ownersResponse.json();
             const result = Array.isArray(owners.result) ? owners.result : Array.isArray(owners) ? owners : [];
             const holderCount = Number(owners.total ?? owners.totalHolders ?? owners.total_holders ?? result.length);
-            const topHolders = result.slice(0, 5).map((holder: any) => ({
+            const topHolders = result.slice(0, 50).map((holder: any) => ({
                 address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
-                percent: Number(holder.percentage_relative_to_total_supply ?? holder.percentage ?? holder.percent ?? 0)
+                percent: normalizeHolderPercent(holder.percentage_relative_to_total_supply ?? holder.percentage ?? holder.percent ?? 0)
             })).filter((holder: { address: string }) => holder.address);
 
             return holderCount > 0 ? { holderCount, topHolders } : null;

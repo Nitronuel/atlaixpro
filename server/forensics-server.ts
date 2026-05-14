@@ -409,6 +409,70 @@ const formatAssistantDetectionLine = (event: any) => {
     return `${label}: ${event.eventType || 'Detection'} (${event.severity || 'Medium'}) with score ${event.score || 0}. 24h volume ${volume}, liquidity ${liquidity}.`;
 };
 
+const explainAssistantDetectionImplication = (event: any) => {
+    const eventType = String(event?.eventType || '').toLowerCase();
+    const severity = String(event?.severity || 'Medium');
+    const token = event?.token || {};
+    const label = token.ticker || token.name || 'This token';
+    const liquidity = compactUsd(event?.metrics?.liquidity);
+    const volume = compactUsd(event?.metrics?.volume24h);
+
+    if (eventType.includes('accumulation')) {
+        return `${label}: buyers or active wallets may be building interest. In plain terms, people may be quietly positioning, but it still needs confirmation from liquidity and price follow-through.`;
+    }
+    if (eventType.includes('distribution')) {
+        return `${label}: selling pressure may be building. In plain terms, some holders may be reducing exposure, so chasing green candles can be riskier.`;
+    }
+    if (eventType.includes('stress')) {
+        return `${label}: the market structure looks strained. In plain terms, price, liquidity, or volume behavior may be unstable, so risk is higher than normal.`;
+    }
+    if (eventType.includes('recovery')) {
+        return `${label}: the token may be trying to recover after weakness. In plain terms, it is not automatically safe, but buyers may be returning.`;
+    }
+    if (eventType.includes('liquidity')) {
+        return `${label}: liquidity changed enough to matter. In plain terms, it may become easier or harder to trade without moving price. Current liquidity: ${liquidity}, volume: ${volume}.`;
+    }
+    return `${label}: Atlaix detected unusual activity at ${severity} severity. In plain terms, something about trading, liquidity, or wallet behavior is worth checking before trusting the move.`;
+};
+
+const buildAssistantDetectionBrief = (events: any[], detailed: boolean) => {
+    const recentEvents = events || [];
+    const visibleEvents = recentEvents.slice(0, detailed ? 12 : 7);
+    const highSeverity = recentEvents.filter((event: any) => event?.severity === 'High').length;
+    const mediumSeverity = recentEvents.filter((event: any) => event?.severity === 'Medium').length;
+    const eventTypes = new Map<string, number>();
+
+    for (const event of recentEvents) {
+        const type = String(event?.eventType || 'Unusual Activity');
+        eventTypes.set(type, (eventTypes.get(type) || 0) + 1);
+    }
+
+    const typeSummary = [...eventTypes.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([type, count]) => `${type}: ${count}`)
+        .join(', ');
+
+    return [
+        `I found ${recentEvents.length} recent Detection Engine event${recentEvents.length === 1 ? '' : 's'} in the stored feed.`,
+        `Risk mix: ${highSeverity} High, ${mediumSeverity} Medium, ${Math.max(0, recentEvents.length - highSeverity - mediumSeverity)} lower/other severity.`,
+        typeSummary ? `Main patterns: ${typeSummary}.` : '',
+        '',
+        detailed ? 'What those signals mean in plain English' : 'Recent highlights',
+        ...visibleEvents.map((event: any, index: number) => detailed
+            ? `${index + 1}. ${explainAssistantDetectionImplication(event)}`
+            : `${index + 1}. ${formatAssistantDetectionLine(event)}`
+        ),
+        recentEvents.length > visibleEvents.length
+            ? `I summarized the first ${visibleEvents.length}; there are ${recentEvents.length - visibleEvents.length} more stored events behind that.`
+            : '',
+        '',
+        detailed
+            ? 'Beginner takeaway: treat Detection events as attention signals, not buy or sell commands. High severity means slow down and check liquidity, holder concentration, wallet activity, and Safe Scan before making a decision.'
+            : 'Ask me to explain further if you want the beginner-friendly meaning behind these events.'
+    ].filter(Boolean).join('\n');
+};
+
 type AssistantEntityResolution = {
     kind: 'token' | 'wallet' | 'unknown';
     confidence: 'high' | 'medium' | 'low';
@@ -477,6 +541,11 @@ const withAssistantTimeout = async <T>(promise: Promise<T>, timeoutMs: number, f
         if (timeoutId) clearTimeout(timeoutId);
     }
 };
+
+const buildAssistantTimeoutResponse = (message: string) => ({
+    answer: buildLocalConversationResponse(message),
+    tool: 'conversation'
+});
 
 const matchesAssistantTokenEvent = (event: any, addressOrQuery: string, chain?: string) => {
     const query = String(addressOrQuery || '').toLowerCase();
@@ -625,8 +694,8 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
     if (resolution.kind !== 'token') {
         return {
             answer: [
-                `I could not resolve "${query}" as a token from the app data I can access.`,
-                resolution.reason || 'Try a contract address, ticker, or exact token name from Atlaix.'
+                `I could not find a clean token match for "${query}" in the data I can reach right now.`,
+                resolution.reason || 'Send me the contract address, ticker, or exact token name and I will try again.'
             ].join('\n'),
             tool: 'get_token_deep_brief',
             data: { resolution },
@@ -673,7 +742,7 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
     const answer = [
         `Atlaix Brief: ${tokenLabel}`,
         '',
-        'Current read',
+        'Here is what I am seeing',
         `${tokenLabel} is on ${normalizeAssistantChainLabel(tokenChain)} at ${formatAssistantPrice(token?.price)}. 24h move: ${safeAssistantText(token?.h24)}. Volume: ${safeAssistantText(token?.volume24h, '$0')}. Liquidity: ${safeAssistantText(token?.liquidity, '$0')}. Market cap: ${safeAssistantText(token?.cap, '$0')}.`,
         '',
         'Liquidity and market quality',
@@ -682,24 +751,24 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
         'Recent activity',
         recentEvents.length
             ? recentEvents.map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionLine(event)}`).join('\n')
-            : 'No matching Detection Engine event is currently stored for this token.',
+            : 'I do not see a matching Detection Engine event stored for this token yet.',
         recentActivities.length
             ? recentActivities.map((activity: any, index: number) => `${index + 1}. ${activity.title}: ${activity.description} (${compactUsd(activity.usdValue)}).`).join('\n')
-            : 'No reportable whale/impact activity is currently stored for this token.',
+            : 'I do not see stored whale or impact activity for this token yet.',
         '',
         'Risk picture',
         safeError
-            ? `Safe Scan context is unavailable right now: ${safeError}`
+            ? `I could not pull Safe Scan context right now: ${safeError}`
             : safeScan
                 ? `Risk level: ${(safeScan as any).riskLevel} with ${(safeScan as any).confidence} confidence. Coordinated supply estimate: ${Number((safeScan as any).coordinatedSupplyPct || 0).toFixed(2)}%. Top 10 holders: ${Number((safeScan as any).top10Pct || 0).toFixed(2)}%.`
-                : 'Safe Scan context was not available for this token.',
+                : 'Safe Scan context is not available for this token yet.',
         riskReasons.length ? `Main risk reasons: ${riskReasons.join(' ')}` : '',
         '',
         interpretation,
         `Confidence: ${confidence}. Based on ${confidenceBits.length ? confidenceBits.join(', ') : 'limited accessible app data'}.`,
         '',
-        'Suggested next moves',
-        'Open the token page for chart context, run or review Safe Scan for holder/supply risk, and set an alert if you want Atlaix to watch liquidity, price, or whale movement.'
+        'What I would do next',
+        'Open the token page for chart context, run Safe Scan for holder and supply risk, and set an alert if you want me to help keep an eye on liquidity, price, or whale movement.'
     ].filter((line) => line !== '').join('\n');
 
     const params = new URLSearchParams({ address: tokenAddress, chain: tokenChain });
@@ -733,7 +802,7 @@ const buildWalletDeepBrief = async (address: string, chain: string) => {
     const resolution = await resolveAssistantEntity(address, chain, 'wallet');
     if (!resolution.address) {
         return {
-            answer: 'I can analyze a wallet, but I need a valid EVM or Solana wallet address first.',
+            answer: 'I can take a look at that wallet. Send me a valid EVM or Solana wallet address first.',
             tool: 'get_wallet_deep_brief',
             data: { resolution },
             actions: [{ label: 'Open Wallet Tracker', href: '/wallet', kind: 'navigate' }]
@@ -754,22 +823,22 @@ const buildWalletDeepBrief = async (address: string, chain: string) => {
         const answer = [
             `Wallet Brief: ${resolution.address}`,
             '',
-            'Current read',
+            'Here is what I am seeing',
             `Tracked value: ${portfolio.netWorth || '$0'} across ${activePositions} active position${activePositions === 1 ? '' : 's'} on ${portfolioChain}.`,
             matchedSmartWallet
                 ? `Smart Money status: tracked as ${Array.isArray(matchedSmartWallet.categories) ? matchedSmartWallet.categories.join(', ') : 'Smart Money'}.`
-                : 'Smart Money status: not currently listed in the global smart-money wallet set.',
+                : 'Smart Money status: I do not see it in the global smart-money wallet set yet.',
             '',
             'Top holdings',
             topAssets.length
                 ? topAssets.map((asset: any, index: number) => `${index + 1}. ${asset.symbol || 'TOKEN'}: ${asset.value || '$0'} (${asset.balance || '0'} tokens).`).join('\n')
-                : 'No priced holdings were returned by the accessible portfolio providers.',
+                : 'The accessible portfolio providers did not return priced holdings for this wallet yet.',
             '',
             'Behavior read',
             `${profitableAssets} position${profitableAssets === 1 ? '' : 's'} currently show positive PnL where PnL is available. Recent activity data is ${portfolio.recentActivity?.length ? 'available' : 'not currently populated'} in this wallet view.`,
             '',
-            'Suggested next moves',
-            'Open the wallet profile, track the wallet if it matters to you, or inspect the top token positions one by one for liquidity and risk.'
+            'What I would do next',
+            'Open the wallet profile, track it if it matters to you, or inspect the top positions one by one for liquidity and risk.'
         ].join('\n');
 
         return {
@@ -783,7 +852,7 @@ const buildWalletDeepBrief = async (address: string, chain: string) => {
         };
     } catch (error) {
         return {
-            answer: `I found the wallet address, but the portfolio providers could not return a clean wallet brief right now. ${error instanceof Error ? error.message : ''}`.trim(),
+            answer: `I found the wallet address, but the portfolio providers could not give me a clean wallet brief right now. ${error instanceof Error ? error.message : ''}`.trim(),
             tool: 'get_wallet_deep_brief',
             data: { resolution },
             actions: [{ label: 'Open Wallet Tracker', href: `/wallet/${encodeURIComponent(resolution.address)}?chain=${encodeURIComponent(portfolioChain)}`, kind: 'navigate' }]
@@ -820,8 +889,8 @@ const buildPlatformUpdateBrief = async () => {
             `Runner: ${smartStatus.enabled ? 'enabled' : 'disabled'}. Last run: ${smartStatus.lastRunStatus || 'not run yet'}. Rules checked: ${smartStatus.rulesChecked || 0}. Triggers created: ${smartStatus.triggersCreated || 0}.`,
             smartStatus.lastError ? `Latest alert issue: ${smartStatus.lastError}` : '',
             '',
-            'Suggested next moves',
-            'Review high-severity Detection Engine events first, then set alerts for tokens where liquidity or whale movement matters.'
+            'What I would do next',
+            'Start with the high-severity Detection Engine events, then set alerts for tokens where liquidity or whale movement matters.'
         ].filter(Boolean).join('\n'),
         tool: 'get_platform_updates',
         data: { events: topEvents, smartStatus, market: topMarketTokens },
@@ -884,8 +953,8 @@ const summarizeSafeScanReport = (report: any) => {
 };
 
 const buildAssistantSystemPrompt = () => [
-    'You are the Atlaix in-app AI assistant router.',
-    'Choose exactly one approved tool for the user request.',
+    'You are the Atlaix in-app AI assistant router. Be calm, friendly, and helpful while choosing the right tool.',
+    'Choose exactly one approved tool for the user request. Do this quietly and do not expose routing logic to the user.',
     'You cannot modify source code, change app architecture, access secrets, run shell commands, or invent app data.',
     'Write actions must be confirmation-first. For alerts, choose prepare_alert_setup, not a direct save.',
     'Return only valid JSON with keys: tool, address, chain, query, responseStyle.',
@@ -903,8 +972,10 @@ const buildAssistantSystemPrompt = () => [
 ].join('\n');
 
 const buildAssistantChatPrompt = () => [
-    'You are Atlaix AI, a warm, sharp, conversational assistant inside the Atlaix crypto intelligence platform.',
-    'Answer normal questions directly first. Be chatty when the user is casual, concise when they are operational, and never sound like a rigid command menu.',
+    'You are Atlaix AI, a friendly, sharp, conversational assistant inside the Atlaix crypto intelligence platform.',
+    'Sound like a helpful teammate, not a compliance notice or command menu. Be relaxed, plain-spoken, and lightly conversational.',
+    'Answer normal questions directly first. If the user is casual, be warm and easygoing. If they are operational, stay concise but still human.',
+    'When data is missing, say it gently and offer the most useful next step instead of sounding like a hard error.',
     'Use plain text with no emoji and no decorative formatting.',
     'When it is natural, connect the conversation back to useful Atlaix capabilities: Detection Engine updates, Safe Scan token risk summaries, token activity/whale movement review, and Smart Alert preparation.',
     'Do not force Atlaix features into every answer. Use a light touch: one helpful bridge is enough when relevant.',
@@ -1056,8 +1127,18 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         }
     }
 
-    if (/\bdetection\b|\bupdate\b|\bnew\b|\bengine\b|\balpha\b/.test(lower)) {
-        return { tool: 'get_detection_updates' };
+    if (/\bdetection\b|\bupdate\b|\bnew\b|\bengine\b|\balpha\b|\bhidden\b|\brecent events?\b/.test(lower)) {
+        return {
+            tool: 'get_detection_updates',
+            responseStyle: /\b(explain|further|beginner|simple|plain|hidden|all)\b/.test(lower) ? 'detailed' : 'brief'
+        };
+    }
+
+    if (/\b(explain further|explain more|what does that mean|break it down|beginner|simple terms|plain english)\b/.test(lower)) {
+        const recentAssistantText = history.slice(-4).map((item) => item.text || '').join(' ').toLowerCase();
+        if (recentAssistantText.includes('detection engine') || recentAssistantText.includes('detection_updates')) {
+            return { tool: 'get_detection_updates', responseStyle: 'detailed' };
+        }
     }
 
     if (/\balert status\b|\bsmart alert status\b|\brunner\b/.test(lower)) {
@@ -1114,6 +1195,13 @@ const generateAssistantConversation = async (message: string, history: Assistant
 
 const buildLocalConversationResponse = (message: string) => {
     const lower = message.toLowerCase();
+    if (/\b(bit\s*coin|bitcoin|btc|coin|token)\b/.test(lower) && /\b(up|rise|pump|going|today|price|green|bull|bullish|bear|bearish|drop|down)\b/.test(lower)) {
+        return [
+            'I can help think through it, but I would not call a 10% move from vibes alone.',
+            'For a real read, I need live context: current price action, liquidity, volume, recent detection signals, and any whale movement. If you mean BTC, ask me for a BTC overview or give me the exact token/contract and I will pull the Atlaix data I can reach.'
+        ].join('\n');
+    }
+
     if (/\b(today|date|day)\b/.test(lower)) {
         const today = new Date().toLocaleDateString('en-US', {
             weekday: 'long',
@@ -1207,7 +1295,9 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
 
     if (request.tool === 'get_detection_updates') {
         const events = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
-        const topEvents = (events || []).slice(0, 5);
+        const allEvents = events || [];
+        const detailed = request.responseStyle === 'detailed';
+        const topEvents = allEvents.slice(0, detailed ? 12 : 7);
         actions.push({ label: 'Open Detection Engine', href: '/detection' });
 
         if (!topEvents.length) {
@@ -1219,17 +1309,16 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
         }
 
         return {
-            answer: [
-                `I found ${topEvents.length} recent Detection Engine updates:`,
-                ...topEvents.map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionLine(event)}`)
-            ].join('\n'),
+            answer: buildAssistantDetectionBrief(allEvents, detailed),
             tool: 'detection_updates',
             data: {
+                totalEvents: allEvents.length,
                 events: topEvents.map((event: any) => ({
                     token: event?.token?.ticker || event?.token?.name,
                     eventType: event?.eventType,
                     severity: event?.severity,
                     score: event?.score,
+                    implication: detailed ? explainAssistantDetectionImplication(event) : undefined,
                     href: eventTokenHref(event)
                 }))
             },
@@ -2150,7 +2239,11 @@ const server = createServer(async (request, response) => {
             }
 
             const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
-            const result = await buildAssistantResponse(message, history);
+            const result = await withAssistantTimeout(
+                buildAssistantResponse(message, history),
+                22_000,
+                buildAssistantTimeoutResponse(message)
+            );
             json(response, 200, {
                 id: randomUUID(),
                 role: 'assistant',
