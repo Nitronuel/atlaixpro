@@ -144,7 +144,7 @@ export const TokenDetails: React.FC = () => {
     const [chartExpanded, setChartExpanded] = useState(false);
     const [visibleWalletRows, setVisibleWalletRows] = useState(8);
     const [visibleHolderRows, setVisibleHolderRows] = useState(10);
-    const [marketPanelTab, setMarketPanelTab] = useState<'activity' | 'holders'>('activity');
+    const [marketPanelTab, setMarketPanelTab] = useState<'activity' | 'holders'>('holders');
     const [compactChartLoaded, setCompactChartLoaded] = useState(false);
     const [activityRefreshing, setActivityRefreshing] = useState(false);
     const lastActivityLoadKeyRef = useRef('');
@@ -280,6 +280,7 @@ export const TokenDetails: React.FC = () => {
 
     useEffect(() => {
         if (!enrichedData?.baseToken.address) return;
+        if (marketPanelTab !== 'activity') return;
 
         const activityKey = [
             enrichedData.chainId,
@@ -290,7 +291,7 @@ export const TokenDetails: React.FC = () => {
 
         if (lastActivityLoadKeyRef.current === activityKey) return;
         void loadTokenActivity(enrichedData);
-    }, [enrichedData?.baseToken.address, enrichedData?.chainId, enrichedData?.pairAddress, enrichedData?.priceUsd, loadTokenActivity]);
+    }, [enrichedData?.baseToken.address, enrichedData?.chainId, enrichedData?.pairAddress, enrichedData?.priceUsd, loadTokenActivity, marketPanelTab]);
 
     const tokenSymbol = enrichedData?.baseToken.symbol || 'TOKEN';
     const imageUrl = enrichedData?.info?.imageUrl || `https://ui-avatars.com/api/?name=${tokenSymbol}&background=042f2e&color=fff`;
