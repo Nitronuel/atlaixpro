@@ -245,6 +245,7 @@ export interface EnrichedTokenData {
     priceUsd: string;
     liquidity: { usd: number };
     fdv: number;
+    marketCap?: number;
     volume: { h24: number; m5: number; h1: number; h6: number };
     priceChange: { m5: number; h1: number; h6: number; h24: number };
     info: { imageUrl?: string; websites?: any[]; socials?: any[] };

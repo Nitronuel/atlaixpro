@@ -37,6 +37,7 @@ const parseCurrency = (val: string | number) => {
 interface FeedFilters {
     visibleCount: string;
     chain: string;
+    sector: string;
     eventType: string;
     marketCapMin: string;
     marketCapMax: string;
@@ -51,6 +52,7 @@ interface FeedFilters {
 const DEFAULT_FEED_FILTERS: FeedFilters = {
     visibleCount: 'all',
     chain: 'all',
+    sector: 'all',
     eventType: 'all',
     marketCapMin: '',
     marketCapMax: '',
@@ -249,6 +251,54 @@ const EVENT_FILTER_OPTIONS: Array<{ value: 'all' | AlphaGauntletEventType; label
 ];
 
 const EVENT_BADGE_STYLE = 'border-border bg-card-hover text-text-medium';
+
+const SECTOR_FILTER_OPTIONS = [
+    { value: 'all', label: 'All Sectors' },
+    { value: 'ai', label: 'AI' },
+    { value: 'meme', label: 'Meme' },
+    { value: 'rwa', label: 'RWA' },
+    { value: 'layer-1', label: 'Layer 1' },
+    { value: 'defi', label: 'DeFi' },
+    { value: 'gaming', label: 'Gaming' },
+    { value: 'depin', label: 'DePIN' },
+    { value: 'infra', label: 'Infrastructure' }
+];
+
+const SECTOR_KEYWORDS: Record<string, string[]> = {
+    ai: ['AI', 'AGENT', 'AGENTS', 'AIXBT', 'BOT', 'BOTS', 'COMPUTE', 'GPU', 'ROBOT', 'VIRTUAL', 'ML', 'LLM', 'DATA'],
+    meme: ['MEME', 'DOGE', 'SHIB', 'PEPE', 'WIF', 'BONK', 'FLOKI', 'MOG', 'POPCAT', 'MEW', 'BRETT', 'WOJAK', 'CHAD', 'CAT', 'DOG', 'FROG', 'APE', 'TRUMP', 'MAGA', 'MOODENG', 'NEIRO', 'FART', 'FWOG'],
+    rwa: ['RWA', 'REAL WORLD', 'ONDO', 'PENDLE', 'TOKENIZED', 'CREDIT', 'TREASURY', 'BOND', 'REAL ESTATE', 'ESTATE'],
+    'layer-1': ['LAYER 1', 'L1', 'SOL', 'ETH', 'BTC', 'BNB', 'AVAX', 'SUI', 'APT', 'SEI', 'TRX', 'TON', 'NEAR', 'ATOM', 'INJ'],
+    defi: ['DEFI', 'DEX', 'SWAP', 'YIELD', 'FARM', 'LEND', 'LENDING', 'STAKE', 'STAKING', 'DAO', 'AAVE', 'UNI', 'CAKE', 'JUP', 'RAY', 'AERO', 'ORCA'],
+    gaming: ['GAME', 'GAMING', 'PLAY', 'METAVERSE', 'NFT', 'CASINO', 'BET', 'SPORT'],
+    depin: ['DEPIN', 'NODE', 'CLOUD', 'STORAGE', 'WIRELESS', 'SENSOR', 'RENDER', 'HNT', 'AKT'],
+    infra: ['INFRA', 'PROTOCOL', 'CHAIN', 'BRIDGE', 'ORACLE', 'INDEX', 'RPC', 'NETWORK', 'PAY', 'WALLET', 'SECURITY']
+};
+
+const normalizeSectorText = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+
+const tokenMatchesSectorKeyword = (terms: string[], normalizedText: string, keyword: string) => {
+    const normalizedKeyword = normalizeSectorText(keyword);
+    if (!normalizedKeyword) return false;
+
+    if (normalizedKeyword.includes(' ')) {
+        return ` ${normalizedText} `.includes(` ${normalizedKeyword} `);
+    }
+
+    if (normalizedKeyword.length <= 3) {
+        return terms.some((term) => term === normalizedKeyword || term.startsWith(normalizedKeyword));
+    }
+
+    return terms.some((term) => term === normalizedKeyword || term.includes(normalizedKeyword));
+};
+
+const classifyFeedSector = (coin: MarketCoin) => {
+    const normalizedText = normalizeSectorText(`${coin.ticker || ''} ${coin.name || ''}`);
+    const terms = normalizedText.split(/\s+/).filter(Boolean);
+    return SECTOR_FILTER_OPTIONS
+        .filter((option) => option.value !== 'all')
+        .find((option) => SECTOR_KEYWORDS[option.value]?.some((keyword) => tokenMatchesSectorKeyword(terms, normalizedText, keyword)))?.value || 'other';
+};
 
 const getFeedEventLabel = (coin: MarketCoin, eventType?: AlphaGauntletEventType) => {
     if (eventType) return eventType;
@@ -512,6 +562,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         return marketData.filter((coin) => {
             if (!isLiveAlphaEligible(coin)) return false;
             if (feedFilters.chain !== 'all' && coin.chain !== feedFilters.chain) return false;
+            if (feedFilters.sector !== 'all' && classifyFeedSector(coin) !== feedFilters.sector) return false;
 
             if (feedFilters.eventType !== 'all') {
                 const event = AlphaGauntletService.qualifyToken(coin);
@@ -1272,6 +1323,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                         { value: 'all', label: 'All Networks' },
                                         ...chainOptions.map((chain) => ({ value: chain, label: chain }))
                                     ]}
+                                />
+                                <FilterSelect
+                                    label="Sector"
+                                    value={draftFeedFilters.sector}
+                                    onChange={(value) => updateDraftFilter('sector', value)}
+                                    options={SECTOR_FILTER_OPTIONS}
                                 />
                                 <FilterSelect
                                     label="Event Type"

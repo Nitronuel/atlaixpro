@@ -154,6 +154,7 @@ interface DexPair {
     priceChange: { h1: number; h24: number; h6: number; };
     liquidity?: { usd: number; };
     fdv?: number;
+    marketCap?: number;
     volume: { h24: number; h24Buy?: number; h24Sell?: number; buy?: number; sell?: number; buys?: number; sells?: number; };
     txns: { h24: { buys: number; sells: number; } };
     pairCreatedAt?: number;
@@ -1079,7 +1080,7 @@ export const DatabaseService = {
             h1: `${(priceChangeH1).toFixed(2)}%`,
             h24: `${(priceChangeH24).toFixed(2)}%`,
             d7: `${(pair.priceChange?.h6 || 0).toFixed(2)}%`,
-            cap: formatCurrency(pair.fdv || pair.liquidity?.usd || 0),
+            cap: formatCurrency(pair.marketCap || pair.fdv || pair.liquidity?.usd || 0),
             liquidity: formatCurrency(pair.liquidity?.usd || 0),
             volume24h: formatCurrency(volume24h),
             dexBuys: buys.toString(),

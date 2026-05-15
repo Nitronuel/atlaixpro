@@ -295,6 +295,7 @@ export const TokenDetails: React.FC = () => {
     const tokenSymbol = enrichedData?.baseToken.symbol || 'TOKEN';
     const imageUrl = enrichedData?.info?.imageUrl || `https://ui-avatars.com/api/?name=${tokenSymbol}&background=042f2e&color=fff`;
     const currentPrice = formatPrice(enrichedData?.priceUsd);
+    const marketCap = enrichedData?.marketCap || enrichedData?.fdv || 0;
     const h24Change = enrichedData?.priceChange?.h24 || 0;
     const priceNumber = parseFloat(enrichedData?.priceUsd || '0') || 0;
     const high24 = priceNumber * (1 + Math.max(h24Change, 1) / 100);
@@ -312,9 +313,11 @@ export const TokenDetails: React.FC = () => {
     const topHolderRows = (enrichedData?.topHolders || [])
         .map((holder) => {
             const percent = clampPercent(Number(holder.percent) || 0);
-            const amount = Number.isFinite(Number(holder.amount))
-                ? Number(holder.amount)
-                : ((enrichedData?.totalSupply || 0) * percent) / 100;
+            const totalSupply = enrichedData?.totalSupply || 0;
+            const rawAmount = Number(holder.amount);
+            const amount = Number.isFinite(rawAmount) && (!totalSupply || rawAmount <= totalSupply * 1.05)
+                ? rawAmount
+                : (totalSupply * percent) / 100;
             return {
                 address: holder.address,
                 percent,
@@ -532,19 +535,20 @@ export const TokenDetails: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:w-[680px]">
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:w-[780px]">
                         {[
                             { label: 'Price (USD)', value: currentPrice, large: true, change: h24Change },
+                            { label: 'Market Cap', value: formatCompactNumber(marketCap, '$') },
                             { label: '24H High', value: formatPrice(high24) },
                             { label: '24H Low', value: formatPrice(low24) },
                             { label: '24H Volume', value: formatCompactNumber(volume24h, '$') }
                         ].map((metric, index) => (
-                            <div key={metric.label} className={`border-border/70 ${index > 0 ? 'lg:border-l lg:pl-6' : ''}`}>
+                            <div key={metric.label} className={`min-w-0 border-border/70 ${index > 0 ? 'lg:border-l lg:pl-5' : ''}`}>
                                 <div className="text-[10px] font-bold uppercase tracking-wide text-text-medium">{metric.label}</div>
-                                <div className="mt-2 flex flex-wrap items-baseline gap-3">
-                                    <span className={`${metric.large ? 'text-3xl' : 'text-lg'} font-bold text-text-light`}>{metric.value}</span>
+                                <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                    <span className={`${metric.large ? 'text-2xl lg:text-[26px]' : 'text-base lg:text-lg'} min-w-0 break-words font-bold leading-tight text-text-light`}>{metric.value}</span>
                                     {typeof metric.change === 'number' && (
-                                        <span className={`text-sm font-black ${metric.change >= 0 ? 'text-primary-green' : 'text-primary-red'}`}>
+                                        <span className={`text-xs font-black ${metric.change >= 0 ? 'text-primary-green' : 'text-primary-red'}`}>
                                             {metric.change >= 0 ? '+' : ''}{metric.change.toFixed(2)}%
                                         </span>
                                     )}

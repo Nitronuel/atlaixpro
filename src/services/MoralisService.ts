@@ -87,6 +87,37 @@ const normalizeHolderAmount = (value: unknown) => {
     return numeric;
 };
 
+const normalizeHolderAddress = (holder: any) =>
+    String(
+        holder.owner_address ||
+        holder.address ||
+        holder.wallet_address ||
+        holder.holder_address ||
+        holder.ownerAddress ||
+        holder.walletAddress ||
+        ''
+    );
+
+const normalizeHolderRows = (rows: any[]) => rows.slice(0, 50).map((holder: any) => ({
+    address: normalizeHolderAddress(holder),
+    percent: normalizeHolderPercent(
+        holder.percentage_relative_to_total_supply ??
+        holder.percentage ??
+        holder.percent ??
+        holder.balance_percentage ??
+        holder.ownership_percentage ??
+        0
+    ),
+    amount: normalizeHolderAmount(
+        holder.balance_formatted ??
+        holder.balanceFormatted ??
+        holder.token_amount ??
+        holder.amount_formatted ??
+        holder.amountFormatted ??
+        holder.amount
+    )
+})).filter((holder: { address: string }) => holder.address);
+
 const mapChainToMoralisEVM = (chain: string) => {
     switch (chain.toLowerCase()) {
         case 'ethereum': return '0x1';
@@ -146,6 +177,19 @@ export const MoralisService = {
         const headers = { 'accept': 'application/json', 'X-API-Key': MORALIS_API_KEY };
 
         try {
+            const holdersUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/holders?chain=${hexChain}&limit=50`;
+            const holdersResponse = await fetchProvider('moralis', holdersUrl, { headers });
+            if (holdersResponse.ok) {
+                const holders = await holdersResponse.json();
+                const result = Array.isArray(holders.result) ? holders.result : Array.isArray(holders.holders) ? holders.holders : Array.isArray(holders) ? holders : [];
+                const holderCount = Number(holders.total ?? holders.totalHolders ?? holders.total_holders ?? result.length);
+                const topHolders = normalizeHolderRows(result);
+
+                if (topHolders.length > 0) {
+                    return { holderCount: holderCount > 0 ? holderCount : topHolders.length, topHolders };
+                }
+            }
+
             const statsUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/holder-stats?chain=${hexChain}`;
             const statsResponse = await fetchProvider('moralis', statsUrl, { headers });
 
@@ -160,50 +204,10 @@ export const MoralisService = {
                     0
                 );
                 const rawTopHolders = stats.topHolders || stats.top_holders || stats.holderDistribution || stats.holder_distribution || [];
-                let topHolders = Array.isArray(rawTopHolders)
-                    ? rawTopHolders.slice(0, 50).map((holder: any) => ({
-                        address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
-                        percent: normalizeHolderPercent(holder.percentage ?? holder.percent ?? holder.balance_percentage ?? 0),
-                        amount: normalizeHolderAmount(holder.balanceFormatted ?? holder.balance_formatted ?? holder.token_amount ?? holder.amount)
-                    })).filter((holder) => holder.address)
-                    : [];
-
-                if (topHolders.length < 50) {
-                    const holdersUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/holders?chain=${hexChain}&limit=50`;
-                    const holdersResponse = await fetchProvider('moralis', holdersUrl, { headers });
-                    if (holdersResponse.ok) {
-                        const holders = await holdersResponse.json();
-                        const result = Array.isArray(holders.result) ? holders.result : Array.isArray(holders.holders) ? holders.holders : Array.isArray(holders) ? holders : [];
-                        const holderTopHolders = result.slice(0, 50).map((holder: any) => ({
-                            address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
-                            percent: normalizeHolderPercent(holder.percentage_relative_to_total_supply ?? holder.percentage ?? holder.percent ?? 0),
-                            amount: normalizeHolderAmount(holder.balance_formatted ?? holder.balanceFormatted ?? holder.token_amount ?? holder.amount)
-                        })).filter((holder: { address: string }) => holder.address);
-                        if (holderTopHolders.length > topHolders.length) {
-                            topHolders = holderTopHolders;
-                        }
-                    }
-                }
+                const topHolders = Array.isArray(rawTopHolders) ? normalizeHolderRows(rawTopHolders) : [];
 
                 if (Number.isFinite(holderCount) && holderCount > 0) {
                     return { holderCount, topHolders };
-                }
-            }
-
-            const holdersUrl = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/holders?chain=${hexChain}&limit=50`;
-            const holdersResponse = await fetchProvider('moralis', holdersUrl, { headers });
-            if (holdersResponse.ok) {
-                const holders = await holdersResponse.json();
-                const result = Array.isArray(holders.result) ? holders.result : Array.isArray(holders.holders) ? holders.holders : Array.isArray(holders) ? holders : [];
-                const holderCount = Number(holders.total ?? holders.totalHolders ?? holders.total_holders ?? result.length);
-                const topHolders = result.slice(0, 50).map((holder: any) => ({
-                    address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
-                    percent: normalizeHolderPercent(holder.percentage_relative_to_total_supply ?? holder.percentage ?? holder.percent ?? 0),
-                    amount: normalizeHolderAmount(holder.balance_formatted ?? holder.balanceFormatted ?? holder.token_amount ?? holder.amount)
-                })).filter((holder: { address: string }) => holder.address);
-
-                if (topHolders.length > 0) {
-                    return { holderCount: holderCount > 0 ? holderCount : topHolders.length, topHolders };
                 }
             }
 
@@ -213,11 +217,7 @@ export const MoralisService = {
             const owners = await ownersResponse.json();
             const result = Array.isArray(owners.result) ? owners.result : Array.isArray(owners) ? owners : [];
             const holderCount = Number(owners.total ?? owners.totalHolders ?? owners.total_holders ?? result.length);
-            const topHolders = result.slice(0, 50).map((holder: any) => ({
-                address: String(holder.owner_address || holder.address || holder.wallet_address || ''),
-                percent: normalizeHolderPercent(holder.percentage_relative_to_total_supply ?? holder.percentage ?? holder.percent ?? 0),
-                amount: normalizeHolderAmount(holder.balance_formatted ?? holder.balanceFormatted ?? holder.token_amount ?? holder.amount)
-            })).filter((holder: { address: string }) => holder.address);
+            const topHolders = normalizeHolderRows(result);
 
             return holderCount > 0 ? { holderCount, topHolders } : null;
         } catch (error) {
