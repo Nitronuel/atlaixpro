@@ -145,6 +145,7 @@ type AssistantConversationMessage = {
 
 type AssistantToolName =
     | 'conversation'
+    | 'unsupported_capability'
     | 'get_token_deep_brief'
     | 'get_wallet_deep_brief'
     | 'get_platform_updates'
@@ -752,6 +753,29 @@ const buildAssistantTimeoutResponse = (message: string) => ({
     tool: 'conversation'
 });
 
+const buildUnsupportedCapabilityResponse = () => ({
+    answer: [
+        'I am not yet able to help you do that from inside Atlaix.',
+        'Very soon, in upcoming updates, I will be able to assist with carrying out that kind of task. For now, I can still help with token research, Safe Scan risk checks, Detection Engine updates, wallet reads, token activity, and Smart Alert preparation.',
+        'Let us steer this back into something I can do safely: send me a token, wallet, or alert goal and I will help from there.'
+    ].join('\n'),
+    tool: 'unsupported_capability',
+    actions: [
+        { label: 'Open Safe Scan', href: '/safe-scan', kind: 'navigate' },
+        { label: 'Open Detection Engine', href: '/detection', kind: 'navigate' },
+        { label: 'Open Smart Alerts', href: '/smart-alerts', kind: 'navigate' }
+    ] satisfies AssistantChatAction[]
+});
+
+const isUnsupportedAssistantCapabilityRequest = (message: string) => {
+    const lower = message.toLowerCase();
+    const asksToAct = /\b(can you|please|help me|i want you to|make|create|build|edit|change|delete|remove|deploy|redeploy|publish|push|commit|merge|open a pr|run|execute|install|connect|withdraw|swap|buy|sell|trade|send|transfer|bridge|stake|unstake|claim|airdrop|mint)\b/.test(lower);
+    const outOfProductScope = /\b(source code|codebase|backend|frontend|database schema|migration|env|secret|api key|deployment|netlify|railway|supabase table|github|pull request|terminal|shell|server file|wallet transaction|private key|seed phrase|sign transaction|connect wallet|login to|password|email|telegram|discord|twitter|x account|post on|send message|dm\b)\b/.test(lower);
+    const tradingAction = /\b(buy|sell|swap|trade|transfer|send|bridge|withdraw|deposit|stake|unstake|claim|mint)\b/.test(lower) && /\b(token|coin|crypto|eth|sol|usdc|wallet|funds?)\b/.test(lower);
+
+    return (asksToAct && outOfProductScope) || tradingAction;
+};
+
 const getAssistantDetectionEventKey = (event: any) => {
     const token = event?.token || {};
     return [
@@ -1253,6 +1277,7 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
         const parsed = JSON.parse(cleaned);
         const allowed = new Set<AssistantToolName>([
             'conversation',
+            'unsupported_capability',
             'get_token_deep_brief',
             'get_wallet_deep_brief',
             'get_platform_updates',
@@ -1318,6 +1343,10 @@ const chooseAssistantToolWithModel = async (
 };
 
 const chooseAssistantToolLocally = (message: string, history: AssistantConversationMessage[] = []): AssistantToolRequest => {
+    if (isUnsupportedAssistantCapabilityRequest(message)) {
+        return { tool: 'unsupported_capability' };
+    }
+
     const lower = message.toLowerCase();
     const address = extractAssistantAddress(message) || (/\b(that|this)\s+token\b/i.test(message) ? getRecentAssistantAddress(history) : '');
     const tokenQuery = extractAssistantTokenQuery(message, history);
@@ -1439,6 +1468,8 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
 
 const chooseAssistantTool = async (message: string, history: AssistantConversationMessage[] = []) => {
     const localChoice = chooseAssistantToolLocally(message, history);
+    if (localChoice.tool === 'unsupported_capability') return localChoice;
+
     const explicitTokenQuery = extractAssistantAddress(message) || message.match(/\$([a-zA-Z][a-zA-Z0-9]{1,15})\b/)?.[1] || (hasExplicitAssistantTokenQuery(message) ? extractAssistantTokenQuery(message, []) : '');
     if (localChoice.eventIntent && !explicitTokenQuery) return localChoice;
 
@@ -1579,6 +1610,10 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     const chain = request.chain || (address ? inferAssistantChain(message, address) : '');
     const actions: AssistantChatAction[] = [];
 
+    if (request.tool === 'unsupported_capability') {
+        return buildUnsupportedCapabilityResponse();
+    }
+
     if (request.tool === 'get_token_deep_brief') {
         const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
         if (!tokenQuery) {
@@ -1627,7 +1662,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             answer: summarizeSafeScanReport(report),
             tool: 'run_safe_scan',
             data: {
-                tokenAddress: activityAddress,
+                tokenAddress: address,
                 chain: safeScanChain,
                 tokenSymbol: report?.tokenSymbol,
                 riskLevel: (report as any)?.bundleIntelligence?.riskLevel,

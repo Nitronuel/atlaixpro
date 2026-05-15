@@ -338,12 +338,6 @@ export const SafeScan: React.FC = () => {
                         <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
                             {chainLabel}
                         </div>
-                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
-                            Moralis top 300
-                        </div>
-                        <div className="rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8FA0BF]">
-                            Lite scan
-                        </div>
                     </div>
                     <div className="mb-2 flex min-w-0 flex-wrap items-center gap-4">
                         <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-card text-lg font-black text-primary-green">

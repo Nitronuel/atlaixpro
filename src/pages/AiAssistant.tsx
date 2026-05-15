@@ -4,6 +4,7 @@ import {
     AlertTriangle,
     Activity,
     ArrowRight,
+    Bell,
     CheckCircle2,
     Loader2,
     Megaphone,
@@ -144,6 +145,7 @@ const toolLabel = (tool?: string) => {
     if (tool === 'get_token_activity') return 'Token Activity';
     if (tool === 'get_smart_alert_status') return 'Smart Alerts';
     if (tool === 'alert_setup') return 'Smart Alerts';
+    if (tool === 'unsupported_capability') return 'Coming Soon';
     if (tool === 'error') return 'Needs Attention';
     return 'Atlaix AI';
 };
@@ -155,6 +157,7 @@ const toolIcon = (tool?: string) => {
     if (tool === 'run_safe_scan') return <ShieldCheck size={15} />;
     if (tool === 'detection_updates') return <CheckCircle2 size={15} />;
     if (tool === 'get_smart_alert_status' || tool === 'alert_setup') return <Bell size={15} />;
+    if (tool === 'unsupported_capability') return <AlertTriangle size={15} />;
     if (tool === 'error') return <AlertTriangle size={15} />;
     return <img src="/logo.png" alt="Atlaix" className="h-4 w-4 object-contain" />;
 };
