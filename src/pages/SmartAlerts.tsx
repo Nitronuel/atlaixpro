@@ -104,7 +104,7 @@ const CONDITION_OPTIONS: Record<SmartAlertType, Array<{ value: SmartAlertConditi
 };
 
 const VALUE_OPTIONS: Partial<Record<SmartAlertType, string[]>> = {
-    Alpha: ['Liquidity Event', 'Accumulation', 'Distribution', 'Market Stress', 'Recovery', 'Unusual Activity'],
+    Alpha: ['Liquidity Event', 'Potential Accumulation', 'Accumulation', 'Potential Distribution', 'Distribution', 'Market Stress', 'Recovery', 'Unusual Activity'],
     Risk: ['Any new risk', 'High', 'Medium', 'Low']
 };
 

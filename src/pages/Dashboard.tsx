@@ -243,7 +243,9 @@ const CHAIN_DEX_VOLUME_IDS = ['solana', 'ethereum', 'base', 'bsc', 'polygon', 'a
 const EVENT_FILTER_OPTIONS: Array<{ value: 'all' | AlphaGauntletEventType; label: string }> = [
     { value: 'all', label: 'All Events' },
     { value: 'Accumulation', label: 'Accumulation' },
+    { value: 'Potential Accumulation', label: 'Potential Accumulation' },
     { value: 'Distribution', label: 'Distribution' },
+    { value: 'Potential Distribution', label: 'Potential Distribution' },
     { value: 'Market Stress', label: 'Market Stress' },
     { value: 'Recovery', label: 'Recovery' },
     { value: 'Liquidity Event', label: 'Liquidity Event' },

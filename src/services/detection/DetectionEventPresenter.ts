@@ -251,7 +251,7 @@ export const buildWatchConditions = (event: AlphaGauntletEvent): DetectionWatchC
     const m = event.metrics;
     const conditions: DetectionWatchCondition[] = [];
 
-    if (event.eventType === 'Accumulation' || event.triggers.includes('Strong Buy Pressure')) {
+    if (event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.triggers.includes('Strong Buy Pressure')) {
         conditions.push({
             label: 'Buyer dominance holds',
             direction: 'bullish',
@@ -284,6 +284,12 @@ export const buildWatchConditions = (event: AlphaGauntletEvent): DetectionWatchC
 
 export const buildDetectionSummary = (eventType: AlphaGauntletEventType, tokenLabel: string, triggerLabels: string[], score: number) => {
     const triggerText = triggerLabels.slice(0, 2).join(' + ').toLowerCase();
+    if (eventType === 'Potential Accumulation') {
+        return `${tokenLabel} is showing early accumulation conditions with ${triggerText || 'buyer activity'} and a ${score} activity score.`;
+    }
+    if (eventType === 'Potential Distribution') {
+        return `${tokenLabel} is showing early distribution risk with ${triggerText || 'seller activity'} and a ${score} activity score.`;
+    }
     return `${tokenLabel} qualified as ${eventType.toLowerCase()} with ${triggerText || 'unusual activity'} and a ${score} activity score.`;
 };
 

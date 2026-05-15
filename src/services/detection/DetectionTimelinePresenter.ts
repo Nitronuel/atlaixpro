@@ -96,9 +96,9 @@ export const buildDetectionTimelineCards = (event: AlphaGauntletEvent): Detectio
         `${event.eventType} Admission`,
         `${tokenLabel} entered the Detection Engine as ${event.eventType} with activity score ${event.score}.`,
         valueBasis,
-        event.eventType === 'Accumulation' || event.eventType === 'Recovery'
+        event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.eventType === 'Recovery'
             ? 'bullish'
-            : event.eventType === 'Distribution' || event.eventType === 'Market Stress'
+            : event.eventType === 'Distribution' || event.eventType === 'Potential Distribution' || event.eventType === 'Market Stress'
                 ? 'bearish'
                 : 'neutral'
     ));

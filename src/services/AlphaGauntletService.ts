@@ -5,6 +5,8 @@ import { isExcludedAlphaToken } from '../utils/tokenFilters';
 
 const OVERVIEW_THRESHOLD = 70;
 const DETECTION_THRESHOLD = 65;
+const ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD = 50;
+const POTENTIAL_ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD = 35;
 
 const parseMetric = (value: string | number | undefined): number => {
     if (typeof value === 'number') return value;
@@ -76,21 +78,26 @@ const classifyEvent = (
     volumeFlowRatio: number,
     netFlow: number
 ): AlphaGauntletEventType => {
-    const strongPositiveMomentum = priceChange24h >= 12;
-    const strongNegativeMomentum = priceChange24h <= -12;
+    const confirmedAccumulationMove = priceChange24h >= ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
+    const confirmedDistributionMove = priceChange24h <= -ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
+    const potentialAccumulationMove = priceChange24h >= POTENTIAL_ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
+    const potentialDistributionMove = priceChange24h <= -POTENTIAL_ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
+    const recoveryMomentum = priceChange24h >= 12;
     const buyVolumeLeads = volumeFlowRatio >= 1.02 || netFlow > 0;
     const sellVolumeLeads = volumeFlowRatio <= 0.98 || netFlow < 0;
-    const countSellPressure = buySellRatio <= 0.8;
+    const buyPressureConfirmed = triggers.includes('Strong Buy Pressure') && (triggers.includes('Volume Spike') || triggers.includes('Elevated Volume') || buySellRatio >= 1.4);
 
-    if ((triggers.includes('Major Dump') || triggers.includes('Price Dump')) && (triggers.includes('Strong Sell Pressure') || lpToMarketCapRatio < 0.15)) return 'Market Stress';
     if (triggers.includes('Strong Sell Pressure')) {
-        if (strongPositiveMomentum && buyVolumeLeads) return 'Recovery';
-        if (strongPositiveMomentum) return 'Recovery';
-        if (strongNegativeMomentum || (countSellPressure && sellVolumeLeads)) return 'Distribution';
+        if (recoveryMomentum && buyVolumeLeads) return 'Recovery';
+        if (recoveryMomentum) return 'Recovery';
+        if (confirmedDistributionMove && sellVolumeLeads) return 'Distribution';
+        if (potentialDistributionMove && sellVolumeLeads) return 'Potential Distribution';
+        if ((triggers.includes('Major Dump') || triggers.includes('Price Dump')) && (triggers.includes('Strong Sell Pressure') || lpToMarketCapRatio < 0.15)) return 'Market Stress';
         return 'Unusual Activity';
     }
     if (triggers.includes('Possible Artificial Volume')) return 'Unusual Activity';
-    if (triggers.includes('Strong Buy Pressure') && (triggers.includes('Volume Spike') || triggers.includes('Elevated Volume') || buySellRatio >= 1.4)) return 'Accumulation';
+    if (buyPressureConfirmed && confirmedAccumulationMove) return 'Accumulation';
+    if (buyPressureConfirmed && potentialAccumulationMove) return 'Potential Accumulation';
     if ((triggers.includes('Price Recovery') || triggers.includes('Confirmed Recovery')) && (triggers.includes('Volume Spike') || triggers.includes('Elevated Volume'))) return 'Recovery';
     if (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed')) return 'Liquidity Event';
     if (triggers.includes('Major Dump') || priceChange24h < -18) return 'Market Stress';

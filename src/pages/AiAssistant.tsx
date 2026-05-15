@@ -4,12 +4,14 @@ import {
     AlertTriangle,
     Activity,
     ArrowRight,
-    Bell,
     CheckCircle2,
     Loader2,
+    Megaphone,
+    MessageSquare,
+    PanelLeft,
+    Plus,
     Radar,
     RefreshCw,
-    Search,
     Send,
     ShieldCheck,
     User
@@ -42,10 +44,10 @@ type ChatMenuItem = {
 };
 
 const SUGGESTED_PROMPTS = [
-    'Latest detections',
-    'Run Safe Scan',
-    'Set alert',
-    'Token activity'
+    'Why is $PENGU moving?',
+    'Suggest 3 tokens smart money is watching',
+    'Who are the top wallets buying today?',
+    'Run a risk read on a token'
 ];
 
 const OFFICIAL_ANNOUNCEMENTS: AiAssistantNotification[] = [];
@@ -63,7 +65,7 @@ type AssistantChatCache = {
 const createWelcomeMessage = (): ChatMessage => ({
     id: 'welcome',
     role: 'assistant',
-    text: 'Hey, I am Atlaix AI. You can talk to me normally, and when the conversation touches tokens, wallets, risk, alerts, or market activity, I can help turn it into an Atlaix workflow.',
+    text: 'I am online. Ask about tokens, wallets, risk, alerts, or market activity and I will turn the conversation into an Atlaix workflow when it helps.',
     tool: 'conversation',
     createdAt: Date.now()
 });
@@ -165,10 +167,10 @@ const notificationToneClass = (tone: AiAssistantNotification['tone']) => {
 };
 
 const promptToMessage = (prompt: string) => {
-    if (prompt === 'Latest detections') return 'Show me the latest Detection Engine updates';
-    if (prompt === 'Run Safe Scan') return 'Run a Safe Scan on a token';
-    if (prompt === 'Set alert') return 'Help me set an alert for a token';
-    return 'Show me token activity for a token';
+    if (prompt === 'Why is $PENGU moving?') return 'Why is $PENGU moving today?';
+    if (prompt === 'Suggest 3 tokens smart money is watching') return 'Suggest 3 tokens that smart money is watching and explain why';
+    if (prompt === 'Who are the top wallets buying today?') return 'Who are the top wallets buying today?';
+    return 'Run a risk read on a token';
 };
 
 export const AiAssistant: React.FC = () => {
@@ -271,7 +273,7 @@ export const AiAssistant: React.FC = () => {
             title: 'Atlaix AI',
             subtitle: messages[messages.length - 1]?.text || 'Ready to help',
             meta: '',
-            icon: <img src="/logo.png" alt="Atlaix" className="h-5 w-5 object-contain" />,
+            icon: <MessageSquare size={18} />,
             active: activeMenu === 'assistant'
         },
         {
@@ -279,102 +281,121 @@ export const AiAssistant: React.FC = () => {
             title: 'Announcements',
             subtitle: notifications[0]?.body || 'Official updates from Atlaix',
             meta: notifications[0] ? formatRelative(notifications[0].timestamp) : '',
-            icon: <Bell size={18} />,
+            icon: <Megaphone size={18} />,
             active: activeMenu === 'announcements',
             unread: notifications.length || undefined
         }
     ];
-
+    const hasUserMessages = messages.some((message) => message.role === 'user');
+    const conversationMode = hasUserMessages || sending;
     return (
-        <div className="h-[calc(100vh-132px)] overflow-hidden rounded-xl border border-border bg-card">
-            <div className="grid h-full grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)]">
-                <aside className="flex min-h-0 flex-col border-b border-border bg-main/40 lg:border-b-0 lg:border-r">
-                    <div className="border-b border-border p-4">
-                        <div className="mb-4 flex items-center justify-between gap-3">
-                            <div>
-                                <h2 className="mt-1 text-xl font-bold text-text-light">Chats</h2>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={loadNotifications}
-                                className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-text-medium transition-colors hover:border-primary-green hover:text-primary-green"
-                                aria-label="Refresh assistant feed"
-                            >
-                                <RefreshCw size={16} className={loadingNotifications ? 'animate-spin' : ''} />
-                            </button>
+        <div className="h-[calc(100vh-132px)] overflow-hidden rounded-xl border border-border bg-card shadow-[0_24px_80px_rgba(0,0,0,0.3)]">
+            <div className="flex h-full">
+                <aside className="group/assistant-rail relative z-20 hidden h-full w-[72px] shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-300 ease-out hover:w-[292px] focus-within:w-[292px] lg:flex">
+                    <div className="flex h-20 items-center gap-3 px-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-green text-main shadow-[0_0_24px_rgba(38,211,86,0.22)]">
+                            <PanelLeft size={19} />
                         </div>
-                        <div className="flex h-10 items-center gap-2 rounded-full border border-border bg-card px-4 text-text-medium">
-                            <Search size={16} />
-                            <span className="text-sm font-medium text-text-dark">Search chats</span>
+                        <div className="min-w-0 opacity-0 transition-opacity duration-200 group-hover/assistant-rail:opacity-100 group-focus-within/assistant-rail:opacity-100">
+                            <div className="truncate text-sm font-black text-text-light">AI Assistant</div>
                         </div>
                     </div>
 
-                    <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                    <div className="flex min-h-0 flex-1 flex-col gap-1 px-2">
                         {chatItems.map((item) => (
                             <button
                                 key={item.id}
                                 type="button"
                                 onClick={() => setActiveMenu(item.id)}
-                                className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors ${
+                                className={`group/item flex h-12 w-full items-center gap-3 rounded-lg px-3 text-left transition-all ${
                                     item.active
-                                        ? 'bg-primary-green/10 text-text-light'
-                                        : 'text-text-medium hover:bg-card-hover hover:text-text-light'
+                                        ? 'bg-primary-green text-main shadow-[0_0_22px_rgba(38,211,86,0.16)]'
+                                        : 'text-text-medium hover:bg-card hover:text-text-light'
                                 }`}
+                                title={item.title}
                             >
-                                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${
-                                    item.active ? 'border-primary-green/40 bg-primary-green/10 text-primary-green' : 'border-border bg-card text-text-medium'
-                                }`}>
-                                    {item.icon}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="truncate text-sm font-bold">{item.title}</div>
-                                        {item.meta && <div className="shrink-0 text-[10px] font-mono text-text-dark">{item.meta}</div>}
-                                    </div>
-                                    <div className="mt-0.5 line-clamp-1 text-xs text-text-dark">{item.subtitle}</div>
-                                </div>
+                                <span className="flex h-6 w-6 shrink-0 items-center justify-center">{item.icon}</span>
+                                <span className="min-w-0 flex-1 opacity-0 transition-opacity duration-200 group-hover/assistant-rail:opacity-100 group-focus-within/assistant-rail:opacity-100">
+                                    <span className="block truncate text-sm font-bold">{item.title}</span>
+                                    <span className={`block truncate text-[11px] ${item.active ? 'text-main/70' : 'text-text-dark'}`}>{item.subtitle}</span>
+                                </span>
                                 {item.unread ? (
-                                    <div className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-green px-1.5 text-[10px] font-bold text-black">
+                                    <span className={`flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-black opacity-0 transition-opacity duration-200 group-hover/assistant-rail:opacity-100 group-focus-within/assistant-rail:opacity-100 ${item.active ? 'bg-main text-primary-green' : 'bg-primary-green text-main'}`}>
                                         {item.unread}
-                                    </div>
+                                    </span>
                                 ) : null}
                             </button>
                         ))}
                     </div>
+
+                    <div className="border-t border-border p-2">
+                        <button
+                            type="button"
+                            onClick={loadNotifications}
+                            className="flex h-12 w-full items-center gap-3 rounded-lg px-3 text-text-medium transition-colors hover:bg-card hover:text-text-light"
+                            title="Refresh"
+                        >
+                            <RefreshCw size={18} className={loadingNotifications ? 'animate-spin' : ''} />
+                            <span className="truncate text-sm font-bold opacity-0 transition-opacity duration-200 group-hover/assistant-rail:opacity-100 group-focus-within/assistant-rail:opacity-100">Refresh feed</span>
+                        </button>
+                    </div>
                 </aside>
 
-                <section className="flex min-h-0 flex-col bg-main">
-                    <header className="flex h-17 shrink-0 items-center justify-between border-b border-border bg-card px-5 py-3">
-                        <div className="flex min-w-0 items-center gap-3">
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary-green/40 bg-primary-green/10 text-primary-green">
-                                {activeMenu === 'announcements' ? <Bell size={21} /> : <img src="/logo.png" alt="Atlaix" className="h-6 w-6 object-contain" />}
-                            </div>
-                            <div className="min-w-0">
-                                <h2 className="truncate text-base font-bold text-text-light">
-                                    {activeMenu === 'announcements' ? 'Announcements' : 'Atlaix AI'}
-                                </h2>
-                                <div className="mt-0.5 flex items-center gap-2 text-xs font-medium text-text-medium">
-                                    <span className="h-2 w-2 rounded-full bg-primary-green" />
-                                    {activeMenu === 'announcements' ? `${notifications.length} updates` : 'Online'}
-                                </div>
-                            </div>
+                <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-main">
+                    <header className="shrink-0 border-b border-border bg-card/95 px-3 py-3 backdrop-blur-md lg:hidden">
+                        <div className="custom-scrollbar flex items-center gap-2 overflow-x-auto">
+                            {chatItems.map((item) => (
+                                <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => setActiveMenu(item.id)}
+                                    className={`flex h-11 shrink-0 items-center gap-2 rounded-full border px-3 transition-colors ${
+                                        item.active ? 'border-primary-green/40 bg-primary-green text-main' : 'border-border bg-main text-text-medium'
+                                    }`}
+                                    aria-label={item.title}
+                                >
+                                    <span className="flex h-5 w-5 items-center justify-center">{item.icon}</span>
+                                    <span className="text-xs font-black">{item.title}</span>
+                                </button>
+                            ))}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setActiveMenu('assistant');
+                                    setMessages([createWelcomeMessage()]);
+                                    setDraft('');
+                                }}
+                                className="flex h-11 shrink-0 items-center gap-2 rounded-full border border-border bg-main px-3 text-text-medium transition-colors hover:border-primary-green/50 hover:text-primary-green"
+                                aria-label="New assistant chat"
+                            >
+                                <Plus size={16} />
+                                <span className="text-xs font-black">New chat</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={loadNotifications}
+                                className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border bg-main text-text-medium"
+                                aria-label="Refresh assistant feed"
+                            >
+                                <RefreshCw size={16} className={loadingNotifications ? 'animate-spin' : ''} />
+                            </button>
                         </div>
                     </header>
 
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                         {activeMenu === 'announcements' ? (
                             <div className="mx-auto max-w-4xl">
-                                <div className="mb-4 flex items-center justify-between gap-3">
+                                <div className="mb-5 flex items-center justify-between gap-3">
                                     <div>
-                                        <h3 className="text-lg font-bold text-text-light">Latest Announcements</h3>
-                                        <p className="mt-1 text-sm font-medium text-text-medium">
-                                            Official product notes and user-facing updates from Atlaix.
-                                        </p>
+                                        <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-lg border border-primary-green/25 bg-primary-green/10 text-primary-green">
+                                            <Megaphone size={20} />
+                                        </div>
+                                        <h3 className="text-2xl font-black text-text-light">Announcements</h3>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={loadNotifications}
-                                        className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-text-medium transition-colors hover:border-primary-green hover:text-primary-green"
+                                        className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-text-medium transition-colors hover:border-primary-green/50 hover:text-primary-green"
                                         aria-label="Refresh announcements"
                                     >
                                         <RefreshCw size={16} className={loadingNotifications ? 'animate-spin' : ''} />
@@ -415,93 +436,139 @@ export const AiAssistant: React.FC = () => {
                                 </div>
                             </div>
                         ) : (
-                        <div className="mx-auto flex max-w-4xl flex-col gap-3">
-                            <div className="mx-auto mb-2 rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-text-dark">
-                                Today
-                            </div>
+                            <div className={`mx-auto flex min-h-full w-full max-w-4xl flex-col ${conversationMode ? 'justify-end gap-3 pb-2' : 'justify-center pb-12'}`}>
+                                {!conversationMode ? (
+                                    <div className="mx-auto w-full max-w-3xl text-center">
+                                        <img
+                                            src="/logo.png"
+                                            alt="Atlaix"
+                                            className="mx-auto mb-6 h-16 w-16 object-contain sm:h-20 sm:w-20"
+                                            onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                                        />
+                                        <h2 className="text-3xl font-black tracking-normal text-text-light sm:text-4xl">What's trending today?</h2>
+                                        <div className="mx-auto mt-7 max-w-2xl">
+                                            <form
+                                                onSubmit={(event) => {
+                                                    event.preventDefault();
+                                                    sendMessage();
+                                                }}
+                                                className="rounded-2xl border border-primary-green/25 bg-main/95 p-3 text-left shadow-[0_20px_70px_rgba(0,0,0,0.35)]"
+                                            >
+                                                <textarea
+                                                    value={draft}
+                                                    onChange={(event) => setDraft(event.target.value)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter' && !event.shiftKey) {
+                                                            event.preventDefault();
+                                                            sendMessage();
+                                                        }
+                                                    }}
+                                                    placeholder="Ask Atlaix AI"
+                                                    className="max-h-32 min-h-[48px] w-full resize-none bg-transparent px-1 py-1 text-base font-medium text-text-light outline-none placeholder:text-text-dark"
+                                                />
+                                                <div className="flex items-center justify-end gap-3">
+                                                    <button
+                                                        type="submit"
+                                                        disabled={!draft.trim() || sending}
+                                                        className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-green text-main transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-45"
+                                                        aria-label="Send assistant message"
+                                                    >
+                                                        <Send size={17} />
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                        <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                            {SUGGESTED_PROMPTS.map((prompt) => (
+                                                <button
+                                                    key={prompt}
+                                                    type="button"
+                                                    onClick={() => sendMessage(promptToMessage(prompt))}
+                                                    disabled={sending}
+                                                    className="min-h-[50px] rounded-xl border border-border bg-card px-4 py-3 text-left text-xs font-bold leading-snug text-text-medium transition-colors hover:border-primary-green/35 hover:bg-primary-green/10 hover:text-text-light disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {prompt}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="mx-auto mb-2 rounded-full border border-border bg-card px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-text-dark">
+                                            Today
+                                        </div>
 
-                            {messages.map((message) => {
-                                const isUser = message.role === 'user';
-                                return (
-                                    <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`flex max-w-[82%] gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                                            {!isUser && (
-                                                <div className="mt-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-primary-green">
-                                                    {toolIcon(message.tool)}
-                                                </div>
-                                            )}
-                                            <div className={`rounded-2xl px-4 py-3 shadow-sm ${
-                                                isUser
-                                                    ? 'rounded-br-md bg-primary-green text-black'
-                                                    : 'rounded-bl-md border border-border bg-card text-text-light'
-                                            }`}>
-                                                {!isUser && (
-                                                    <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-primary-green">
-                                                        {toolLabel(message.tool)}
+                                        {messages.map((message) => {
+                                            const isUser = message.role === 'user';
+                                            return (
+                                                <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                                                    <div className={`flex max-w-[86%] gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                                                        {!isUser && (
+                                                            <div className="mt-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-primary-green">
+                                                                {toolIcon(message.tool)}
+                                                            </div>
+                                                        )}
+                                                        <div className={`rounded-2xl px-4 py-3 shadow-sm ${
+                                                            isUser
+                                                                ? 'rounded-br-md bg-primary-green text-main'
+                                                                : 'rounded-bl-md border border-border bg-card text-text-light'
+                                                        }`}>
+                                                            {!isUser && (
+                                                                <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-primary-green">
+                                                                    {toolLabel(message.tool)}
+                                                                </div>
+                                                            )}
+                                                            <div className={`space-y-2 text-sm leading-relaxed ${isUser ? 'font-semibold' : 'font-medium'}`}>
+                                                                {splitLines(message.text).map((line, index) => (
+                                                                    <p key={index}>{line}</p>
+                                                                ))}
+                                                            </div>
+                                                            {message.actions && message.actions.length > 0 && (
+                                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                                    {message.actions.map((action) => (
+                                                                        <button
+                                                                            key={`${message.id}-${action.label}-${action.href}`}
+                                                                            type="button"
+                                                                            onClick={() => goToAction(action.href)}
+                                                                            className="inline-flex items-center gap-2 rounded-lg border border-primary-green/30 bg-primary-green/10 px-3 py-1.5 text-xs font-bold text-primary-green transition-colors hover:border-primary-green"
+                                                                            title={action.confirmationRequired ? 'Opens a review step before anything is saved' : undefined}
+                                                                        >
+                                                                            {action.label}{action.confirmationRequired ? ' (review)' : ''} <ArrowRight size={13} />
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            <div className={`mt-2 text-right text-[10px] ${isUser ? 'text-main/60' : 'text-text-dark'}`}>
+                                                                {formatClock(message.createdAt)}
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                )}
-                                                <div className={`space-y-2 text-sm leading-relaxed ${isUser ? 'font-semibold' : 'font-medium'}`}>
-                                                    {splitLines(message.text).map((line, index) => (
-                                                        <p key={index}>{line}</p>
-                                                    ))}
                                                 </div>
-                                                {message.actions && message.actions.length > 0 && (
-                                                    <div className="mt-3 flex flex-wrap gap-2">
-                                                        {message.actions.map((action) => (
-                                                            <button
-                                                                key={`${message.id}-${action.label}-${action.href}`}
-                                                                type="button"
-                                                                onClick={() => goToAction(action.href)}
-                                                                className="inline-flex items-center gap-2 rounded-full border border-primary-green/30 bg-primary-green/10 px-3 py-1.5 text-xs font-bold text-primary-green transition-colors hover:border-primary-green"
-                                                                title={action.confirmationRequired ? 'Opens a review step before anything is saved' : undefined}
-                                                            >
-                                                                {action.label}{action.confirmationRequired ? ' (review)' : ''} <ArrowRight size={13} />
-                                                            </button>
-                                                        ))}
+                                            );
+                                        })}
+
+                                        {sending && (
+                                            <div className="flex justify-start">
+                                                <div className="flex items-end gap-2">
+                                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-primary-green">
+                                                        <img src="/logo.png" alt="Atlaix" className="h-4 w-4 object-contain" />
                                                     </div>
-                                                )}
-                                                <div className={`mt-2 text-right text-[10px] ${isUser ? 'text-black/60' : 'text-text-dark'}`}>
-                                                    {formatClock(message.createdAt)}
+                                                    <div className="rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 text-sm font-semibold text-text-medium">
+                                                        <Loader2 size={15} className="mr-2 inline animate-spin" />
+                                                        Thinking
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-
-                            {sending && (
-                                <div className="flex justify-start">
-                                    <div className="flex items-end gap-2">
-                                        <div className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-primary-green">
-                                            <img src="/logo.png" alt="Atlaix" className="h-4 w-4 object-contain" />
-                                        </div>
-                                        <div className="rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 text-sm font-semibold text-text-medium">
-                                            <Loader2 size={15} className="mr-2 inline animate-spin" />
-                                            Thinking
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                            <div ref={messagesEndRef} />
-                        </div>
+                                        )}
+                                        <div ref={messagesEndRef} />
+                                    </>
+                                )}
+                            </div>
                         )}
                     </div>
 
-                    {activeMenu === 'assistant' && <div className="shrink-0 border-t border-border bg-card p-4">
+                    {activeMenu === 'assistant' && conversationMode && <div className="shrink-0 border-t border-border bg-card/90 p-4 backdrop-blur">
                         <div className="mx-auto max-w-4xl">
-                            <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                                {SUGGESTED_PROMPTS.map((prompt) => (
-                                    <button
-                                        key={prompt}
-                                        type="button"
-                                        onClick={() => sendMessage(promptToMessage(prompt))}
-                                        disabled={sending}
-                                        className="shrink-0 rounded-full border border-border bg-main px-3 py-1.5 text-xs font-bold text-text-medium transition-colors hover:border-primary-green hover:text-primary-green disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        {prompt}
-                                    </button>
-                                ))}
-                            </div>
                             <form
                                 onSubmit={(event) => {
                                     event.preventDefault();
@@ -519,12 +586,12 @@ export const AiAssistant: React.FC = () => {
                                             }
                                         }}
                                         placeholder="Message Atlaix AI"
-                                        className="max-h-32 min-h-[46px] flex-1 resize-none rounded-2xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
+                                        className="max-h-32 min-h-[48px] flex-1 resize-none rounded-2xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
                                     />
                                     <button
                                         type="submit"
                                         disabled={!draft.trim() || sending}
-                                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-green text-black transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-green text-main transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-50"
                                         aria-label="Send assistant message"
                                     >
                                         <Send size={18} />
@@ -533,6 +600,21 @@ export const AiAssistant: React.FC = () => {
                             </form>
                         </div>
                     </div>}
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setActiveMenu('assistant');
+                            setMessages([createWelcomeMessage()]);
+                            setDraft('');
+                        }}
+                        className="group absolute bottom-5 right-5 hidden h-12 w-12 items-center justify-center gap-2 overflow-hidden rounded-full bg-primary-green px-0 text-main shadow-[0_14px_44px_rgba(38,211,86,0.25)] transition-[width,transform,padding] duration-200 hover:w-36 hover:scale-105 hover:px-4 lg:flex"
+                        aria-label="New assistant chat"
+                    >
+                        <Plus size={20} className="shrink-0 transition-transform duration-200 group-hover:rotate-90" />
+                        <span className="w-0 overflow-hidden whitespace-nowrap text-sm font-black opacity-0 transition-all duration-200 group-hover:w-[72px] group-hover:opacity-100">
+                            New chat
+                        </span>
+                    </button>
                 </section>
             </div>
         </div>

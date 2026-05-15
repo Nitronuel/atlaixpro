@@ -95,7 +95,7 @@ describe('AlphaGauntletService', () => {
         expect(event?.eventType).toBe('Recovery');
     });
 
-    it('does not let inferred liquidity structure override cleaner accumulation evidence', () => {
+    it('does not call buy pressure accumulation before a fifty percent move', () => {
         const event = AlphaGauntletService.qualifyToken(buildCoin({
             cap: '$4.00M',
             liquidity: '$1.10M',
@@ -105,12 +105,46 @@ describe('AlphaGauntletService', () => {
             buyVolume24h: '$620.00K',
             sellVolume24h: '$280.00K',
             netFlow: '+$340.00K',
-            h24: '16.00%'
+            h24: '11.00%'
         }));
 
         expect(event).not.toBeNull();
         expect(event?.triggers).toContain('Liquidity Added');
+        expect(event?.eventType).toBe('Liquidity Event');
+    });
+
+    it('keeps accumulation for confirmed fifty percent buy-pressure moves', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            cap: '$4.00M',
+            liquidity: '$1.10M',
+            volume24h: '$900.00K',
+            dexBuys: '2200',
+            dexSells: '1200',
+            buyVolume24h: '$620.00K',
+            sellVolume24h: '$280.00K',
+            netFlow: '+$340.00K',
+            h24: '54.00%'
+        }));
+
+        expect(event).not.toBeNull();
         expect(event?.eventType).toBe('Accumulation');
+    });
+
+    it('uses potential accumulation for thirty five to forty nine percent buy-pressure moves', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            cap: '$4.00M',
+            liquidity: '$1.10M',
+            volume24h: '$900.00K',
+            dexBuys: '2200',
+            dexSells: '1200',
+            buyVolume24h: '$620.00K',
+            sellVolume24h: '$280.00K',
+            netFlow: '+$340.00K',
+            h24: '40.00%'
+        }));
+
+        expect(event).not.toBeNull();
+        expect(event?.eventType).toBe('Potential Accumulation');
     });
 
     it('does not claim holder growth when only transaction proxy data exists', () => {
@@ -124,7 +158,7 @@ describe('AlphaGauntletService', () => {
         expect(event?.triggers).not.toContain('Holder Growth Spike');
     });
 
-    it('keeps true distribution when sell pressure has negative price and negative USD flow', () => {
+    it('does not call sell pressure distribution before a fifty percent move', () => {
         const event = AlphaGauntletService.qualifyToken(buildCoin({
             h1: '-4.50%',
             h24: '-8.00%',
@@ -138,6 +172,41 @@ describe('AlphaGauntletService', () => {
         }));
 
         expect(event).not.toBeNull();
+        expect(event?.eventType).not.toBe('Distribution');
+        expect(event?.eventType).toBe('Unusual Activity');
+    });
+
+    it('keeps distribution for confirmed fifty percent sell-pressure moves', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            h1: '-4.50%',
+            h24: '-55.00%',
+            cap: '$8.00M',
+            liquidity: '$900.00K',
+            dexBuys: '1600',
+            dexSells: '3600',
+            buyVolume24h: '$320.00K',
+            sellVolume24h: '$820.00K',
+            netFlow: '-$500.00K'
+        }));
+
+        expect(event).not.toBeNull();
         expect(event?.eventType).toBe('Distribution');
+    });
+
+    it('uses potential distribution for thirty five to forty nine percent sell-pressure moves', () => {
+        const event = AlphaGauntletService.qualifyToken(buildCoin({
+            h1: '-4.50%',
+            h24: '-40.00%',
+            cap: '$8.00M',
+            liquidity: '$900.00K',
+            dexBuys: '1600',
+            dexSells: '3600',
+            buyVolume24h: '$320.00K',
+            sellVolume24h: '$820.00K',
+            netFlow: '-$500.00K'
+        }));
+
+        expect(event).not.toBeNull();
+        expect(event?.eventType).toBe('Potential Distribution');
     });
 });

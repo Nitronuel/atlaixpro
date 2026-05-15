@@ -89,7 +89,9 @@ export interface MarketCoin {
 
 export type AlphaGauntletEventType =
     | 'Accumulation'
+    | 'Potential Accumulation'
     | 'Distribution'
+    | 'Potential Distribution'
     | 'Market Stress'
     | 'Recovery'
     | 'Liquidity Event'
