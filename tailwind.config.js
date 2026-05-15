@@ -25,7 +25,7 @@ export default {
         border: '#2A2E33'
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif']
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'Segoe UI', 'Roboto', 'Arial', 'sans-serif']
       },
       animation: {
         'fade-in': 'fadeIn 0.5s ease-out'

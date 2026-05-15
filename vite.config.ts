@@ -19,6 +19,9 @@ export default defineConfig(({ mode }) => {
             }
 
             if (id.includes('node_modules')) {
+              if (id.includes('lucide-react') || id.includes('d3-force')) {
+                return 'graph-vendor';
+              }
               if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
                 return 'react-vendor';
               }
@@ -28,17 +31,14 @@ export default defineConfig(({ mode }) => {
               if (id.includes('apexcharts')) {
                 return 'charts-vendor';
               }
-              if (id.includes('lucide-react') || id.includes('d3-force')) {
-                return 'graph-vendor';
-              }
               return 'vendor';
             }
 
-            if (id.includes('/src/config/') || id.includes('/src/contexts/') || id.includes('/src/services/SupabaseClient') || id.includes('/src/services/ProfileService')) {
+            if (id.includes('/src/contexts/')) {
               return 'app-core';
             }
 
-            if (id.includes('/src/types/') || id.includes('/src/utils/')) {
+            if (id.includes('/src/config/') || id.includes('/src/types/') || id.includes('/src/utils/')) {
               return 'shared-utils';
             }
 

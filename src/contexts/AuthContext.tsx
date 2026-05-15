@@ -1,8 +1,7 @@
 // Supabase-backed authentication state for Atlaix.
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Session, User } from '@supabase/supabase-js';
-import { ProfileService, ProfileUpdate, UserProfile } from '../services/ProfileService';
-import { authSupabase, hasAuthSupabaseConfig } from '../services/SupabaseClient';
+import type { Session, User } from '@supabase/supabase-js';
+import type { ProfileUpdate, UserProfile } from '../services/ProfileService';
 
 interface AuthContextValue {
     user: User | null;
@@ -21,7 +20,18 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const requireSupabase = () => {
+const loadSupabaseClient = async () => {
+    const { authSupabase } = await import('../services/SupabaseClient');
+    return authSupabase;
+};
+
+const loadProfileService = async () => {
+    const { ProfileService } = await import('../services/ProfileService');
+    return ProfileService;
+};
+
+const requireSupabase = async () => {
+    const authSupabase = await loadSupabaseClient();
     if (!authSupabase) {
         throw new Error('Sign in is temporarily unavailable. Please try again later.');
     }
@@ -69,6 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [profileError, setProfileError] = useState<string | null>(null);
+    const [authConfigAvailable, setAuthConfigAvailable] = useState(true);
 
     const loadProfile = useCallback(async (nextUser: User | null) => {
         if (!nextUser) {
@@ -78,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         try {
+            const ProfileService = await loadProfileService();
             const ensured = await ProfileService.ensureProfile({
                 id: nextUser.id,
                 email: nextUser.email || '',
@@ -94,37 +106,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     useEffect(() => {
         let mounted = true;
 
-        if (!authSupabase) {
-            setLoading(false);
-            return;
-        }
-
-        authSupabase.auth.getSession().then(async ({ data }) => {
+        const loadSession = async () => {
+            const authSupabase = await loadSupabaseClient();
             if (!mounted) return;
+
+            if (!authSupabase) {
+                setAuthConfigAvailable(false);
+                setLoading(false);
+                return;
+            }
+
+            setAuthConfigAvailable(true);
+            const { data } = await authSupabase.auth.getSession();
+            if (!mounted) return;
+
             const nextSession = data.session;
             setSession(nextSession);
             setUser(nextSession?.user || null);
             await loadProfile(nextSession?.user || null);
             if (mounted) setLoading(false);
+
+            const { data: listener } = authSupabase.auth.onAuthStateChange((_event, nextSession) => {
+                setSession(nextSession);
+                setUser(nextSession?.user || null);
+                loadProfile(nextSession?.user || null);
+            });
+
+            return () => listener.subscription.unsubscribe();
+        };
+
+        let unsubscribe: (() => void) | undefined;
+        loadSession().then((cleanup) => {
+            unsubscribe = cleanup;
         }).catch((error) => {
             console.error('Auth session load failed', error);
             if (mounted) setLoading(false);
         });
 
-        const { data: listener } = authSupabase.auth.onAuthStateChange((_event, nextSession) => {
-            setSession(nextSession);
-            setUser(nextSession?.user || null);
-            loadProfile(nextSession?.user || null);
-        });
-
         return () => {
             mounted = false;
-            listener.subscription.unsubscribe();
+            unsubscribe?.();
         };
     }, [loadProfile]);
 
     const signIn = useCallback(async (email: string, password: string) => {
-        const supabase = requireSupabase();
+        const supabase = await requireSupabase();
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (!error) return;
 
@@ -139,7 +165,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
-        const supabase = requireSupabase();
+        const supabase = await requireSupabase();
         const { data, error } = await supabase.auth.signUp({
             email,
             password,
@@ -153,7 +179,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const signInWithGoogle = useCallback(async () => {
-        const supabase = requireSupabase();
+        const supabase = await requireSupabase();
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: { redirectTo: `${window.location.origin}/dashboard` }
@@ -162,14 +188,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const signOut = useCallback(async () => {
-        const supabase = requireSupabase();
+        const supabase = await requireSupabase();
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
         setProfile(null);
     }, []);
 
     const resetPassword = useCallback(async (email: string) => {
-        const supabase = requireSupabase();
+        const supabase = await requireSupabase();
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
             redirectTo: `${window.location.origin}/login`
         });
@@ -182,6 +208,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const updateProfile = useCallback(async (update: ProfileUpdate) => {
         if (!user) throw new Error('You need to be signed in to update your profile.');
+        const ProfileService = await loadProfileService();
         const nextProfile = await ProfileService.updateProfile(user.id, update);
         setProfile(nextProfile);
     }, [user]);
@@ -191,7 +218,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         session,
         profile,
         loading,
-        profileError: hasAuthSupabaseConfig ? profileError : 'Account access is temporarily unavailable.',
+        profileError: authConfigAvailable ? profileError : 'Account access is temporarily unavailable.',
         signIn,
         signUp,
         signInWithGoogle,
@@ -199,7 +226,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resetPassword,
         updateProfile,
         refreshProfile
-    }), [loading, profile, profileError, refreshProfile, resetPassword, session, signIn, signInWithGoogle, signOut, signUp, updateProfile, user]);
+    }), [authConfigAvailable, loading, profile, profileError, refreshProfile, resetPassword, session, signIn, signInWithGoogle, signOut, signUp, updateProfile, user]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

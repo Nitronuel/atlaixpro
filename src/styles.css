@@ -1,3 +1,375 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Base styles matching the design system */
+        :root {
+            --bg-main: #111315;
+            --bg-card: #1C1F22;
+            --text-light: #EAECEF;
+            --border-color: #2A2E33;
+            --primary-green: #26D356;
+        }
+
+        body {
+            font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-light);
+        }
+
+        /*
+         * Windows 150% display scaling makes a 1920px laptop behave like a
+         * 1280px CSS viewport. This density mode keeps the product surface
+         * closer to its 125% layout without changing browser zoom.
+         */
+        html.atlaix-compact-ui {
+            font-size: 83.333%;
+        }
+
+        html.atlaix-compact-ui body {
+            text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        @media (max-width: 1023px) {
+            html.atlaix-compact-ui {
+                font-size: 100%;
+            }
+        }
+
+        /*
+         * Narrow high-DPR phones need a different density treatment: keep text
+         * legible and taps comfortable, but reduce repeated chrome, page
+         * padding, and card spacing so product screens waste less room.
+         */
+        @media (max-width: 430px) {
+            html.atlaix-mobile-compact body {
+                overflow-x: hidden;
+                text-size-adjust: 100%;
+                -webkit-text-size-adjust: 100%;
+            }
+
+            html.atlaix-mobile-compact .h-\[80px\] {
+                height: 68px !important;
+            }
+
+            html.atlaix-mobile-compact main.p-4,
+            html.atlaix-mobile-compact .p-4 {
+                padding: 0.75rem !important;
+            }
+
+            html.atlaix-mobile-compact .p-5,
+            html.atlaix-mobile-compact .p-6,
+            html.atlaix-mobile-compact .p-8 {
+                padding: 1rem !important;
+            }
+
+            html.atlaix-mobile-compact .px-4,
+            html.atlaix-mobile-compact .px-5,
+            html.atlaix-mobile-compact .px-6,
+            html.atlaix-mobile-compact .px-8 {
+                padding-left: 0.875rem !important;
+                padding-right: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .py-4,
+            html.atlaix-mobile-compact .py-5,
+            html.atlaix-mobile-compact .py-6,
+            html.atlaix-mobile-compact .py-8 {
+                padding-top: 0.875rem !important;
+                padding-bottom: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .gap-5,
+            html.atlaix-mobile-compact .gap-6 {
+                gap: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .gap-4 {
+                gap: 0.75rem !important;
+            }
+
+            html.atlaix-mobile-compact .mt-6 {
+                margin-top: 1rem !important;
+            }
+
+            html.atlaix-mobile-compact .mb-6 {
+                margin-bottom: 1rem !important;
+            }
+
+            html.atlaix-mobile-compact .w-\[300px\] {
+                width: min(280px, 86vw) !important;
+            }
+
+            html.atlaix-mobile-compact h1.text-2xl {
+                font-size: 1.375rem !important;
+                line-height: 1.75rem !important;
+            }
+
+            html.atlaix-mobile-compact .rounded-2xl {
+                border-radius: 0.875rem !important;
+            }
+
+            html.atlaix-mobile-compact .data-table th,
+            html.atlaix-mobile-compact .data-table td {
+                padding: 0.5rem 0.35rem !important;
+            }
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-main);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 10px;
+            border: 2px solid var(--bg-main);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary-green);
+        }
+
+        .custom-scrollbar {
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) var(--bg-main);
+        }
+
+        /* Table Styles */
+        .data-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            white-space: nowrap;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 0.6rem 0.4rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .data-table th {
+            color: #6C727A;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            background: var(--bg-card);
+            height: 44px;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+
+        .data-table td {
+            color: #EAECEF;
+            font-weight: 500;
+            font-size: 0.85rem;
+            vertical-align: middle;
+            height: 50px;
+        }
+
+        .sticky-col {
+            position: sticky !important;
+            left: 0;
+            background: var(--bg-card) !important;
+            z-index: 10 !important;
+            box-shadow: 4px 0 10px -2px rgba(0, 0, 0, 0.5);
+        }
+
+        th.sticky-col {
+            z-index: 30 !important;
+        }
+
+        /* Filter Pills */
+        .filter-pill {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 50px;
+            padding: 0.35rem 0.8rem;
+            color: #8F96A3;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .filter-pill:hover,
+        .filter-pill.active {
+            border-color: #EAECEF;
+            color: #EAECEF;
+            background: #222529;
+        }
+
+        .filter-popup {
+            position: absolute;
+            top: calc(100% + 12px);
+            left: 0;
+            background: #1C1F22;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            z-index: 500;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.7);
+            width: max-content;
+            min-width: 100%;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .filter-list-item {
+            padding: 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .filter-list-item:hover {
+            background: #222529;
+            color: #EAECEF;
+        }
+
+        .filter-list-item.selected {
+            color: var(--primary-green);
+            font-weight: 600;
+        }
+
+        /* Atlaix folder tabs: active tab physically joins the content tray. */
+        .atlaix-folder-shell {
+            position: relative;
+        }
+
+        .atlaix-folder-strip {
+            position: relative;
+            z-index: 30;
+            display: flex;
+            align-items: flex-end;
+            overflow-x: auto;
+            padding: 0 0.75rem;
+            scrollbar-width: none;
+        }
+
+        .atlaix-folder-strip::-webkit-scrollbar {
+            display: none;
+        }
+
+        .atlaix-folder-tab {
+            position: relative;
+            z-index: 1;
+            min-width: 214px;
+            height: 46px;
+            margin-right: -22px;
+            border: 0;
+            background: transparent;
+            color: #EAECEF;
+            cursor: pointer;
+            padding: 0.78rem 2.05rem 0.62rem 1.45rem;
+            text-align: left;
+            transition: transform 180ms ease, color 180ms ease, filter 180ms ease;
+            isolation: isolate;
+        }
+
+        .atlaix-folder-tab::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            border: 1px solid rgba(42, 46, 51, 0.95);
+            border-bottom: 0;
+            border-radius: 13px 18px 0 0;
+            transform: perspective(13px) rotateX(2.1deg);
+            transform-origin: bottom;
+            box-shadow: 0 -8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+        }
+
+        .atlaix-folder-tab.is-idle::before {
+            background: linear-gradient(180deg, #2AF598 0%, #22C85A 48%, #11823A 100%);
+            border-color: rgba(42, 245, 152, 0.28);
+            box-shadow: 0 -8px 22px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+
+        .atlaix-folder-tab.is-idle {
+            color: #07110B;
+            text-shadow: 0 1px 0 rgba(255, 255, 255, 0.18);
+        }
+
+        .atlaix-folder-tab.is-idle:hover {
+            filter: brightness(1.06);
+            transform: translateY(-2px);
+        }
+
+        .atlaix-folder-tab.is-active {
+            z-index: 20;
+            transform: translateY(1px);
+            color: #EAECEF;
+        }
+
+        .atlaix-folder-tab.is-active::before {
+            background: #171B1F;
+            border-color: rgba(42, 245, 152, 0.34);
+            box-shadow: -8px -10px 24px rgba(0, 0, 0, 0.22), 8px -10px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.055);
+        }
+
+        .atlaix-folder-label {
+            position: relative;
+            display: block;
+            font-size: 0.95rem;
+            font-weight: 900;
+            line-height: 1.05;
+            white-space: nowrap;
+        }
+
+        .atlaix-folder-panel {
+            position: relative;
+            z-index: 10;
+            margin-top: -1px;
+            border: 1px solid rgba(42, 46, 51, 0.9);
+            border-radius: 0 14px 14px 14px;
+            background: #171B1F;
+            padding: 1rem;
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+        }
+
+        .atlaix-folder-accent {
+            height: 1px;
+            background: linear-gradient(90deg, rgba(38, 211, 86, 0.70), rgba(42, 46, 51, 0.65) 44%, transparent);
+            margin: 0 0 1rem;
+        }
+
+        @media (max-width: 640px) {
+            .atlaix-folder-tab {
+                min-width: 176px;
+                height: 44px;
+                padding-left: 1rem;
+                padding-right: 1.75rem;
+            }
+
+            .atlaix-folder-label {
+                font-size: 0.82rem;
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+

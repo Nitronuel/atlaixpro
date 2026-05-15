@@ -6,7 +6,7 @@ import {
   Wallet, Zap, ShieldCheck, Bell, Settings, LogOut, LogIn, Menu, User, Briefcase
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { UserProfile } from '../../services/ProfileService';
+import type { UserProfile } from '../../services/ProfileService';
 
 interface LayoutProps {
   children: React.ReactNode;

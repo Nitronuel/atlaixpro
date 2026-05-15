@@ -2,10 +2,10 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
-import { AuthScreen } from './pages/Auth';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
+const AuthScreen = lazy(async () => ({ default: (await import('./pages/Auth')).AuthScreen }));
 const Dashboard = lazy(async () => ({ default: (await import('./pages/Dashboard')).Dashboard }));
 const TokenDetails = lazy(async () => ({ default: (await import('./pages/TokenDetails')).TokenDetails }));
 const Heatmap = lazy(async () => ({ default: (await import('./pages/Heatmap')).Heatmap }));

@@ -320,7 +320,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 20;
+    const itemsPerPage = typeof window !== 'undefined' && window.innerWidth <= 640 ? 12 : 20;
 
     // Sorting State - Default is null (Neutral/Algorithm Rank)
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -1075,7 +1075,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                             }}
                                         >
                                             <div className="w-10 h-10 rounded-full bg-main flex items-center justify-center shrink-0 border border-border">
-                                                <img src={coin.img} alt={coin.ticker} className="w-7 h-7 rounded-full object-cover" onError={handleImageError} />
+                                                <img src={coin.img} alt={coin.ticker} loading="lazy" decoding="async" className="w-7 h-7 rounded-full object-cover" onError={handleImageError} />
                                             </div>
 
                                             {/* Left: Ticker & Name */}
@@ -1217,9 +1217,9 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                             <td className="sticky-col">
                                                 <div className="flex items-center gap-2 w-[150px] max-w-[150px] overflow-hidden">
                                                     <div className="w-5 h-5 flex items-center justify-center bg-card-hover rounded-full border border-border/50 shrink-0">
-                                                        <img src={getChainIcon(coin.chain)} alt={coin.chain} className="w-3.5 h-3.5 opacity-80" />
+                                                        <img src={getChainIcon(coin.chain)} alt={coin.chain} loading="lazy" decoding="async" className="w-3.5 h-3.5 opacity-80" />
                                                     </div>
-                                                    <img src={coin.img} alt={coin.name} width="24" height="24" className="rounded-full shrink-0 object-cover bg-card" onError={handleImageError} />
+                                                    <img src={coin.img} alt={coin.name} width="24" height="24" loading="lazy" decoding="async" className="rounded-full shrink-0 object-cover bg-card" onError={handleImageError} />
                                                     <div className="flex flex-col min-w-0 flex-1">
                                                         <div className="font-bold text-xs leading-none text-text-light truncate" title={coin.ticker}>{coin.ticker}</div>
                                                         <div className="text-[9px] text-text-dark font-medium leading-tight mt-0.5 truncate" title={coin.name}>{coin.name}</div>
