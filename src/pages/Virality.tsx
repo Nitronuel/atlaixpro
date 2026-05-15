@@ -2,8 +2,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search } from 'lucide-react';
 
-declare var ApexCharts: any;
-
 export const Virality: React.FC = () => {
     const timelineRef = useRef<HTMLDivElement>(null);
     const chartInstance = useRef<any>(null);
@@ -11,7 +9,14 @@ export const Virality: React.FC = () => {
     const [timeFilter, setTimeFilter] = useState('1D');
 
     useEffect(() => {
-        if (timelineRef.current && typeof ApexCharts !== 'undefined') {
+        let cancelled = false;
+
+        const renderChart = async () => {
+            if (!timelineRef.current) return;
+
+            const { default: ApexCharts } = await import('apexcharts');
+            if (cancelled || !timelineRef.current) return;
+
             let categories: string[] = [];
             let d1: number[] = [], d2: number[] = [];
 
@@ -47,8 +52,14 @@ export const Virality: React.FC = () => {
             if (chartInstance.current) { chartInstance.current.destroy(); }
             chartInstance.current = new ApexCharts(timelineRef.current, options);
             chartInstance.current.render();
-        }
-        return () => { if (chartInstance.current) { chartInstance.current.destroy(); chartInstance.current = null; } };
+        };
+
+        renderChart();
+
+        return () => {
+            cancelled = true;
+            if (chartInstance.current) { chartInstance.current.destroy(); chartInstance.current = null; }
+        };
     }, [timeFilter]);
 
     const centerToken = { name: searchQuery || '$WIF', img: 'https://cryptologos.cc/logos/dogwifhat-wif-logo.png' };

@@ -1,4 +1,5 @@
 import path from 'path';
+import { rmSync } from 'fs';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -13,14 +14,36 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            if (id.includes('vite/preload-helper')) {
+              return 'app-core';
+            }
+
             if (id.includes('node_modules')) {
               if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
                 return 'react-vendor';
+              }
+              if (id.includes('@supabase/supabase-js')) {
+                return 'supabase-vendor';
+              }
+              if (id.includes('apexcharts')) {
+                return 'charts-vendor';
               }
               if (id.includes('lucide-react') || id.includes('d3-force')) {
                 return 'graph-vendor';
               }
               return 'vendor';
+            }
+
+            if (id.includes('/src/config/') || id.includes('/src/contexts/') || id.includes('/src/services/SupabaseClient') || id.includes('/src/services/ProfileService')) {
+              return 'app-core';
+            }
+
+            if (id.includes('/src/types/') || id.includes('/src/utils/')) {
+              return 'shared-utils';
+            }
+
+            if (id.includes('/src/services/DatabaseService')) {
+              return 'market-data';
             }
 
             if (id.includes('/src/pages/SafeScan') || id.includes('/src/components/safe-scan') || id.includes('/src/services/forensics')) {
@@ -110,7 +133,15 @@ export default defineConfig(({ mode }) => {
         }
       }
     },
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: 'atlaix-prune-video-only-assets',
+        closeBundle() {
+          rmSync(path.resolve('.', 'dist', 'atlaix-investor-bed.wav'), { force: true });
+        }
+      }
+    ],
     define: {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

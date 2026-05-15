@@ -1,8 +1,6 @@
 // Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect } from 'react';
 
-declare var ApexCharts: any;
-
 export const Sentiment: React.FC = () => {
     const [analyzed, setAnalyzed] = useState(false);
     const [contract, setContract] = useState('');
@@ -11,7 +9,14 @@ export const Sentiment: React.FC = () => {
     const chartInstance = useRef<any>(null);
 
     useEffect(() => {
-        if (analyzed && chartRef.current && typeof ApexCharts !== 'undefined') {
+        let cancelled = false;
+
+        const renderChart = async () => {
+            if (!analyzed || !chartRef.current) return;
+
+            const { default: ApexCharts } = await import('apexcharts');
+            if (cancelled || !chartRef.current) return;
+
             let categories: string[] = [];
             let d1: number[] = [], d2: number[] = [], d3: number[] = [], d4: number[] = [];
 
@@ -56,8 +61,14 @@ export const Sentiment: React.FC = () => {
             if (chartInstance.current) { chartInstance.current.destroy(); }
             chartInstance.current = new ApexCharts(chartRef.current, options);
             chartInstance.current.render();
-        }
-        return () => { if (chartInstance.current) { chartInstance.current.destroy(); chartInstance.current = null; } };
+        };
+
+        renderChart();
+
+        return () => {
+            cancelled = true;
+            if (chartInstance.current) { chartInstance.current.destroy(); chartInstance.current = null; }
+        };
     }, [analyzed, timeFilter]);
 
     if (!analyzed) {

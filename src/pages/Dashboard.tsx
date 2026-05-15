@@ -440,9 +440,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                         hydratedFeed = hydrated.data;
                         applyStableMarketData(hydrated.data);
                         setLastUpdated(new Date());
-                        setIsLoading(false);
                         hasHydratedFeed = true;
                     }
+                    setIsLoading(false);
+                }
+
+                if (!hasHydratedFeed) {
+                    setLastUpdated(new Date());
                 }
 
                 const response = await DatabaseService.getMarketData(true, hasHydratedFeed);

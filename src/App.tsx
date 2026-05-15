@@ -9,6 +9,7 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 const Dashboard = lazy(async () => ({ default: (await import('./pages/Dashboard')).Dashboard }));
 const TokenDetails = lazy(async () => ({ default: (await import('./pages/TokenDetails')).TokenDetails }));
 const Heatmap = lazy(async () => ({ default: (await import('./pages/Heatmap')).Heatmap }));
+const Sentiment = lazy(async () => ({ default: (await import('./pages/Sentiment')).Sentiment }));
 const Detection = lazy(async () => ({ default: (await import('./pages/Detection')).Detection }));
 const TokenDetection = lazy(async () => ({ default: (await import('./pages/TokenDetection')).TokenDetection }));
 const AiAssistant = lazy(async () => ({ default: (await import('./pages/AiAssistant')).AiAssistant }));
@@ -90,7 +91,7 @@ function AppContent() {
 
 
                             <Route path="/heatmap" element={<Heatmap />} />
-                            <Route path="/sentiment" element={<PlaceholderView title="Sentiment Intelligence" />} />
+                            <Route path="/sentiment" element={<Sentiment />} />
 
                             <Route path="/detection" element={<Detection />} />
                             <Route path="/detection/token/:query" element={<TokenDetection />} />
