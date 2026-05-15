@@ -19,6 +19,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
     "@types/d3-force": "^3.0.10",
+    "apexcharts": "^3.54.1",
     "d3-force": "^3.0.0",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
