@@ -161,6 +161,7 @@ type AssistantToolRequest = {
     chain?: string;
     query?: string;
     responseStyle?: 'brief' | 'detailed';
+    eventIntent?: 'accumulation' | 'performance' | 'moving';
 };
 
 type AssistantScoredTokenCandidate = {
@@ -410,11 +411,32 @@ const scoreAssistantTokenCandidate = (token: any, normalizedQuery: string) => {
     return score;
 };
 
+const assistantTokenFromDetectionEvent = (event: any) => {
+    const token = event?.token || {};
+    if (!token?.ticker && !token?.name && !token?.address) return null;
+
+    return {
+        name: token.name || token.ticker || 'Unknown Token',
+        ticker: token.ticker || token.name || 'TOKEN',
+        address: token.address || token.pairAddress || '',
+        pairAddress: token.pairAddress,
+        chain: token.chain || 'unknown',
+        price: token.price || '$0',
+        h24: token.h24 || `${Number(event?.metrics?.priceChange24h || 0).toFixed(2)}%`,
+        volume24h: token.volume24h || compactUsd(Number(event?.metrics?.volume24h || 0)),
+        liquidity: token.liquidity || compactUsd(Number(event?.metrics?.liquidity || 0)),
+        cap: token.cap || compactUsd(Number(event?.metrics?.marketCap || 0))
+    };
+};
+
 const getAssistantTokenCandidates = async (query: string, chain?: string): Promise<AssistantScoredTokenCandidate[]> => {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
-    const searchResults = await DatabaseService.searchGlobalPairs(trimmed);
+    const [searchResults, detectionFeed] = await Promise.all([
+        DatabaseService.searchGlobalPairs(trimmed).catch(() => []),
+        DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents().catch(() => []))
+    ]);
     const normalizedChain = chain ? chain.toLowerCase() : '';
     const normalizedQuery = trimmed.replace(/^\$/, '').toLowerCase();
     const chainMatches = (token: any) => {
@@ -422,8 +444,18 @@ const getAssistantTokenCandidates = async (query: string, chain?: string): Promi
         const tokenChain = String(token.chain || '').toLowerCase();
         return tokenChain === normalizedChain || normalizeAssistantChainLabel(tokenChain).toLowerCase() === normalizeAssistantChainLabel(chain).toLowerCase();
     };
-    const chainFiltered = searchResults.filter(chainMatches);
-    const candidates = chainFiltered.length ? chainFiltered : searchResults;
+    const detectionTokens = (detectionFeed || [])
+        .map(assistantTokenFromDetectionEvent)
+        .filter(Boolean);
+    const candidateMap = new Map<string, any>();
+    for (const token of [...searchResults, ...detectionTokens]) {
+        const key = `${String(token?.chain || '').toLowerCase()}:${String(token?.address || token?.pairAddress || token?.ticker || token?.name || '').toLowerCase()}`;
+        if (!candidateMap.has(key)) candidateMap.set(key, token);
+    }
+
+    const mergedResults = [...candidateMap.values()];
+    const chainFiltered = mergedResults.filter(chainMatches);
+    const candidates = chainFiltered.length ? chainFiltered : mergedResults;
 
     return candidates
         .map((token: any) => ({
@@ -535,6 +567,117 @@ const buildAssistantDetectionBrief = (events: any[], detailed: boolean) => {
     ].filter(Boolean).join('\n');
 };
 
+const assistantEventText = (event: any) => [
+    event?.eventType,
+    event?.summary,
+    ...(Array.isArray(event?.triggers) ? event.triggers : [])
+].filter(Boolean).join(' ').toLowerCase();
+
+const getAssistantEventIntentLabel = (intent?: AssistantToolRequest['eventIntent']) => {
+    if (intent === 'accumulation') return 'accumulation';
+    if (intent === 'performance') return 'strong performance';
+    if (intent === 'moving') return 'tokens moving now';
+    return 'recent Detection Engine';
+};
+
+const filterAssistantEventsByIntent = (events: any[], intent?: AssistantToolRequest['eventIntent']) => {
+    const sorted = [...(events || [])].sort((a, b) => {
+        const scoreDelta = Number(b?.score || 0) - Number(a?.score || 0);
+        if (scoreDelta) return scoreDelta;
+        return Number(b?.detectedAt || 0) - Number(a?.detectedAt || 0);
+    });
+
+    if (intent === 'accumulation') {
+        return sorted.filter((event) => /accumulat/.test(String(event?.eventType || '').toLowerCase()));
+    }
+
+    if (intent === 'performance') {
+        return sorted.filter((event) => {
+            const priceChange = Number(event?.metrics?.priceChange24h || parseAssistantMarketNumber(event?.token?.h24));
+            const eventText = assistantEventText(event);
+            return priceChange > 0 && !/distribution|sell-side|market stress/.test(eventText);
+        }).sort((a, b) => {
+            const priceDelta = Number(b?.metrics?.priceChange24h || parseAssistantMarketNumber(b?.token?.h24)) -
+                Number(a?.metrics?.priceChange24h || parseAssistantMarketNumber(a?.token?.h24));
+            if (priceDelta) return priceDelta;
+            return Number(b?.score || 0) - Number(a?.score || 0);
+        });
+    }
+
+    if (intent === 'moving') {
+        return sorted.filter((event) => {
+            const priceChange = Math.abs(Number(event?.metrics?.priceChange24h || parseAssistantMarketNumber(event?.token?.h24)));
+            return priceChange >= 3 || Number(event?.score || 0) >= 60 || /unusual activity|volume|liquidity|market stress|accumulat|recovery/.test(assistantEventText(event));
+        });
+    }
+
+    return sorted;
+};
+
+const formatAssistantActivityLine = (activity: any) => {
+    const value = Number(activity?.usdValue || 0);
+    const valueText = value > 0 ? ` (${compactUsd(value)})` : '';
+    return `${activity?.title || activity?.type || 'Activity'}: ${activity?.description || 'Recent token activity detected.'}${valueText}.`;
+};
+
+const buildAssistantEventIntentBrief = async (
+    events: any[],
+    intent?: AssistantToolRequest['eventIntent'],
+    detailed = false
+) => {
+    const matchingEvents = filterAssistantEventsByIntent(events, intent);
+    const visibleEvents = matchingEvents.slice(0, detailed ? 8 : 5);
+    const label = getAssistantEventIntentLabel(intent);
+
+    if (!visibleEvents.length) {
+        return [
+            `I checked the stored Detection Engine feed, but I do not see current ${label} events in the available snapshot.`,
+            'Try opening Detection Engine for the full feed, or ask about a specific token and I can search its event context directly.'
+        ].join('\n');
+    }
+
+    const activityByToken = new Map<string, any[]>();
+    await Promise.all(visibleEvents.map(async (event) => {
+        const token = event?.token || {};
+        const tokenAddress = token.address || token.pairAddress || '';
+        const tokenChain = normalizeAssistantChainId(token.chain);
+        const key = `${tokenChain}:${String(tokenAddress || token.ticker || '').toLowerCase()}`;
+        if (!tokenAddress || !tokenChain || activityByToken.has(key)) return;
+        const activities = await withAssistantTimeout(
+            ImpactfulTokenActivityStore.getActivities(tokenChain, tokenAddress).catch(() => []),
+            2_500,
+            []
+        );
+        activityByToken.set(key, activities.slice(0, 2));
+    }));
+
+    const lines = visibleEvents.flatMap((event: any, index: number) => {
+        const token = event?.token || {};
+        const label = token.ticker || token.name || 'Unknown token';
+        const tokenAddress = token.address || token.pairAddress || '';
+        const tokenChain = normalizeAssistantChainId(token.chain);
+        const activityKey = `${tokenChain}:${String(tokenAddress || token.ticker || '').toLowerCase()}`;
+        const activities = activityByToken.get(activityKey) || [];
+        const priceMove = safeAssistantText(token.h24 || `${Number(event?.metrics?.priceChange24h || 0).toFixed(2)}%`, 'unknown');
+        const baseLine = `${index + 1}. ${label}: ${event.eventType || 'Detection'} (${event.severity || 'Medium'}, score ${event.score || 0}). 24h move ${priceMove}, volume ${compactUsd(event?.metrics?.volume24h)}, liquidity ${compactUsd(event?.metrics?.liquidity)}.`;
+        const meaningLine = `   Why it matters: ${explainAssistantDetectionImplication(event)}`;
+        const activityLines = activities.length
+            ? activities.map((activity: any) => `   Event feed: ${formatAssistantActivityLine(activity)}`)
+            : [`   Event feed: ${safeAssistantText(event.summary, 'No separate wallet-impact activity is stored yet, so this read is based on the Detection Engine event metrics.')}`];
+        return [baseLine, meaningLine, ...(detailed ? activityLines : activityLines.slice(0, 1))];
+    });
+
+    return [
+        `I found ${matchingEvents.length} ${label} event${matchingEvents.length === 1 ? '' : 's'} in the stored Detection Engine feed.`,
+        `Here are the token-level reads with recent event-feed context:`,
+        '',
+        ...lines,
+        matchingEvents.length > visibleEvents.length ? `I showed the top ${visibleEvents.length} by score; ${matchingEvents.length - visibleEvents.length} more matching events are available in the feed.` : '',
+        '',
+        'Beginner takeaway: these are attention signals. Accumulation and performance events can be constructive, but they still need liquidity, holder quality, and follow-through before you trust the move.'
+    ].filter(Boolean).join('\n');
+};
+
 type AssistantEntityResolution = {
     kind: 'token' | 'wallet' | 'unknown';
     confidence: 'high' | 'medium' | 'low';
@@ -608,6 +751,15 @@ const buildAssistantTimeoutResponse = (message: string) => ({
     answer: buildLocalConversationResponse(message),
     tool: 'conversation'
 });
+
+const getAssistantDetectionEventKey = (event: any) => {
+    const token = event?.token || {};
+    return [
+        normalizeAssistantChainId(token.chain),
+        String(token.address || token.pairAddress || token.ticker || '').toLowerCase(),
+        String(event?.eventType || '').toLowerCase()
+    ].join(':');
+};
 
 const matchesAssistantTokenEvent = (event: any, addressOrQuery: string, chain?: string) => {
     const query = String(addressOrQuery || '').toLowerCase();
@@ -703,13 +855,19 @@ const resolveAssistantEntity = async (
 
 const getAssistantDetectionContext = async (addressOrQuery: string, chain?: string) => {
     const normalizedChain = normalizeAssistantChainId(chain);
+    const feed = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+    const matchingFeedEvents = (feed || []).filter((event: any) => matchesAssistantTokenEvent(event, addressOrQuery, normalizedChain));
+
     if (addressOrQuery && normalizedChain) {
         const event = await DetectionSnapshotStore.getToken(normalizedChain, addressOrQuery).catch(() => null);
-        if (event) return [event];
+        if (event) {
+            const key = getAssistantDetectionEventKey(event);
+            const extraEvents = matchingFeedEvents.filter((item: any) => getAssistantDetectionEventKey(item) !== key);
+            return [event, ...extraEvents].slice(0, 5);
+        }
     }
 
-    const feed = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
-    return (feed || []).filter((event: any) => matchesAssistantTokenEvent(event, addressOrQuery, normalizedChain)).slice(0, 5);
+    return matchingFeedEvents.slice(0, 5);
 };
 
 const getAssistantSafeScanSummary = async (address: string, chain: string) => {
@@ -1176,6 +1334,18 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         };
     }
 
+    if (!hasExplicitTokenQuery && /\b(tokens?|coins?)\b/.test(lower) && /\b(accumulat\w*|buy pressure|buyer|net inflow)\b/.test(lower)) {
+        return { tool: 'get_detection_updates', responseStyle: 'detailed', eventIntent: 'accumulation' };
+    }
+
+    if (!hasExplicitTokenQuery && /\b(tokens?|coins?)\b/.test(lower) && /\b(performing well|best performing|strong performers|gainers|doing well)\b/.test(lower)) {
+        return { tool: 'get_detection_updates', responseStyle: 'detailed', eventIntent: 'performance' };
+    }
+
+    if (!hasExplicitTokenQuery && /\b(tokens?|coins?)\b/.test(lower) && /\b(moving|move|active|unusual activity)\b/.test(lower)) {
+        return { tool: 'get_detection_updates', responseStyle: 'detailed', eventIntent: 'moving' };
+    }
+
     if (hasTokenQuery && hasTokenSpecificIntent) {
         return {
             tool: /\b(price|overview|details)\b/.test(lower) && !/\b(performing|performance|moving|move|doing|today|deep|analysis|analy[sz]e|what happened|recent events?)\b/.test(lower) ? 'get_token_overview' : 'get_token_deep_brief',
@@ -1270,6 +1440,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
 const chooseAssistantTool = async (message: string, history: AssistantConversationMessage[] = []) => {
     const localChoice = chooseAssistantToolLocally(message, history);
     const explicitTokenQuery = extractAssistantAddress(message) || message.match(/\$([a-zA-Z][a-zA-Z0-9]{1,15})\b/)?.[1] || (hasExplicitAssistantTokenQuery(message) ? extractAssistantTokenQuery(message, []) : '');
+    if (localChoice.eventIntent && !explicitTokenQuery) return localChoice;
 
     try {
         const modelChoice = await chooseAssistantToolWithModel(message, history);
@@ -1277,6 +1448,9 @@ const chooseAssistantTool = async (message: string, history: AssistantConversati
             const localExplicitQuery = String(localChoice.query || localChoice.address || explicitTokenQuery || '').toLowerCase();
             const modelExplicitQuery = String(modelChoice.query || modelChoice.address || '').replace(/^\$/, '').toLowerCase();
             const modelChoseTokenTool = modelChoice.tool === 'get_token_deep_brief' || modelChoice.tool === 'get_token_overview' || modelChoice.tool === 'get_token_activity';
+            if (localChoice.eventIntent && (modelChoice.tool === 'conversation' || modelChoice.tool === 'get_detection_updates' || modelChoice.tool === 'get_platform_updates')) {
+                return localChoice;
+            }
             const modelUsedDifferentExplicitToken =
                 Boolean(explicitTokenQuery) &&
                 Boolean(localExplicitQuery) &&
@@ -1293,7 +1467,7 @@ const chooseAssistantTool = async (message: string, history: AssistantConversati
             }
 
             if (explicitTokenQuery && modelChoseTokenTool) {
-                if (localChoice.tool === 'get_token_deep_brief' && modelChoice.tool === 'get_token_overview') {
+                if (localChoice.tool === 'get_token_deep_brief' && (modelChoice.tool === 'get_token_overview' || modelChoice.tool === 'get_token_activity')) {
                     return localChoice;
                 }
 
@@ -1474,6 +1648,26 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             return {
                 answer: 'I checked the Detection Engine, but there are no current detection events available from the local feed.',
                 tool: 'detection_updates',
+                actions
+            };
+        }
+
+        if (request.eventIntent) {
+            return {
+                answer: await buildAssistantEventIntentBrief(allEvents, request.eventIntent, detailed),
+                tool: 'detection_updates',
+                data: {
+                    totalEvents: allEvents.length,
+                    eventIntent: request.eventIntent,
+                    events: filterAssistantEventsByIntent(allEvents, request.eventIntent).slice(0, detailed ? 8 : 5).map((event: any) => ({
+                        token: event?.token?.ticker || event?.token?.name,
+                        eventType: event?.eventType,
+                        severity: event?.severity,
+                        score: event?.score,
+                        implication: explainAssistantDetectionImplication(event),
+                        href: eventTokenHref(event)
+                    }))
+                },
                 actions
             };
         }

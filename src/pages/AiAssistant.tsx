@@ -44,9 +44,9 @@ type ChatMenuItem = {
 };
 
 const SUGGESTED_PROMPTS = [
-    'Why is $PENGU moving?',
-    'Suggest 3 tokens smart money is watching',
-    'Who are the top wallets buying today?',
+    'How is $KISHU moving?',
+    'What tokens are performing well?',
+    'Tokens with accumulation events',
     'Run a risk read on a token'
 ];
 
@@ -167,9 +167,9 @@ const notificationToneClass = (tone: AiAssistantNotification['tone']) => {
 };
 
 const promptToMessage = (prompt: string) => {
-    if (prompt === 'Why is $PENGU moving?') return 'Why is $PENGU moving today?';
-    if (prompt === 'Suggest 3 tokens smart money is watching') return 'Suggest 3 tokens that smart money is watching and explain why';
-    if (prompt === 'Who are the top wallets buying today?') return 'Who are the top wallets buying today?';
+    if (prompt === 'How is $KISHU moving?') return 'How is $KISHU moving today?';
+    if (prompt === 'What tokens are performing well?') return 'What tokens are performing well today?';
+    if (prompt === 'Tokens with accumulation events') return 'Show me tokens with accumulation events';
     return 'Run a risk read on a token';
 };
 
