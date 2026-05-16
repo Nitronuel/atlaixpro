@@ -231,8 +231,11 @@ const getRecentAssistantAddress = (messages: AssistantConversationMessage[] = []
 const TOKEN_QUERY_STOP_WORDS = new Set([
     'what', 'is', 'the', 'current', 'price', 'of', 'coin', 'token', 'please', 'pls',
     'show', 'me', 'tell', 'about', 'for', 'on', 'chain', 'details', 'overview', 'market',
-    'cap', 'liquidity', 'volume', 'this', 'that', 'yes', 'it', 'one', 'talking',
-    'can', 'you', 'search', 'find', 'called', 'named', 'known', 'as', 'look', 'lookup', 'up'
+    'cap', 'liquidity', 'volume', 'this', 'that', 'yes', 'it', 'its', 'one', 'talking',
+    'can', 'you', 'search', 'find', 'called', 'named', 'known', 'as', 'look', 'lookup', 'up',
+    'detected', 'detection', 'engine', 'event', 'events', 'signals', 'signal', 'updates',
+    'recent', 'latest', 'newest', 'from', 'in', 'with', 'score', 'scores', 'severity',
+    'data', 'right', 'now'
 ]);
 
 const cleanAssistantTokenQuery = (value: string) => value
@@ -251,6 +254,9 @@ const extractAssistantTokenQuery = (message: string, history: AssistantConversat
     if (cashtag) return cashtag;
 
     const directPatterns = [
+        /\b(?:tell\s+me\s+about|show\s+me|explain)\s+(?:the\s+)?(?:detected\s+)?(?:events?|detections?|signals?)\s+(?:in|for|on|about)\s+([a-zA-Z0-9$.-]{2,32})\b/i,
+        /\b(?:detected\s+)?(?:events?|detections?|signals?)\s+(?:in|for|on|about)\s+([a-zA-Z0-9$.-]{2,32})\b/i,
+        /\bdetection(?:\s+engine)?\s+(?:events?|signals?|context|updates?)\s+(?:in|for|on|about)\s+([a-zA-Z0-9$.-]{2,32})\b/i,
         /\b(?:token|coin)\s+(?:called|named|known\s+as)\s+([a-zA-Z0-9$.-]{2,32})\b/i,
         /\b(?:search|find|lookup|look\s+up)\s+(?:for\s+)?(?:the\s+)?(?:token|coin)?\s*(?:called|named)?\s+([a-zA-Z0-9$.-]{2,32})\b/i,
         /\b(?:price|details|overview|market\s*cap|liquidity|volume|performing|performance|moving|move|doing)\s+(?:of|for|on)?\s+(.+?)(?:\?|$)/i,
@@ -276,12 +282,55 @@ const extractAssistantTokenQuery = (message: string, history: AssistantConversat
     return '';
 };
 
+const extractRecentAssistantTokenFromContext = (history: AssistantConversationMessage[] = []) => {
+    for (const item of [...history].reverse()) {
+        if (item.role !== 'user') continue;
+        const explicitToken = extractAssistantTokenQuery(String(item.text || ''), []);
+        if (explicitToken) {
+            return /^[a-z0-9$.-]{2,15}$/i.test(explicitToken) ? explicitToken.toUpperCase() : explicitToken;
+        }
+    }
+
+    const tokenMentions: string[] = [];
+    const patterns = [
+        /\bAtlaix Brief:\s+.+?\(([A-Z0-9$.-]{2,32})\)/g,
+        /\b([A-Z][A-Z0-9$.-]{1,31})\s+\(([A-Z][A-Z0-9$.-]{1,31})\)\s+on\b/g,
+        /\b\d+\.\s+([A-Z0-9$.-]{2,32}):\s+/g,
+        /\b([A-Z0-9$.-]{2,32}):\s+(?:Market Stress|Accumulation|Distribution|Recovery|Liquidity Event|Thin Liquidity Risk|Unusual Activity|Conflicting Signals|Volume Spike)/g,
+        /\b([A-Z0-9$.-]{2,32})\s+(?:detection|detections|detected|events|signals|risk|risky|liquidity|price|volume)\b/g
+    ];
+
+    for (const item of [...history].reverse()) {
+        const text = String(item.text || '');
+        for (const pattern of patterns) {
+            pattern.lastIndex = 0;
+            for (const match of text.matchAll(pattern)) {
+                const token = cleanAssistantTokenQuery(match[2] || match[1] || '');
+                const lower = token.toLowerCase();
+                const looksLikeMetric = /^\$?\d/.test(token) || token.includes('.') || /\b(k|m|b|t)\b/i.test(token);
+                if (token && !looksLikeMetric && !TOKEN_QUERY_STOP_WORDS.has(lower)) tokenMentions.push(token);
+            }
+        }
+        if (tokenMentions.length) return tokenMentions[0];
+    }
+
+    return '';
+};
+
+const isAssistantBroadDetectionQuery = (message: string) => {
+    const lower = message.toLowerCase();
+    const mentionsDetection = /\b(detection|detections?|detected|events?|signals?|admitted|newest|latest|recent)\b/.test(lower);
+    const broadScope = /\b(newest|latest|recent|all|high|medium|low|severity|score|today|24h|last hour|past hour|bsc|bnb|solana|base|ethereum|polygon|chain|chains)\b/.test(lower);
+    return mentionsDetection && broadScope && !hasExplicitAssistantTokenQuery(message);
+};
+
 const hasExplicitAssistantTokenQuery = (message: string) =>
     Boolean(
         extractAssistantAddress(message) ||
         message.match(/\$[a-zA-Z][a-zA-Z0-9]{1,15}\b/) ||
         message.match(/\b(?:token|coin)\s+(?:called|named|known\s+as)\s+[a-zA-Z0-9$.-]{2,32}\b/i) ||
-        message.match(/\b(?:search|find|lookup|look\s+up)\s+(?:for\s+)?(?:the\s+)?(?:token|coin)?\s*(?:called|named)?\s+[a-zA-Z0-9$.-]{2,32}\b/i)
+        message.match(/\b(?:search|find|lookup|look\s+up)\s+(?:for\s+)?(?:the\s+)?(?:token|coin)?\s*(?:called|named)?\s+[a-zA-Z0-9$.-]{2,32}\b/i) ||
+        message.match(/\b(?:detected\s+)?(?:events?|detections?|signals?)\s+(?:in|for|on|about)\s+[a-zA-Z0-9$.-]{2,32}\b/i)
     );
 
 const normalizeAssistantChainLabel = (chain: string | undefined) => {
@@ -535,8 +584,18 @@ const assistantEventReference = (event: any) => ({
     href: eventTokenHref(event)
 });
 
-const getDetectionFeedForAssistant = async () =>
-    DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+const getAssistantDetectionTimestamp = (event: any) => Number(event?.detectedAt || 0);
+
+const sortAssistantDetectionEventsByFreshness = (events: any[]) => [...(events || [])].sort((a, b) => {
+    const timeDelta = getAssistantDetectionTimestamp(b) - getAssistantDetectionTimestamp(a);
+    if (timeDelta) return timeDelta;
+    return Number(b?.score || 0) - Number(a?.score || 0);
+});
+
+const getDetectionFeedForAssistant = async () => {
+    const events = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+    return sortAssistantDetectionEventsByFreshness(events || []);
+};
 
 const normalizeAssistantDetectionEventType = (value: string | undefined) => {
     const lower = String(value || '').toLowerCase();
@@ -648,6 +707,24 @@ const formatAssistantDetectionLine = (event: any) => {
     return `${label}: ${event.eventType || 'Detection'} (${event.severity || 'Medium'}) with score ${event.score || 0}. 24h volume ${volume}, liquidity ${liquidity}.`;
 };
 
+const formatAssistantRelativeTime = (timestamp: number) => {
+    const ageMs = Date.now() - Number(timestamp || 0);
+    if (!Number.isFinite(ageMs) || ageMs < 0) return 'just now';
+    const minutes = Math.round(ageMs / 60_000);
+    if (minutes < 2) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `${hours}h ago`;
+    return `${Math.round(hours / 24)}d ago`;
+};
+
+const formatAssistantDetectionDetailLine = (event: any) => {
+    const base = formatAssistantDetectionLine(event);
+    const summary = safeAssistantText(event?.summary, '').replace(/\s+/g, ' ').trim();
+    const time = formatAssistantRelativeTime(getAssistantDetectionTimestamp(event));
+    return summary ? `${base} Detected ${time}. ${summary}` : `${base} Detected ${time}.`;
+};
+
 const explainAssistantDetectionImplication = (event: any) => {
     const eventType = String(event?.eventType || '').toLowerCase();
     const severity = String(event?.severity || 'Medium');
@@ -693,7 +770,8 @@ const buildAssistantDetectionBrief = (events: any[], detailed: boolean) => {
         .join(', ');
 
     return [
-        `I found ${recentEvents.length} recent Detection Engine event${recentEvents.length === 1 ? '' : 's'} in the stored feed.`,
+        `I found ${recentEvents.length} recent Detection Engine event${recentEvents.length === 1 ? '' : 's'} in the current feed.`,
+        formatAssistantFreshnessLine(recentEvents),
         `Risk mix: ${highSeverity} High, ${mediumSeverity} Medium, ${Math.max(0, recentEvents.length - highSeverity - mediumSeverity)} lower/other severity.`,
         typeSummary ? `Main patterns: ${typeSummary}.` : '',
         '',
@@ -703,7 +781,7 @@ const buildAssistantDetectionBrief = (events: any[], detailed: boolean) => {
             : `${index + 1}. ${formatAssistantDetectionLine(event)}`
         ),
         recentEvents.length > visibleEvents.length
-            ? `I summarized the first ${visibleEvents.length}; there are ${recentEvents.length - visibleEvents.length} more stored events behind that.`
+            ? `I summarized the first ${visibleEvents.length}; there are ${recentEvents.length - visibleEvents.length} more current-feed events behind that.`
             : '',
         '',
         detailed
@@ -1023,7 +1101,7 @@ const resolveAssistantEntity = async (
 
 const getAssistantDetectionContext = async (addressOrQuery: string, chain?: string) => {
     const normalizedChain = normalizeAssistantChainId(chain);
-    const feed = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+    const feed = await getDetectionFeedForAssistant();
     const matchingFeedEvents = (feed || []).filter((event: any) => matchesAssistantTokenEvent(event, addressOrQuery, normalizedChain));
 
     if (addressOrQuery && normalizedChain) {
@@ -1086,6 +1164,64 @@ const summarizeAssistantLiquidity = (token: any, detectionEvents: any[]) => {
     ].filter(Boolean);
 
     return { liquidityUsd, marketCapUsd, volumeUsd, quality, notes };
+};
+
+const isAssistantStanceQuestion = (message: string) =>
+    /\b(bullish|bearish|buy|sell|long|short|ape|entry|good idea|should i|worth it|conviction|thoughts?|take|opinion|risk|risky|safe|danger|dangerous)\b/i.test(message);
+
+const buildAssistantTokenStance = (
+    message: string,
+    token: any,
+    liquidity: ReturnType<typeof summarizeAssistantLiquidity>,
+    recentEvents: any[],
+    safeScan: any,
+    safeError: string | undefined
+) => {
+    const asksRisk = /\b(risk|risky|safe|danger|dangerous)\b/i.test(message);
+    const priceChange = parseAssistantMarketNumber(token?.h24);
+    const eventText = recentEvents.map((event: any) => `${event?.eventType || ''} ${event?.severity || ''}`).join(' ').toLowerCase();
+    const hasHighRiskEvent = recentEvents.some((event: any) => event?.severity === 'High' || /stress|thin liquidity|distribution|sell|conflicting/.test(String(event?.eventType || '').toLowerCase()));
+    const hasConstructiveEvent = recentEvents.some((event: any) => /accumulation|recovery|breakout|buy/.test(String(event?.eventType || '').toLowerCase()));
+    const scanRisk = String(safeScan?.riskLevel || '').toLowerCase();
+    const scanIsElevated = !safeError && /high|critical|elevated/.test(scanRisk);
+
+    if (asksRisk) {
+        if (hasHighRiskEvent || scanIsElevated || priceChange < -10) {
+            return [
+                `Short take: yes, ${token?.ticker || token?.name || 'this token'} currently looks risk-elevated from the available Atlaix data.`,
+                `Why: ${recentEvents[0]?.eventType ? `the leading Detection signal is ${recentEvents[0].eventType} (${recentEvents[0].severity || 'Medium'})` : 'the token context is not clean'}${priceChange < -10 ? `, and it is down ${safeAssistantText(token?.h24)} over 24h` : ''}.`,
+                'Plain English: this is a caution setup. I would not treat it as clean until the chart, liquidity, and holder/supply context improve.'
+            ];
+        }
+
+        return [
+            `Short take: I do not see a major risk flag for ${token?.ticker || token?.name || 'this token'} from the available Atlaix data, but the evidence is not complete.`,
+            recentEvents.length ? `Why: Detection context is ${recentEvents.map((event: any) => `${event.eventType} (${event.severity})`).join(', ')}.` : 'Why: I do not see a token-specific Detection event in the current feed.',
+            'Plain English: not an automatic red flag, but still verify chart and holder context before trusting it.'
+        ];
+    }
+
+    if (hasHighRiskEvent || scanIsElevated) {
+        return [
+            `Short take: I would not call ${token?.ticker || token?.name || 'this token'} cleanly bullish from the available Atlaix data.`,
+            `Why: ${priceChange > 0 ? `it is up ${safeAssistantText(token?.h24)} over 24h, but ` : ''}${recentEvents[0]?.eventType ? `the strongest current signal is ${recentEvents[0].eventType} (${recentEvents[0].severity || 'Medium'})` : 'the detection context is not clean'}, and liquidity/volume conditions need caution.`,
+            'Plain English: it may still move, but this is not a comfortable green-light setup. I would want chart confirmation, holder risk, and liquidity stability before trusting the bullish case.'
+        ];
+    }
+
+    if (priceChange > 0 && hasConstructiveEvent && liquidity.liquidityUsd >= 250_000) {
+        return [
+            `Short take: ${token?.ticker || token?.name || 'this token'} has a constructive read, but I would still treat it as watchlist-bullish rather than blindly bullish.`,
+            `Why: price is up ${safeAssistantText(token?.h24)}, liquidity is ${safeAssistantText(token?.liquidity, '$0')}, and Detection has ${recentEvents[0]?.eventType || 'constructive'} context.`,
+            'Plain English: there is something to watch, but confirmation still matters.'
+        ];
+    }
+
+    return [
+        `Short take: I do not have enough clean evidence to be strongly bullish or bearish on ${token?.ticker || token?.name || 'this token'}.`,
+        eventText ? `Why: the current Detection context is ${recentEvents.map((event: any) => `${event.eventType} (${event.severity})`).join(', ')}.` : 'Why: I do not see enough token-specific Detection context yet.',
+        'Plain English: interesting, but not decisive.'
+    ];
 };
 
 const formatAssistantTokenCandidate = (token: any, index: number) => {
@@ -1164,7 +1300,12 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
                 : `Interpretation: watchable, but not conclusive. I can summarize the available data, but I do not see enough strong recent app signals to call it cleanly bullish or bearish.`;
 
     const tokenLabel = `${token?.name || token?.ticker || 'Token'}${token?.ticker ? ` (${token.ticker})` : ''}`;
+    const stanceLines = isAssistantStanceQuestion(message)
+        ? buildAssistantTokenStance(message, token, liquidity, recentEvents, safeScan, safeError)
+        : [];
     const answer = [
+        ...stanceLines,
+        stanceLines.length ? '' : '',
         `Atlaix Brief: ${tokenLabel}`,
         '',
         'Here is what I am seeing',
@@ -1198,22 +1339,34 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
 
     const params = new URLSearchParams({ address: tokenAddress, chain: tokenChain });
     const safeScanChain = toAlchemyAssistantChain(tokenChain, tokenAddress);
-    return {
-        answer,
-        tool: 'get_token_deep_brief',
-        data: {
-            resolution,
-            token,
-            detectionEvents: recentEvents,
-            activities: recentActivities,
-            safeScan: safeScan && !safeError ? {
+    const responseData = {
+        resolution,
+        token,
+        detectionEvents: recentEvents,
+        activities: recentActivities,
+        safeScan: safeScan && !safeError ? {
                 riskLevel: (safeScan as any).riskLevel,
                 confidence: (safeScan as any).confidence,
                 coordinatedSupplyPct: (safeScan as any).coordinatedSupplyPct,
                 top10Pct: (safeScan as any).top10Pct
-            } : null,
-            confidence
-        },
+        } : null,
+        confidence
+    };
+    const groundedAnswer = await generateAssistantGroundedAnswer({
+        message,
+        history,
+        tool: 'get_token_deep_brief',
+        data: responseData,
+        draftAnswer: answer
+    }).catch((error) => {
+        console.warn('[AiAssistant] grounded token brief unavailable; using fallback draft', error instanceof Error ? error.message : error);
+        return null;
+    });
+
+    return {
+        answer: groundedAnswer || answer,
+        tool: 'get_token_deep_brief',
+        data: responseData,
         actions: [
             { label: 'Open Token Details', href: tokenAddress ? `/token/${encodeURIComponent(tokenAddress)}` : '/dashboard', kind: 'navigate' },
             { label: 'Open Detection View', href: tokenAddress ? `/detection/token/${encodeURIComponent(tokenAddress)}?${params.toString()}` : '/detection', kind: 'navigate' },
@@ -1287,7 +1440,7 @@ const buildWalletDeepBrief = async (address: string, chain: string) => {
 
 const buildPlatformUpdateBrief = async () => {
     const [events, smartStatus, marketResponse] = await Promise.all([
-        DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents()),
+        getDetectionFeedForAssistant(),
         Promise.resolve(smartAlertRunner.getStatus()),
         DatabaseService.getMarketData(false, true).catch(() => null)
     ]);
@@ -1328,7 +1481,7 @@ const buildPlatformUpdateBrief = async () => {
 };
 
 const loadAssistantNotifications = async (): Promise<AssistantNotification[]> => {
-    const events = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+    const events = await getDetectionFeedForAssistant();
     const notifications: AssistantNotification[] = (events || []).slice(0, 6).map((event: any, index: number) => ({
         id: `detection-${event?.token?.address || event?.token?.ticker || index}-${event?.detectedAt || index}`,
         title: `${event?.token?.ticker || event?.token?.name || 'Token'} ${event?.eventType || 'Detection'}`,
@@ -1457,7 +1610,7 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
             responseStyle: parsed.responseStyle === 'detailed' ? 'detailed' : 'brief',
             eventType: typeof parsed.eventType === 'string' ? parsed.eventType : undefined,
             severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
-            scoreMin: Number.isFinite(Number(parsed.scoreMin)) ? Number(parsed.scoreMin) : undefined,
+            scoreMin: Number.isFinite(Number(parsed.scoreMin)) && Number(parsed.scoreMin) > 0 ? Number(parsed.scoreMin) : undefined,
             timeWindow: typeof parsed.timeWindow === 'string' ? parsed.timeWindow : undefined,
             alertMode: typeof parsed.alertMode === 'string' ? parsed.alertMode : undefined
         };
@@ -1518,17 +1671,94 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
     const hasExplicitTokenQuery = hasExplicitAssistantTokenQuery(message);
     const hasTokenSpecificIntent = /\b(search|find|lookup|look up|called|named|performing|performance|moving|move|doing|price|market\s*cap|liquidity|volume|overview|details|deep|analysis|analy[sz]e|what happened|recent events?)\b/.test(lower);
     const hasTokenQuery = Boolean(address || hasExplicitTokenQuery || (tokenQuery && hasTokenSpecificIntent));
+    const refersToPriorToken = /\b(this|that|it|its|the)\s+(?:token|coin|one|event|events|detection|detections|signal|signals|liquidity|price|volume|market\s*cap)\b/i.test(message)
+        || /\b(it|this|that)\s+(?:risky|safe|bullish|bearish|good|bad|worth|strong|weak)\b/i.test(message)
+        || /\b(explain|mean|means|plain english|break it down|what about)\b/i.test(message) && /\b(it|its|this|that)\b/i.test(message)
+        || (isAssistantStanceQuestion(message) && /\b(it|this|that)\b/i.test(message));
+    const contextTokenQuery = refersToPriorToken ? extractRecentAssistantTokenFromContext(history) : '';
+    const effectiveTokenQuery = address || tokenQuery || contextTokenQuery;
+    const hasDetectionEventQuestion = /\b(detected|detection|detections?|events?|signals?|admitted|qualified|score|severity)\b/.test(lower);
 
     if (/\b(compare|versus|vs\.?|against|which\s+(?:one|token|coin)\s+is\s+better)\b/.test(lower)) {
         return { tool: 'compare_tokens', query: message, responseStyle: 'detailed' };
+    }
+
+    if (isAssistantBroadDetectionQuery(message)) {
+        const filters = extractAssistantDetectionFilters(message);
+        return {
+            tool: 'get_detection_filtered',
+            responseStyle: 'detailed',
+            eventType: filters.eventType,
+            severity: filters.severity,
+            scoreMin: filters.scoreMin,
+            chain: filters.chain,
+            timeWindow: filters.hours ? `${filters.hours}h` : undefined
+        };
+    }
+
+    if (contextTokenQuery && /\b(price|market\s*cap|mcap|overview|details?)\b/.test(lower) && !/\b(liquidity|volume|thoughts?|bullish|bearish|risk|risky|explain|mean|plain english|break it down)\b/.test(lower)) {
+        return {
+            tool: 'get_token_overview',
+            query: contextTokenQuery,
+            responseStyle: 'detailed'
+        };
+    }
+
+    if (contextTokenQuery && /\b(explain|mean|means|plain english|break it down|what does|why does|why is|what about)\b/.test(lower)) {
+        return {
+            tool: /\b(liquidity|price|volume|market\s*cap|thoughts?|bullish|bearish|risk|risky)\b/.test(lower)
+                ? 'get_token_deep_brief'
+                : 'get_detection_filtered',
+            query: contextTokenQuery,
+            responseStyle: 'detailed'
+        };
     }
 
     if (/\b(why|how)\b/.test(lower) && /\b(qualified|qualifies|admitted|entered|score|scored|accepted|allowed into|detection)\b/.test(lower)) {
         return {
             tool: 'explain_detection_admission',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : undefined,
+            responseStyle: 'detailed'
+        };
+    }
+
+    if (hasDetectionEventQuestion && effectiveTokenQuery && !isAssistantBroadDetectionQuery(message) && !/\b(most recent|latest|updates?|whole platform|all tokens|all events|overall)\b/.test(lower)) {
+        const filters = extractAssistantDetectionFilters(message);
+        return {
+            tool: 'get_detection_filtered',
+            address,
+            query: effectiveTokenQuery,
+            responseStyle: 'detailed',
+            eventType: filters.eventType,
+            severity: filters.severity,
+            scoreMin: filters.scoreMin,
+            chain: address ? inferAssistantChain(message, address) : filters.chain,
+            timeWindow: filters.hours ? `${filters.hours}h` : undefined
+        };
+    }
+
+    if (contextTokenQuery && isAssistantStanceQuestion(message)) {
+        return {
+            tool: 'get_token_deep_brief',
+            query: contextTokenQuery,
+            responseStyle: 'detailed'
+        };
+    }
+
+    if (contextTokenQuery && /\b(risk|risky|safe|danger|bullish|bearish|liquidity|volume)\b/.test(lower)) {
+        return {
+            tool: 'get_token_deep_brief',
+            query: contextTokenQuery,
+            responseStyle: 'detailed'
+        };
+    }
+
+    if (contextTokenQuery && /\b(what does|mean|means|implication|interpret|explain|risk|concern|should i|is this|for the token)\b/.test(lower)) {
+        return {
+            tool: 'get_detection_filtered',
+            query: contextTokenQuery,
             responseStyle: 'detailed'
         };
     }
@@ -1537,7 +1767,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return {
             tool: 'get_token_holders',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : undefined,
             responseStyle: 'detailed'
         };
@@ -1547,7 +1777,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return {
             tool: 'open_token_details',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : undefined
         };
     }
@@ -1556,7 +1786,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return {
             tool: 'prepare_linked_alert',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : undefined,
             alertMode: 'linked'
         };
@@ -1567,7 +1797,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return {
             tool: 'prepare_detection_alert',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : filters.chain,
             eventType: filters.eventType,
             severity: filters.severity,
@@ -1579,7 +1809,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return {
             tool: 'watch_token_activity',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : undefined,
             responseStyle: 'detailed'
         };
@@ -1623,7 +1853,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return {
             tool: /\b(price|overview|details)\b/.test(lower) && !/\b(performing|performance|moving|move|doing|today|deep|analysis|analy[sz]e|what happened|recent events?)\b/.test(lower) ? 'get_token_overview' : 'get_token_deep_brief',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : undefined,
             responseStyle: 'detailed'
         };
@@ -1659,7 +1889,7 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         return {
             tool: 'get_token_deep_brief',
             address,
-            query: address || tokenQuery,
+            query: effectiveTokenQuery,
             chain: address ? inferAssistantChain(message, address) : undefined,
             responseStyle: 'detailed'
         };
@@ -1667,9 +1897,11 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
 
     if (/\bprice\b|\bmarket\s*cap\b|\bliquidity\b|\bvolume\b|\boverview\b|\btoken details\b|\bdetails\b/.test(lower)) {
         return {
-            tool: /\bliquidity\b|\bvolume\b|\bmarket\s*cap\b/.test(lower) ? 'get_token_deep_brief' : 'get_token_overview',
+            tool: /\b(price|market\s*cap|mcap|overview|details?)\b/.test(lower) && !/\b(liquidity|volume)\b/.test(lower)
+                ? 'get_token_overview'
+                : 'get_token_deep_brief',
             address,
-            query: tokenQuery,
+            query: effectiveTokenQuery,
             chain: lower.includes('solana') ? 'solana' : address ? inferAssistantChain(message, address) : undefined
         };
     }
@@ -1716,6 +1948,12 @@ const chooseAssistantTool = async (message: string, history: AssistantConversati
 
     const explicitTokenQuery = extractAssistantAddress(message) || message.match(/\$([a-zA-Z][a-zA-Z0-9]{1,15})\b/)?.[1] || (hasExplicitAssistantTokenQuery(message) ? extractAssistantTokenQuery(message, []) : '');
     if (localChoice.eventIntent && !explicitTokenQuery) return localChoice;
+    if (localChoice.query && /\b(it|its|this|that|what about|plain english|break it down)\b/i.test(message)) {
+        return localChoice;
+    }
+    if (localChoice.tool === 'get_token_deep_brief' && localChoice.query && isAssistantStanceQuestion(message)) {
+        return localChoice;
+    }
     if ([
         'get_detection_filtered',
         'explain_detection_admission',
@@ -1746,8 +1984,17 @@ const chooseAssistantTool = async (message: string, history: AssistantConversati
                 Boolean(explicitTokenQuery) &&
                 localChoice.tool !== 'conversation' &&
                 (modelChoice.tool === 'conversation' || modelChoice.tool === 'get_platform_updates' || modelChoice.tool === 'get_detection_updates');
+            const modelOverrodeLocalTokenContext =
+                modelChoseTokenTool &&
+                Boolean(localExplicitQuery) &&
+                Boolean(modelExplicitQuery) &&
+                modelExplicitQuery !== localExplicitQuery &&
+                (
+                    (!modelExplicitQuery.includes(localExplicitQuery) && !localExplicitQuery.includes(modelExplicitQuery)) ||
+                    (modelExplicitQuery.includes(localExplicitQuery) && modelExplicitQuery.length > localExplicitQuery.length + 12)
+                );
 
-            if (modelMissedExplicitToken || modelUsedDifferentExplicitToken) {
+            if (modelMissedExplicitToken || modelUsedDifferentExplicitToken || modelOverrodeLocalTokenContext) {
                 return localChoice;
             }
 
@@ -1822,6 +2069,77 @@ const generateAssistantConversation = async (message: string, history: Assistant
     return typeof content === 'string' && content.trim() ? content.trim() : null;
 };
 
+const generateAssistantGroundedAnswer = async ({
+    message,
+    history,
+    tool,
+    data,
+    draftAnswer
+}: {
+    message: string;
+    history: AssistantConversationMessage[];
+    tool: string;
+    data: unknown;
+    draftAnswer: string;
+}) => {
+    const apiKey = readEnv('OPENROUTER_API_KEY');
+    const model = readEnv('OPENROUTER_MODEL');
+    if (!apiKey || !model) return null;
+
+    const baseUrl = readEnv('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1';
+    const recentMessages = history.slice(-8).map((item) => ({
+        role: item.role === 'assistant' ? 'assistant' : 'user',
+        content: String(item.text || '').slice(0, 1200)
+    }));
+
+    const response = await fetchWithTimeout(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'http://localhost:3000',
+            'X-Title': 'Atlaix AI Assistant'
+        },
+        body: JSON.stringify({
+            model,
+            temperature: 0.35,
+            messages: [
+                {
+                    role: 'system',
+                    content: [
+                        'You are Atlaix AI. Answer like a sharp crypto intelligence analyst using only the provided Atlaix data.',
+                        'First understand the user question. If they ask for one metric, answer that metric directly in the first sentence.',
+                        'If they ask for a take, give the take first, then the evidence.',
+                        'Do not sound like a template. Do not list every field unless the user asked for a full brief.',
+                        'Preserve exact numbers from the data. Do not invent facts, prices, safety claims, or trading advice.',
+                        'Keep answers concise by default: 2-5 short paragraphs or a compact list only when useful.',
+                        'Use plain text, no markdown tables, no emojis.'
+                    ].join('\n')
+                },
+                ...recentMessages,
+                {
+                    role: 'user',
+                    content: [
+                        `Current user question: ${message}`,
+                        `Selected Atlaix tool: ${tool}`,
+                        `Structured Atlaix data:\n${JSON.stringify(data, null, 2).slice(0, 9000)}`,
+                        `Fallback draft answer:\n${draftAnswer.slice(0, 4000)}`,
+                        'Write the best user-facing answer now.'
+                    ].join('\n\n')
+                }
+            ]
+        })
+    }, 18_000);
+
+    if (!response.ok) {
+        throw new Error(`OpenRouter grounded answer failed with ${response.status}.`);
+    }
+
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content;
+    return typeof content === 'string' && content.trim() ? normalizeAssistantText(content.trim()) : null;
+};
+
 const buildLocalConversationResponse = (message: string) => {
     const lower = message.toLowerCase();
     if (/\b(bit\s*coin|bitcoin|btc|coin|token)\b/.test(lower) && /\b(up|rise|pump|going|today|price|green|bull|bullish|bear|bearish|drop|down)\b/.test(lower)) {
@@ -1860,8 +2178,9 @@ const normalizeAssistantText = (text: string) => text
 
 const buildAssistantResponse = async (message: string, history: AssistantConversationMessage[] = []) => {
     const request = await chooseAssistantTool(message, history);
-    const address = request.address || extractAssistantAddress(message) || getRecentAssistantAddress(history);
-    const chain = request.chain || (address ? inferAssistantChain(message, address) : '');
+    const explicitAddress = request.address || extractAssistantAddress(message);
+    const address = explicitAddress || getRecentAssistantAddress(history);
+    const chain = request.chain || (explicitAddress ? inferAssistantChain(message, explicitAddress) : '');
     const actions: AssistantChatAction[] = [];
 
     if (request.tool === 'unsupported_capability') {
@@ -2027,15 +2346,23 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     if (request.tool === 'get_detection_filtered') {
         const allEvents = await getDetectionFeedForAssistant();
         const filters = extractAssistantDetectionFilters(message, request);
-        const matches = (allEvents || []).filter((event: any) => assistantDetectionEventMatchesFilters(event, filters));
+        const tokenQuery = request.query || address || (/(\bthis\b|\bthat\b|\bit\b|\bthe token\b)/i.test(message) ? extractRecentAssistantTokenFromContext(history) : '');
+        const tokenEvents = tokenQuery
+            ? await withAssistantTimeout(getAssistantDetectionContext(tokenQuery, chain || filters.chain), 6_000, [])
+            : [];
+        const sourceEvents = tokenQuery ? tokenEvents : allEvents;
+        const matches = (sourceEvents || []).filter((event: any) => assistantDetectionEventMatchesFilters(event, filters));
         const visible = matches.slice(0, 10);
         const filterLabel = [
+            tokenQuery ? `${tokenQuery}` : '',
             filters.eventType || '',
             filters.severity ? `${filters.severity} severity` : '',
             typeof filters.scoreMin === 'number' ? `score ${filters.scoreMin}+` : '',
             filters.chain ? normalizeAssistantChainLabel(filters.chain) : '',
             filters.hours ? `last ${filters.hours}h` : ''
         ].filter(Boolean).join(', ') || 'current Detection Engine filters';
+        const primaryEvent = visible[0];
+        const tokenActionHref = primaryEvent ? eventTokenHref(primaryEvent) : '/detection';
 
         return {
             answer: visible.length
@@ -2043,17 +2370,23 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
                     `I found ${matches.length} matching Detection Engine event${matches.length === 1 ? '' : 's'} for ${filterLabel}.`,
                     formatAssistantFreshnessLine(matches),
                     '',
-                    ...visible.map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionLine(event)} ${explainAssistantDetectionImplication(event)}`)
+                    ...visible.map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionDetailLine(event)} ${explainAssistantDetectionImplication(event)}`)
                 ].join('\n')
-                : `I did not find matching Detection Engine events for ${filterLabel} in the current feed.`,
+                : tokenQuery
+                    ? `I checked the current Detection Engine feed for "${tokenQuery}", but I do not see matching detected events for that token yet. Try the exact contract address or chain if there are multiple tokens with that name.`
+                    : `I did not find matching Detection Engine events for ${filterLabel} in the current feed.`,
             tool: 'get_detection_filtered',
             data: {
                 totalEvents: allEvents?.length || 0,
+                tokenScopedEvents: tokenEvents.length,
                 matchingEvents: matches.length,
                 filters,
+                query: tokenQuery,
                 events: visible.map(assistantEventReference)
             },
-            actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+            actions: [
+                { label: primaryEvent ? 'Open Token Detection' : 'Open Detection Engine', href: tokenActionHref, kind: 'navigate' }
+            ]
         };
     }
 
@@ -2129,7 +2462,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'get_detection_updates') {
-        const events = await DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+        const events = await getDetectionFeedForAssistant();
         const allEvents = events || [];
         const detailed = request.responseStyle === 'detailed';
         const topEvents = allEvents.slice(0, detailed ? 12 : 7);
@@ -2333,23 +2666,46 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             ? tokenDetailsHref(token, resolution.chain)
             : `/detection/token/${encodeURIComponent(tokenQuery)}`;
 
-        return {
-            answer: [
-                `${token.name || token.ticker} (${token.ticker}) is currently priced at ${formatAssistantPrice(token.price)} on ${normalizeAssistantChainLabel(token.chain)}.`,
-                `24h change: ${token.h24 || 'unavailable'}. 24h volume: ${token.volume24h || '$0'}. Liquidity: ${token.liquidity || '$0'}. Market cap: ${token.cap || '$0'}.`
-            ].join('\n'),
+        const responseData = {
+            token: token.ticker,
+            name: token.name,
+            address: tokenAddress,
+            chain: token.chain,
+            price: token.price,
+            change24h: token.h24,
+            volume24h: token.volume24h,
+            liquidity: token.liquidity,
+            marketCap: token.cap
+        };
+        const tokenLabel = `${token.name || token.ticker} (${token.ticker})`;
+        const chainLabel = normalizeAssistantChainLabel(token.chain);
+        let draftAnswer = [
+            `${tokenLabel} is currently priced at ${formatAssistantPrice(token.price)} on ${chainLabel}.`,
+            `24h change: ${token.h24 || 'unavailable'}. 24h volume: ${token.volume24h || '$0'}. Liquidity: ${token.liquidity || '$0'}. Market cap: ${token.cap || '$0'}.`
+        ].join('\n');
+
+        if (/\bmarket\s*cap\b|\bmcap\b/i.test(message)) {
+            draftAnswer = `${tokenLabel}'s market cap is ${token.cap || '$0'}. For context, it is trading at ${formatAssistantPrice(token.price)} on ${chainLabel}, with ${token.volume24h || '$0'} in 24h volume and ${token.liquidity || '$0'} liquidity.`;
+        } else if (/\bprice\b/i.test(message)) {
+            draftAnswer = `${tokenLabel} is trading at ${formatAssistantPrice(token.price)} on ${chainLabel}. Its 24h move is ${token.h24 || 'unavailable'}, with ${token.volume24h || '$0'} volume and ${token.liquidity || '$0'} liquidity.`;
+        } else if (/\boverview\b|\bdetails?\b/i.test(message)) {
+            draftAnswer = `${tokenLabel} is on ${chainLabel} at ${formatAssistantPrice(token.price)}. Market cap is ${token.cap || '$0'}, liquidity is ${token.liquidity || '$0'}, 24h volume is ${token.volume24h || '$0'}, and the 24h move is ${token.h24 || 'unavailable'}.`;
+        }
+        const groundedAnswer = await generateAssistantGroundedAnswer({
+            message,
+            history,
             tool: 'get_token_overview',
-            data: {
-                token: token.ticker,
-                name: token.name,
-                address: tokenAddress,
-                chain: token.chain,
-                price: token.price,
-                change24h: token.h24,
-                volume24h: token.volume24h,
-                liquidity: token.liquidity,
-                marketCap: token.cap
-            },
+            data: responseData,
+            draftAnswer
+        }).catch((error) => {
+            console.warn('[AiAssistant] grounded token overview unavailable; using fallback draft', error instanceof Error ? error.message : error);
+            return null;
+        });
+
+        return {
+            answer: groundedAnswer || draftAnswer,
+            tool: 'get_token_overview',
+            data: responseData,
             actions: [
                 { label: 'Open Token Details', href: tokenHref },
                 { label: 'Open Overview', href: '/dashboard' }

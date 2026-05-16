@@ -1275,7 +1275,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                             <div className="text-sm font-bold text-text-medium">Loading detected tokens...</div>
                         </div>
                     ) : (
-                        <table className="data-table">
+                        <table className="data-table min-w-[1120px]">
                             <thead>
                                 <tr>
                                     <SortHeader label="Chain Token" sortKey="ticker" minWidth="150px" />
