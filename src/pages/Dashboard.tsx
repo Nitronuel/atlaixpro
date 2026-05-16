@@ -311,7 +311,7 @@ const getFeedEventLabel = (coin: MarketCoin, eventType?: AlphaGauntletEventType)
 const getInitialItemsPerPage = () => {
     if (typeof window === 'undefined') return 16;
 
-    if (window.innerWidth <= 640) return 12;
+    if (window.innerWidth <= 640) return 8;
     if (window.innerWidth <= 1180) return 14;
     return 16;
 };
@@ -319,9 +319,17 @@ const getInitialItemsPerPage = () => {
 const getStartupRefreshDelay = () => {
     if (typeof window === 'undefined') return 2500;
 
-    if (window.innerWidth <= 640) return 6500;
-    if (window.innerWidth <= 1180) return 3500;
+    if (window.innerWidth <= 640) return 30000;
+    if (window.innerWidth <= 1180) return 8000;
     return 1800;
+};
+
+const getSecondaryDataDelay = () => {
+    if (typeof window === 'undefined') return 2500;
+
+    if (window.innerWidth <= 640) return 12000;
+    if (window.innerWidth <= 1180) return 5000;
+    return 1200;
 };
 
 const runWhenIdle = (callback: () => void) => {
@@ -541,6 +549,8 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
     useEffect(() => {
         let cancelled = false;
+        let interval: number | null = null;
+        let initialTimer: number | null = null;
 
         const loadChainDexVolumes = async () => {
             const volumes = await DatabaseService.getChainDexVolumes(CHAIN_DEX_VOLUME_IDS);
@@ -549,12 +559,17 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             }
         };
 
-        void loadChainDexVolumes();
-        const interval = window.setInterval(loadChainDexVolumes, 5 * 60 * 1000);
+        initialTimer = window.setTimeout(() => {
+            runWhenIdle(() => {
+                void loadChainDexVolumes();
+                interval = window.setInterval(loadChainDexVolumes, 5 * 60 * 1000);
+            });
+        }, getSecondaryDataDelay());
 
         return () => {
             cancelled = true;
-            window.clearInterval(interval);
+            if (initialTimer !== null) window.clearTimeout(initialTimer);
+            if (interval !== null) window.clearInterval(interval);
         };
     }, []);
 
@@ -719,7 +734,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         if (currentPage > total) {
             setCurrentPage(total);
         }
-    }, [currentPage, sortedData.length]);
+    }, [currentPage, itemsPerPage, sortedData.length]);
 
     // AI Market Pulse Logic
     const formatCompactCurrency = (num: number) => {
@@ -767,8 +782,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         else if (sentimentScore <= 25) sentimentLabel = "Extreme Fear";
         else if (sentimentScore <= 40) sentimentLabel = "Bearish";
 
-        const tokensByFlow = [...alphaMarketData].sort((a, b) => parseCurrency(b.netFlow) - parseCurrency(a.netFlow));
-        const topToken = tokensByFlow[0] || null;
+        const topToken = alphaMarketData.reduce<MarketCoin | null>((best, coin) => {
+            if (!best) return coin;
+            return parseCurrency(coin.netFlow) > parseCurrency(best.netFlow) ? coin : best;
+        }, null);
 
         const chainStats: Record<string, number> = {};
 
@@ -862,9 +879,9 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const handlePrevPage = () => { if (currentPage > 1) setCurrentPage(p => p - 1); };
 
     const maxAbsFlow = useMemo(() => {
-        if (marketData.length === 0) return 0;
-        return Math.max(...marketData.map(c => Math.abs(parseCurrency(c.netFlow))));
-    }, [marketData]);
+        if (paginatedData.length === 0) return 0;
+        return Math.max(...paginatedData.map(c => Math.abs(parseCurrency(c.netFlow))));
+    }, [paginatedData]);
 
     // Color logic for change percentage
     const getPercentColor = (val: string) => {
@@ -937,13 +954,23 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         return `data:image/svg+xml;utf8,${encodeURIComponent(svg.replace(/\\s+/g, ' ').trim())}`;
     };
 
-    const SortHeader = ({ label, sortKey, minWidth }: { label: string, sortKey: string, minWidth?: string }) => {
+    const SortHeader = ({
+        label,
+        sortKey,
+        minWidth,
+        className = ''
+    }: {
+        label: string;
+        sortKey: string;
+        minWidth?: string;
+        className?: string;
+    }) => {
         const active = sortConfig?.key === sortKey;
         const dir = sortConfig?.direction;
 
         return (
             <th
-                className={sortKey === 'ticker' ? "sticky-col" : ""}
+                className={`${sortKey === 'ticker' ? "sticky-col" : ""} ${className}`.trim()}
                 style={minWidth ? { minWidth } : { minWidth: '100px' }}
             >
                 <div
@@ -1249,13 +1276,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                             Event
                                         </div>
                                     </th>
-                                    <SortHeader label="Price" sortKey="price" minWidth="100px" />
+                                    <SortHeader label="Price" sortKey="price" minWidth="100px" className="mobile-feed-secondary" />
                                     <SortHeader label="Chg 24h" sortKey="change" minWidth="90px" />
-                                    <SortHeader label="MCap" sortKey="cap" minWidth="100px" />
-                                    <SortHeader label="DEX Volume" sortKey="volume" minWidth="110px" />
-                                    <SortHeader label="Liquidity" sortKey="liquidity" minWidth="100px" />
-                                    <SortHeader label="DEX Buys" sortKey="dexBuys" minWidth="90px" />
-                                    <SortHeader label="DEX Sells" sortKey="dexSells" minWidth="90px" />
+                                    <SortHeader label="MCap" sortKey="cap" minWidth="100px" className="mobile-feed-secondary" />
+                                    <SortHeader label="DEX Volume" sortKey="volume" minWidth="110px" className="mobile-feed-secondary" />
+                                    <SortHeader label="Liquidity" sortKey="liquidity" minWidth="100px" className="mobile-feed-secondary" />
+                                    <SortHeader label="DEX Buys" sortKey="dexBuys" minWidth="90px" className="mobile-feed-secondary" />
+                                    <SortHeader label="DEX Sells" sortKey="dexSells" minWidth="90px" className="mobile-feed-secondary" />
                                     <SortHeader label="DEX Flow" sortKey="netFlow" minWidth="140px" />
                                 </tr>
                             </thead>
@@ -1298,14 +1325,14 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                                 </div>
                                             </td>
 
-                                            <td className="font-mono text-xs text-text-light font-medium text-left">{coin.price}</td>
+                                            <td className="mobile-feed-secondary font-mono text-xs text-text-light font-medium text-left">{coin.price}</td>
                                             <td className={`font-bold text-xs text-left ${getPercentColor(changeVal)}`}>{changeVal}</td>
-                                            <td className="font-medium text-xs text-text-light text-left">{coin.cap}</td>
-                                            <td className="text-xs font-medium text-text-light text-left">{coin.volume24h}</td>
-                                            <td className="font-medium text-xs text-text-medium text-left">{coin.liquidity}</td>
+                                            <td className="mobile-feed-secondary font-medium text-xs text-text-light text-left">{coin.cap}</td>
+                                            <td className="mobile-feed-secondary text-xs font-medium text-text-light text-left">{coin.volume24h}</td>
+                                            <td className="mobile-feed-secondary font-medium text-xs text-text-medium text-left">{coin.liquidity}</td>
 
-                                            <td className="font-mono text-xs text-primary-green text-left">{coin.dexBuys}</td>
-                                            <td className="font-mono text-xs text-primary-red text-left">{coin.dexSells}</td>
+                                            <td className="mobile-feed-secondary font-mono text-xs text-primary-green text-left">{coin.dexBuys}</td>
+                                            <td className="mobile-feed-secondary font-mono text-xs text-primary-red text-left">{coin.dexSells}</td>
 
                                             <td className="text-left">
                                                 <div className="flex items-center justify-start gap-2 w-full">

@@ -176,6 +176,12 @@
             height: 50px;
         }
 
+        @media (max-width: 640px) {
+            .data-table .mobile-feed-secondary {
+                display: none;
+            }
+        }
+
         .sticky-col {
             position: sticky !important;
             left: 0;
