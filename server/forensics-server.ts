@@ -235,7 +235,8 @@ const TOKEN_QUERY_STOP_WORDS = new Set([
     'can', 'you', 'search', 'find', 'called', 'named', 'known', 'as', 'look', 'lookup', 'up',
     'detected', 'detection', 'engine', 'event', 'events', 'signals', 'signal', 'updates',
     'recent', 'latest', 'newest', 'from', 'in', 'with', 'score', 'scores', 'severity',
-    'data', 'right', 'now'
+    'data', 'right', 'now', 'worth', 'value', 'valuation', 'fdv', 'fully', 'diluted',
+    'circulating', 'supply', 'much', 'big', 'large', 'small', 'high', 'low', 'total'
 ]);
 
 const cleanAssistantTokenQuery = (value: string) => value
@@ -245,6 +246,22 @@ const cleanAssistantTokenQuery = (value: string) => value
     .filter((word) => word && !TOKEN_QUERY_STOP_WORDS.has(word.toLowerCase()))
     .join(' ')
     .trim();
+
+const sanitizeAssistantTokenLookupQuery = (value: string) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const address = extractAssistantAddress(raw);
+    if (address) return address;
+
+    const cashtag = raw.match(/\$([a-zA-Z][a-zA-Z0-9]{1,15})\b/)?.[1];
+    if (cashtag) return cashtag;
+
+    const compactMetricQuestion = raw.match(/\b(?:market\s*cap|mcap|price|liquidity|volume|fdv|valuation|worth|value)\s+(?:of|for|on|in)?\s+([a-zA-Z0-9$.-]{2,32})\b/i)?.[1]
+        || raw.match(/\b([a-zA-Z0-9$.-]{2,32})\s+(?:market\s*cap|mcap|price|liquidity|volume|fdv|valuation|worth|value)\b/i)?.[1];
+    if (compactMetricQuestion) return cleanAssistantTokenQuery(compactMetricQuestion);
+
+    return cleanAssistantTokenQuery(raw);
+};
 
 const extractAssistantTokenQuery = (message: string, history: AssistantConversationMessage[] = []) => {
     const address = extractAssistantAddress(message);
@@ -266,11 +283,11 @@ const extractAssistantTokenQuery = (message: string, history: AssistantConversat
 
     for (const pattern of directPatterns) {
         const match = message.match(pattern)?.[1];
-        const cleaned = cleanAssistantTokenQuery(match || '');
+        const cleaned = sanitizeAssistantTokenLookupQuery(match || '');
         if (cleaned) return cleaned;
     }
 
-    const cleanedMessage = cleanAssistantTokenQuery(message);
+    const cleanedMessage = sanitizeAssistantTokenLookupQuery(message);
     if (cleanedMessage && !/\b(yes|that|this|it)\b/i.test(message)) return cleanedMessage;
 
     for (const item of [...history].reverse()) {
@@ -1538,6 +1555,7 @@ const buildAssistantSystemPrompt = () => [
     'Return only valid JSON with keys: tool, address, chain, query, responseStyle, eventType, severity, scoreMin, timeWindow, alertMode.',
     'Approved tools: conversation, get_token_deep_brief, get_wallet_deep_brief, get_platform_updates, get_detection_updates, get_detection_filtered, explain_detection_admission, run_safe_scan, prepare_alert_setup, prepare_detection_alert, prepare_linked_alert, get_token_activity, open_token_details, compare_tokens, get_token_holders, watch_token_activity, get_token_overview, get_smart_alert_status.',
     'If the request includes a cashtag like $PENGU, ticker, token name, or token address, treat it as a token request unless the user clearly asks about the whole platform.',
+    'Separate the entity from the intent. For "what is the market cap of kishu?", query must be "kishu", not "kishu market cap". For "how much is KISHU worth?", query must be "KISHU".',
     'Use get_token_deep_brief for broad token questions, token addresses, performance, liquidity, recent events, deep analysis, or "tell me everything" requests.',
     'Use get_wallet_deep_brief for wallet analysis, holdings, portfolio, PnL, smart-money, or wallet behavior questions.',
     'Use get_platform_updates for broad Atlaix updates, today updates, market summaries, or "what should I pay attention to" requests.',
@@ -1559,6 +1577,8 @@ const buildAssistantSystemPrompt = () => [
     'Examples:',
     '{"tool":"get_token_deep_brief","query":"pengu","responseStyle":"detailed"} for "can you search for the token called pengu?"',
     '{"tool":"get_token_deep_brief","query":"PENGU","responseStyle":"detailed"} for "how is $PENGU performing today?"',
+    '{"tool":"get_token_overview","query":"kishu","responseStyle":"brief"} for "what is the market cap of kishu?"',
+    '{"tool":"get_token_overview","query":"KISHU","responseStyle":"brief"} for "how much is KISHU worth?"',
     '{"tool":"run_safe_scan","address":"0x...","responseStyle":"detailed"} for "scan this token for risk 0x..."',
     '{"tool":"get_detection_updates","responseStyle":"brief"} for "what should I pay attention to today?"'
 ].join('\n');
@@ -1606,7 +1626,7 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
             tool: parsed.tool,
             address: typeof parsed.address === 'string' ? parsed.address : undefined,
             chain: typeof parsed.chain === 'string' ? parsed.chain : undefined,
-            query: typeof parsed.query === 'string' ? parsed.query : undefined,
+            query: typeof parsed.query === 'string' ? sanitizeAssistantTokenLookupQuery(parsed.query) || parsed.query : undefined,
             responseStyle: parsed.responseStyle === 'detailed' ? 'detailed' : 'brief',
             eventType: typeof parsed.eventType === 'string' ? parsed.eventType : undefined,
             severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
@@ -2176,6 +2196,13 @@ const normalizeAssistantText = (text: string) => text
     .replace(/[ \t]+\n/g, '\n')
     .trim();
 
+const getAssistantRequestTokenQuery = (
+    request: AssistantToolRequest,
+    message: string,
+    history: AssistantConversationMessage[],
+    fallbackAddress = ''
+) => sanitizeAssistantTokenLookupQuery(request.query || fallbackAddress || extractAssistantTokenQuery(message, history));
+
 const buildAssistantResponse = async (message: string, history: AssistantConversationMessage[] = []) => {
     const request = await chooseAssistantTool(message, history);
     const explicitAddress = request.address || extractAssistantAddress(message);
@@ -2188,7 +2215,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'get_token_deep_brief') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         if (!tokenQuery) {
             return {
                 answer: 'I can build a full Atlaix token brief, but I need a token contract address, ticker, or name first.',
@@ -2213,7 +2240,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'open_token_details') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         if (!tokenQuery) {
             return {
                 answer: 'I can open a token details page, but I need the token address, ticker, or name first.',
@@ -2316,7 +2343,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'get_token_holders') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         if (!tokenQuery) {
             return {
                 answer: 'I can take you to holder distribution, but I need the token address, ticker, or name first.',
@@ -2346,7 +2373,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     if (request.tool === 'get_detection_filtered') {
         const allEvents = await getDetectionFeedForAssistant();
         const filters = extractAssistantDetectionFilters(message, request);
-        const tokenQuery = request.query || address || (/(\bthis\b|\bthat\b|\bit\b|\bthe token\b)/i.test(message) ? extractRecentAssistantTokenFromContext(history) : '');
+        const tokenQuery = sanitizeAssistantTokenLookupQuery(request.query || address || (/(\bthis\b|\bthat\b|\bit\b|\bthe token\b)/i.test(message) ? extractRecentAssistantTokenFromContext(history) : ''));
         const tokenEvents = tokenQuery
             ? await withAssistantTimeout(getAssistantDetectionContext(tokenQuery, chain || filters.chain), 6_000, [])
             : [];
@@ -2391,7 +2418,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'explain_detection_admission') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         if (!tokenQuery) {
             return {
                 answer: 'I can explain why a token was admitted, but I need the token ticker, name, or address first.',
@@ -2517,14 +2544,15 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     if (request.tool === 'get_token_activity') {
         let activityAddress = address;
         let activityChain = chain;
-        if (!activityAddress && request.query) {
-            const resolution = await resolveAssistantEntity(request.query, chain, 'token');
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history);
+        if (!activityAddress && tokenQuery) {
+            const resolution = await resolveAssistantEntity(tokenQuery, chain, 'token');
             activityAddress = resolution.address || resolution.token?.address || '';
             activityChain = normalizeAssistantChainId(resolution.chain || resolution.token?.chain || chain);
             if (!activityAddress && resolution.candidates?.length) {
                 return {
                     answer: [
-                        `I found multiple possible matches for "${request.query}", so I need the exact token before checking activity.`,
+                        `I found multiple possible matches for "${tokenQuery}", so I need the exact token before checking activity.`,
                         '',
                         'Best matches:',
                         ...resolution.candidates.slice(0, 5).map(formatAssistantTokenCandidate)
@@ -2577,7 +2605,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'watch_token_activity') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         if (!tokenQuery) {
             return {
                 answer: 'I can help monitor token activity, but I need the token address, ticker, or name first.',
@@ -2619,7 +2647,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'get_token_overview') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         if (!tokenQuery) {
             return {
                 answer: 'I can check token price and overview data, but I need the token symbol, name, or contract address first.',
@@ -2729,7 +2757,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'prepare_detection_alert' || request.tool === 'prepare_linked_alert') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         const filters = extractAssistantDetectionFilters(message, request);
         const params = new URLSearchParams();
         let alertType = filters.severity && !filters.eventType ? 'risk' : 'alpha';
@@ -2784,7 +2812,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
     }
 
     if (request.tool === 'prepare_alert_setup') {
-        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const tokenQuery = getAssistantRequestTokenQuery(request, message, history, address);
         const alertIntent = await extractAssistantAlertIntent(message, tokenQuery, chain);
         const token = alertIntent.token as any;
         const alertAddress = address || token?.address || tokenQuery;
