@@ -71,7 +71,8 @@ const BASIC_ALERT_TYPES: BasicAlertType[] = [
     { id: 'volume', title: '24h Volume', desc: 'Volume crosses a dollar threshold or changes by a percentage.', type: 'Volume', icon: <Activity size={18} /> },
     { id: 'liquidity', title: 'Liquidity', desc: 'Liquidity crosses a dollar threshold or changes by a percentage.', type: 'Liquidity', icon: <ShieldCheck size={18} /> },
     { id: 'whale', title: 'Whale Flow', desc: 'Large buy or sell activity crosses a dollar threshold.', type: 'Whale', icon: <Wallet size={18} /> },
-    { id: 'alpha', title: 'Live Alpha Event', desc: 'A token appears with a selected Live Alpha event.', type: 'Alpha', icon: <Flame size={18} /> }
+    { id: 'alpha', title: 'Live Alpha Event', desc: 'A token appears with a selected Live Alpha event.', type: 'Alpha', icon: <Flame size={18} /> },
+    { id: 'risk', title: 'Risk Severity', desc: 'A token appears with a selected risk severity.', type: 'Risk', icon: <ShieldCheck size={18} /> }
 ];
 
 const CONDITION_OPTIONS: Record<SmartAlertType, Array<{ value: SmartAlertCondition; label: string; thresholdKind: SmartAlertThresholdKind }>> = {
@@ -104,7 +105,27 @@ const CONDITION_OPTIONS: Record<SmartAlertType, Array<{ value: SmartAlertConditi
 };
 
 const VALUE_OPTIONS: Partial<Record<SmartAlertType, string[]>> = {
-    Alpha: ['Liquidity Event', 'Potential Accumulation', 'Accumulation', 'Potential Distribution', 'Distribution', 'Market Stress', 'Recovery', 'Unusual Activity'],
+    Alpha: [
+        'Momentum Breakout',
+        'Overextended Momentum',
+        'Potential Accumulation',
+        'Accumulation',
+        'Potential Distribution',
+        'Distribution',
+        'Market Stress',
+        'Possible Wash Trading',
+        'Deep Liquidity Structure',
+        'Thin Liquidity Risk',
+        'Confirmed Liquidity Added',
+        'Confirmed Liquidity Removed',
+        'Flow Imbalance',
+        'Conflicting Signals',
+        'Recovery Attempt',
+        'Confirmed Recovery',
+        'Recovery',
+        'Liquidity Event',
+        'Unusual Activity'
+    ],
     Risk: ['Any new risk', 'High', 'Medium', 'Low']
 };
 
@@ -502,9 +523,20 @@ export const SmartAlerts: React.FC = () => {
         const nextType = BASIC_ALERT_TYPES.find((item) => item.id === requestedType) || BASIC_ALERT_TYPES[0];
         setActiveTypeKey(nextType.id);
         setSetupType(nextType);
-        setSetupMode('single');
-        setAlertMode('single');
-        setSetupDraft(getAssistantDraftFromParams(nextType));
+        const requestedMode = searchParams.get('alertMode') === 'linked' || searchParams.get('linked') === '1' ? 'linked' : 'single';
+        const assistantDraft = getAssistantDraftFromParams(nextType);
+        setSetupMode(requestedMode === 'linked' ? 'linked-condition' : 'single');
+        setAlertMode(requestedMode);
+        setSetupDraft(assistantDraft);
+        setLinkedConditions(requestedMode === 'linked'
+            ? [{
+                ...assistantDraft,
+                id: `assistant-${Date.now()}`,
+                typeId: nextType.id,
+                typeTitle: nextType.title,
+                triggerLabel: getAlertTrigger(nextType, assistantDraft)
+            }]
+            : []);
         setShowLinkedTypePicker(false);
         setSetupTokenLookupError(null);
         setFormError(null);

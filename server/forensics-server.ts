@@ -150,9 +150,17 @@ type AssistantToolName =
     | 'get_wallet_deep_brief'
     | 'get_platform_updates'
     | 'get_detection_updates'
+    | 'get_detection_filtered'
+    | 'explain_detection_admission'
     | 'run_safe_scan'
     | 'prepare_alert_setup'
+    | 'prepare_detection_alert'
+    | 'prepare_linked_alert'
     | 'get_token_activity'
+    | 'open_token_details'
+    | 'compare_tokens'
+    | 'get_token_holders'
+    | 'watch_token_activity'
     | 'get_token_overview'
     | 'get_smart_alert_status';
 
@@ -163,6 +171,11 @@ type AssistantToolRequest = {
     query?: string;
     responseStyle?: 'brief' | 'detailed';
     eventIntent?: 'accumulation' | 'performance' | 'moving';
+    eventType?: string;
+    severity?: string;
+    scoreMin?: number;
+    timeWindow?: string;
+    alertMode?: string;
 };
 
 type AssistantScoredTokenCandidate = {
@@ -482,6 +495,21 @@ const resolveAssistantTokenOverview = async (query: string, chain?: string) => {
     return (await getAssistantTokenCandidates(trimmed, chain))[0]?.token || null;
 };
 
+const tokenDetailsHref = (tokenOrAddress: any, chain?: string, pairAddress?: string) => {
+    const token = typeof tokenOrAddress === 'string' ? { address: tokenOrAddress, chain, pairAddress } : (tokenOrAddress || {});
+    const address = token.address || token.tokenAddress || token.query || '';
+    if (!address) return '/dashboard';
+
+    const params = new URLSearchParams();
+    const pair = token.pairAddress || pairAddress;
+    const tokenChain = token.chain || chain;
+    if (pair) params.set('pair', pair);
+    if (tokenChain) params.set('chain', normalizeAssistantChainId(tokenChain));
+
+    const suffix = params.toString();
+    return `/token/${encodeURIComponent(address)}${suffix ? `?${suffix}` : ''}`;
+};
+
 const eventTokenHref = (event: any) => {
     const token = event?.token || {};
     const address = token.address || token.pairAddress || token.ticker || '';
@@ -493,7 +521,123 @@ const eventTokenHref = (event: any) => {
         score: String(event.score || 0),
         detectedAt: String(event.detectedAt || Date.now())
     });
+    if (token.chain) params.set('chain', normalizeAssistantChainId(token.chain));
+    if (token.pairAddress) params.set('pair', token.pairAddress);
     return `/detection/token/${encodeURIComponent(address)}?${params.toString()}`;
+};
+
+const assistantEventReference = (event: any) => ({
+    token: event?.token?.ticker || event?.token?.name,
+    eventType: event?.eventType,
+    severity: event?.severity,
+    score: event?.score,
+    implication: explainAssistantDetectionImplication(event),
+    href: eventTokenHref(event)
+});
+
+const getDetectionFeedForAssistant = async () =>
+    DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents());
+
+const normalizeAssistantDetectionEventType = (value: string | undefined) => {
+    const lower = String(value || '').toLowerCase();
+    if (!lower) return '';
+    if (lower.includes('breakout') || lower.includes('momentum')) return lower.includes('overextended') ? 'Overextended Momentum' : 'Momentum Breakout';
+    if (lower.includes('wash') || lower.includes('artificial')) return 'Possible Wash Trading';
+    if (lower.includes('conflict')) return 'Conflicting Signals';
+    if (lower.includes('flow imbalance')) return 'Flow Imbalance';
+    if (lower.includes('potential') && lower.includes('accum')) return 'Potential Accumulation';
+    if (lower.includes('accum')) return 'Accumulation';
+    if (lower.includes('potential') && lower.includes('distrib')) return 'Potential Distribution';
+    if (lower.includes('distrib')) return 'Distribution';
+    if (lower.includes('stress')) return 'Market Stress';
+    if (lower.includes('confirmed') && lower.includes('recover')) return 'Confirmed Recovery';
+    if (lower.includes('recover')) return lower.includes('attempt') ? 'Recovery Attempt' : 'Recovery';
+    if (lower.includes('confirmed') && lower.includes('liquid') && lower.includes('removed')) return 'Confirmed Liquidity Removed';
+    if (lower.includes('confirmed') && lower.includes('liquid') && lower.includes('added')) return 'Confirmed Liquidity Added';
+    if (lower.includes('thin') && lower.includes('liquid')) return 'Thin Liquidity Risk';
+    if (lower.includes('deep') && lower.includes('liquid')) return 'Deep Liquidity Structure';
+    if (lower.includes('liquid')) return 'Liquidity Event';
+    if (lower.includes('unusual')) return 'Unusual Activity';
+    if (lower.includes('volume')) return 'Volume Spike';
+    return '';
+};
+
+const extractAssistantScoreMin = (message: string) => {
+    const match = message.match(/\b(?:score|confidence)\s*(?:above|over|>=|at least|minimum|min)?\s*(\d{1,3})\b/i)
+        || message.match(/\b(\d{1,3})\s*\+?\s*(?:score|confidence)\b/i);
+    if (!match) return undefined;
+    const score = Number(match[1]);
+    return Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : undefined;
+};
+
+const extractAssistantDetectionFilters = (message: string, request: AssistantToolRequest = { tool: 'get_detection_filtered' }) => {
+    const lower = message.toLowerCase();
+    const eventType = normalizeAssistantDetectionEventType(request.eventType || message);
+    const severity = request.severity
+        || (/\bhigh\b/.test(lower) ? 'High' : /\bmedium\b/.test(lower) ? 'Medium' : /\blow\b/.test(lower) ? 'Low' : '');
+    const scoreMin = request.scoreMin ?? extractAssistantScoreMin(message);
+    const chain = request.chain
+        || (lower.includes('solana') ? 'solana'
+            : lower.includes('base') ? 'base'
+                : lower.includes('bsc') || lower.includes('bnb') ? 'bsc'
+                    : lower.includes('ethereum') ? 'ethereum'
+                        : '');
+    const hours = lower.includes('last hour') || lower.includes('past hour') ? 1
+        : lower.includes('today') || lower.includes('24h') || lower.includes('24 hours') ? 24
+            : lower.includes('week') ? 24 * 7
+                : undefined;
+
+    return {
+        eventType,
+        severity,
+        scoreMin,
+        chain: normalizeAssistantChainId(chain),
+        hours
+    };
+};
+
+const assistantDetectionEventMatchesFilters = (event: any, filters: ReturnType<typeof extractAssistantDetectionFilters>) => {
+    const eventType = String(event?.eventType || '').toLowerCase();
+    const requestedType = String(filters.eventType || '').toLowerCase();
+    const chain = normalizeAssistantChainId(event?.token?.chain);
+    if (requestedType && !eventType.includes(requestedType.replace(/^potential\s+/, '')) && !requestedType.includes(eventType)) {
+        if (!(requestedType.includes('volume') && assistantEventText(event).includes('volume'))) return false;
+    }
+    if (filters.severity && String(event?.severity || '').toLowerCase() !== filters.severity.toLowerCase()) return false;
+    if (filters.chain && chain && chain !== filters.chain) return false;
+    if (typeof filters.scoreMin === 'number' && Number(event?.score || 0) < filters.scoreMin) return false;
+    if (filters.hours) {
+        const detectedAt = Number(event?.detectedAt || 0);
+        if (!detectedAt || Date.now() - detectedAt > filters.hours * 60 * 60 * 1000) return false;
+    }
+    return true;
+};
+
+const formatAssistantFreshnessLine = (events: any[]) => {
+    const latest = Math.max(...events.map((event: any) => Number(event?.detectedAt || 0)).filter(Boolean), 0);
+    if (!latest) return 'Freshness: no detection timestamp is available for these results.';
+    const minutes = Math.max(0, Math.round((Date.now() - latest) / 60_000));
+    if (minutes < 2) return 'Freshness: latest matching event is live from the last couple of minutes.';
+    if (minutes < 60) return `Freshness: latest matching event is about ${minutes} minutes old.`;
+    return `Freshness: latest matching event is about ${(minutes / 60).toFixed(1)} hours old.`;
+};
+
+const extractAssistantCompareTargets = (message: string, history: AssistantConversationMessage[] = []) => {
+    const cashtags = [...message.matchAll(/\$([a-zA-Z][a-zA-Z0-9]{1,15})\b/g)].map((match) => match[1]);
+    if (cashtags.length >= 2) return [...new Set(cashtags)].slice(0, 4);
+
+    const cleaned = message
+        .replace(/\b(compare|versus|vs\.?|against|which is better|between|token|tokens|coin|coins|please|show me|can you)\b/gi, ' ')
+        .replace(/[?]/g, ' ');
+    const parts = cleaned
+        .split(/\s+(?:and|vs|versus|against)\s+|,/i)
+        .map((part) => cleanAssistantTokenQuery(part))
+        .filter((part) => part && !/\b(price|liquidity|volume|market cap|performance|better)\b/i.test(part));
+
+    if (parts.length >= 2) return [...new Set(parts)].slice(0, 4);
+
+    const recent = extractAssistantTokenQuery('', history);
+    return recent && parts.length === 1 ? [recent, parts[0]] : parts;
 };
 
 const formatAssistantDetectionLine = (event: any) => {
@@ -1238,8 +1382,8 @@ const buildAssistantSystemPrompt = () => [
     'Choose exactly one approved tool for the user request. Do this quietly and do not expose routing logic to the user.',
     'You cannot modify source code, change app architecture, access secrets, run shell commands, or invent app data.',
     'Write actions must be confirmation-first. For alerts, choose prepare_alert_setup, not a direct save.',
-    'Return only valid JSON with keys: tool, address, chain, query, responseStyle.',
-    'Approved tools: conversation, get_token_deep_brief, get_wallet_deep_brief, get_platform_updates, get_detection_updates, run_safe_scan, prepare_alert_setup, get_token_activity, get_token_overview, get_smart_alert_status.',
+    'Return only valid JSON with keys: tool, address, chain, query, responseStyle, eventType, severity, scoreMin, timeWindow, alertMode.',
+    'Approved tools: conversation, get_token_deep_brief, get_wallet_deep_brief, get_platform_updates, get_detection_updates, get_detection_filtered, explain_detection_admission, run_safe_scan, prepare_alert_setup, prepare_detection_alert, prepare_linked_alert, get_token_activity, open_token_details, compare_tokens, get_token_holders, watch_token_activity, get_token_overview, get_smart_alert_status.',
     'If the request includes a cashtag like $PENGU, ticker, token name, or token address, treat it as a token request unless the user clearly asks about the whole platform.',
     'Use get_token_deep_brief for broad token questions, token addresses, performance, liquidity, recent events, deep analysis, or "tell me everything" requests.',
     'Use get_wallet_deep_brief for wallet analysis, holdings, portfolio, PnL, smart-money, or wallet behavior questions.',
@@ -1247,8 +1391,16 @@ const buildAssistantSystemPrompt = () => [
     'Use get_token_overview for current price, token details, market cap, liquidity, volume, or overview questions.',
     'Use run_safe_scan only when the user asks for scan, safety, risk, security, or forensic analysis.',
     'Use get_detection_updates for Detection Engine, new updates, admitted tokens, market events, or alpha events.',
+    'Use get_detection_filtered for filtered Detection Engine requests by event type, severity, chain, score, or time window.',
+    'Use explain_detection_admission when the user asks why a token qualified, was admitted, or received a detection score.',
     'Use prepare_alert_setup for alerts, notifications, watching a token, or thresholds.',
+    'Use prepare_detection_alert for alerts about detection event types, score, severity, accumulation, distribution, or risk events.',
+    'Use prepare_linked_alert when the user asks for an alert requiring multiple conditions at once.',
     'Use get_token_activity for whale buys, whale sells, wallet movements, token impact timeline, or activity.',
+    'Use open_token_details when the user wants to open, view, or navigate to a token page.',
+    'Use compare_tokens when the user asks to compare two or more tokens.',
+    'Use get_token_holders for holder distribution, top holders, holder concentration, or ownership questions.',
+    'Use watch_token_activity when the user asks to monitor or watch a token activity feed.',
     'Use get_smart_alert_status for existing alert runner/status questions.',
     'Use conversation for casual chat, capability questions, or unclear requests.',
     'Examples:',
@@ -1282,9 +1434,17 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
             'get_wallet_deep_brief',
             'get_platform_updates',
             'get_detection_updates',
+            'get_detection_filtered',
+            'explain_detection_admission',
             'run_safe_scan',
             'prepare_alert_setup',
+            'prepare_detection_alert',
+            'prepare_linked_alert',
             'get_token_activity',
+            'open_token_details',
+            'compare_tokens',
+            'get_token_holders',
+            'watch_token_activity',
             'get_token_overview',
             'get_smart_alert_status'
         ]);
@@ -1294,7 +1454,12 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
             address: typeof parsed.address === 'string' ? parsed.address : undefined,
             chain: typeof parsed.chain === 'string' ? parsed.chain : undefined,
             query: typeof parsed.query === 'string' ? parsed.query : undefined,
-            responseStyle: parsed.responseStyle === 'detailed' ? 'detailed' : 'brief'
+            responseStyle: parsed.responseStyle === 'detailed' ? 'detailed' : 'brief',
+            eventType: typeof parsed.eventType === 'string' ? parsed.eventType : undefined,
+            severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
+            scoreMin: Number.isFinite(Number(parsed.scoreMin)) ? Number(parsed.scoreMin) : undefined,
+            timeWindow: typeof parsed.timeWindow === 'string' ? parsed.timeWindow : undefined,
+            alertMode: typeof parsed.alertMode === 'string' ? parsed.alertMode : undefined
         };
     } catch {
         return null;
@@ -1354,6 +1519,72 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
     const hasTokenSpecificIntent = /\b(search|find|lookup|look up|called|named|performing|performance|moving|move|doing|price|market\s*cap|liquidity|volume|overview|details|deep|analysis|analy[sz]e|what happened|recent events?)\b/.test(lower);
     const hasTokenQuery = Boolean(address || hasExplicitTokenQuery || (tokenQuery && hasTokenSpecificIntent));
 
+    if (/\b(compare|versus|vs\.?|against|which\s+(?:one|token|coin)\s+is\s+better)\b/.test(lower)) {
+        return { tool: 'compare_tokens', query: message, responseStyle: 'detailed' };
+    }
+
+    if (/\b(why|how)\b/.test(lower) && /\b(qualified|qualifies|admitted|entered|score|scored|accepted|allowed into|detection)\b/.test(lower)) {
+        return {
+            tool: 'explain_detection_admission',
+            address,
+            query: address || tokenQuery,
+            chain: address ? inferAssistantChain(message, address) : undefined,
+            responseStyle: 'detailed'
+        };
+    }
+
+    if (/\b(holders?|holder distribution|top holders?|ownership|concentration|supply distribution)\b/.test(lower)) {
+        return {
+            tool: 'get_token_holders',
+            address,
+            query: address || tokenQuery,
+            chain: address ? inferAssistantChain(message, address) : undefined,
+            responseStyle: 'detailed'
+        };
+    }
+
+    if (/\b(open|go to|take me to|show me|view)\b/.test(lower) && /\b(token details|token page|details page|chart page)\b/.test(lower)) {
+        return {
+            tool: 'open_token_details',
+            address,
+            query: address || tokenQuery,
+            chain: address ? inferAssistantChain(message, address) : undefined
+        };
+    }
+
+    if (/\b(alert|notify|notification)\b/.test(lower) && /\b(and|plus|both|linked|combined|together)\b/.test(lower)) {
+        return {
+            tool: 'prepare_linked_alert',
+            address,
+            query: address || tokenQuery,
+            chain: address ? inferAssistantChain(message, address) : undefined,
+            alertMode: 'linked'
+        };
+    }
+
+    if (/\b(alert|notify|notification)\b/.test(lower) && /\b(detection|accumulat\w*|distribut\w*|severity|score|risk|market stress|recovery|liquidity event)\b/.test(lower)) {
+        const filters = extractAssistantDetectionFilters(message);
+        return {
+            tool: 'prepare_detection_alert',
+            address,
+            query: address || tokenQuery,
+            chain: address ? inferAssistantChain(message, address) : filters.chain,
+            eventType: filters.eventType,
+            severity: filters.severity,
+            scoreMin: filters.scoreMin
+        };
+    }
+
+    if (/\b(watch|monitor|keep an eye on|track)\b/.test(lower) && /\b(activity|whale|buys?|sells?|movement|token)\b/.test(lower)) {
+        return {
+            tool: 'watch_token_activity',
+            address,
+            query: address || tokenQuery,
+            chain: address ? inferAssistantChain(message, address) : undefined,
+            responseStyle: 'detailed'
+        };
+    }
+
     if (/\b(wallet|holdings|portfolio|pnl|win rate|smart money wallet|track this wallet|analy[sz]e this wallet)\b/.test(lower)) {
         return {
             tool: 'get_wallet_deep_brief',
@@ -1373,6 +1604,19 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
 
     if (!hasExplicitTokenQuery && /\b(tokens?|coins?)\b/.test(lower) && /\b(moving|move|active|unusual activity)\b/.test(lower)) {
         return { tool: 'get_detection_updates', responseStyle: 'detailed', eventIntent: 'moving' };
+    }
+
+    if (!hasExplicitTokenQuery && /\b(tokens?|coins?|events?|detections?|admitted)\b/.test(lower) && /\b(high|medium|low|score|confidence|above|over|last hour|past hour|today|24h|solana|base|bsc|bnb|ethereum|accumulat\w*|distribut\w*|market stress|recovery|liquidity|volume spike|unusual)\b/.test(lower)) {
+        const filters = extractAssistantDetectionFilters(message);
+        return {
+            tool: 'get_detection_filtered',
+            responseStyle: 'detailed',
+            eventType: filters.eventType,
+            severity: filters.severity,
+            scoreMin: filters.scoreMin,
+            chain: filters.chain,
+            timeWindow: filters.hours ? `${filters.hours}h` : undefined
+        };
     }
 
     if (hasTokenQuery && hasTokenSpecificIntent) {
@@ -1472,6 +1716,16 @@ const chooseAssistantTool = async (message: string, history: AssistantConversati
 
     const explicitTokenQuery = extractAssistantAddress(message) || message.match(/\$([a-zA-Z][a-zA-Z0-9]{1,15})\b/)?.[1] || (hasExplicitAssistantTokenQuery(message) ? extractAssistantTokenQuery(message, []) : '');
     if (localChoice.eventIntent && !explicitTokenQuery) return localChoice;
+    if ([
+        'get_detection_filtered',
+        'explain_detection_admission',
+        'prepare_detection_alert',
+        'prepare_linked_alert',
+        'open_token_details',
+        'compare_tokens',
+        'get_token_holders',
+        'watch_token_activity'
+    ].includes(localChoice.tool)) return localChoice;
 
     try {
         const modelChoice = await chooseAssistantToolWithModel(message, history);
@@ -1639,6 +1893,208 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
         return buildPlatformUpdateBrief();
     }
 
+    if (request.tool === 'open_token_details') {
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        if (!tokenQuery) {
+            return {
+                answer: 'I can open a token details page, but I need the token address, ticker, or name first.',
+                tool: 'open_token_details_needs_query',
+                actions: [{ label: 'Open Overview', href: '/dashboard', kind: 'navigate' }]
+            };
+        }
+
+        const resolution = await resolveAssistantEntity(tokenQuery, chain, 'token');
+        if (resolution.kind !== 'token' || !resolution.token) {
+            const candidates = Array.isArray(resolution.candidates) ? resolution.candidates.slice(0, 5) : [];
+            return {
+                answer: candidates.length
+                    ? [
+                        `I found a few possible matches for "${tokenQuery}". Pick the exact token so I do not open the wrong page.`,
+                        '',
+                        ...candidates.map(formatAssistantTokenCandidate)
+                    ].join('\n')
+                    : `I could not find a token details page for "${tokenQuery}" yet. Try the contract address or exact ticker.`,
+                tool: 'open_token_details',
+                data: {
+                    candidates: candidates.map((token: any) => ({
+                        token: token?.ticker || token?.name,
+                        href: tokenDetailsHref(token)
+                    }))
+                },
+                actions: [{ label: 'Open Overview', href: '/dashboard', kind: 'navigate' }]
+            };
+        }
+
+        const href = tokenDetailsHref(resolution.token, resolution.chain);
+        return {
+            answer: `I found ${resolution.token.name || resolution.token.ticker}. Use the token details link to inspect the chart, holders, Detection context, and quick actions.`,
+            tool: 'open_token_details',
+            data: { token: { ...resolution.token, href } },
+            actions: [{ label: 'Open Token Details', href, kind: 'navigate' }]
+        };
+    }
+
+    if (request.tool === 'compare_tokens') {
+        const targets = extractAssistantCompareTargets(request.query || message, history);
+        if (targets.length < 2) {
+            return {
+                answer: 'I can compare tokens, but I need at least two tickers, names, or addresses. For example: compare $SOL and $ETH.',
+                tool: 'compare_tokens_needs_targets',
+                actions: [{ label: 'Open Overview', href: '/dashboard', kind: 'navigate' }]
+            };
+        }
+
+        const resolved = await Promise.all(targets.slice(0, 4).map(async (target) => ({
+            target,
+            resolution: await resolveAssistantEntity(target, chain, 'token')
+        })));
+        const tokens = resolved
+            .map(({ target, resolution }) => ({ target, token: resolution.token, resolution }))
+            .filter((item) => item.resolution.kind === 'token' && item.token);
+
+        if (tokens.length < 2) {
+            return {
+                answer: [
+                    'I could not resolve enough tokens to compare safely.',
+                    ...resolved.map(({ target, resolution }) => `${target}: ${resolution.reason || resolution.kind}`)
+                ].join('\n'),
+                tool: 'compare_tokens',
+                actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+            };
+        }
+
+        const lines = tokens.map(({ token }, index) => {
+            const liquidity = parseAssistantMarketNumber(token?.liquidity);
+            const volume = parseAssistantMarketNumber(token?.volume24h);
+            const cap = parseAssistantMarketNumber(token?.cap);
+            const volumeToLiquidity = liquidity > 0 ? `${(volume / liquidity).toFixed(2)}x liquidity` : 'volume/liquidity unavailable';
+            return `${index + 1}. ${token?.ticker || token?.name}: 24h ${safeAssistantText(token?.h24)}, volume ${safeAssistantText(token?.volume24h, '$0')}, liquidity ${safeAssistantText(token?.liquidity, '$0')}, market cap ${safeAssistantText(token?.cap, '$0')}, ${volumeToLiquidity}${cap > 0 && liquidity > 0 ? `, liquidity/cap ${(liquidity / cap * 100).toFixed(2)}%` : ''}.`;
+        });
+
+        return {
+            answer: [
+                `I compared ${tokens.length} tokens using the latest Atlaix market snapshot I can reach:`,
+                '',
+                ...lines,
+                '',
+                'For a decision, I would weigh liquidity depth and volume quality before chasing the largest 24h move.'
+            ].join('\n'),
+            tool: 'compare_tokens',
+            data: {
+                tokens: tokens.map(({ token }) => ({
+                    token: token?.ticker || token?.name,
+                    name: token?.name,
+                    chain: token?.chain,
+                    href: tokenDetailsHref(token)
+                }))
+            },
+            actions: tokens.map(({ token }) => ({
+                label: `Open ${token?.ticker || token?.name}`,
+                href: tokenDetailsHref(token),
+                kind: 'navigate' as const
+            }))
+        };
+    }
+
+    if (request.tool === 'get_token_holders') {
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        if (!tokenQuery) {
+            return {
+                answer: 'I can take you to holder distribution, but I need the token address, ticker, or name first.',
+                tool: 'token_holders_needs_query',
+                actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+            };
+        }
+
+        const resolution = await resolveAssistantEntity(tokenQuery, chain, 'token');
+        if (resolution.kind !== 'token' || !resolution.token) {
+            return {
+                answer: `I could not resolve "${tokenQuery}" to a single token. Send the contract address or exact chain and I will open the holder view.`,
+                tool: 'get_token_holders',
+                actions: [{ label: 'Open Overview', href: '/dashboard', kind: 'navigate' }]
+            };
+        }
+
+        const href = `${tokenDetailsHref(resolution.token, resolution.chain)}${tokenDetailsHref(resolution.token, resolution.chain).includes('?') ? '&' : '?'}panel=holders`;
+        return {
+            answer: `I found ${resolution.token.name || resolution.token.ticker}. The holder distribution lives on the token details page, alongside top-holder concentration and supply context.`,
+            tool: 'get_token_holders',
+            data: { token: { ...resolution.token, href } },
+            actions: [{ label: 'Open Holder Distribution', href, kind: 'navigate' }]
+        };
+    }
+
+    if (request.tool === 'get_detection_filtered') {
+        const allEvents = await getDetectionFeedForAssistant();
+        const filters = extractAssistantDetectionFilters(message, request);
+        const matches = (allEvents || []).filter((event: any) => assistantDetectionEventMatchesFilters(event, filters));
+        const visible = matches.slice(0, 10);
+        const filterLabel = [
+            filters.eventType || '',
+            filters.severity ? `${filters.severity} severity` : '',
+            typeof filters.scoreMin === 'number' ? `score ${filters.scoreMin}+` : '',
+            filters.chain ? normalizeAssistantChainLabel(filters.chain) : '',
+            filters.hours ? `last ${filters.hours}h` : ''
+        ].filter(Boolean).join(', ') || 'current Detection Engine filters';
+
+        return {
+            answer: visible.length
+                ? [
+                    `I found ${matches.length} matching Detection Engine event${matches.length === 1 ? '' : 's'} for ${filterLabel}.`,
+                    formatAssistantFreshnessLine(matches),
+                    '',
+                    ...visible.map((event: any, index: number) => `${index + 1}. ${formatAssistantDetectionLine(event)} ${explainAssistantDetectionImplication(event)}`)
+                ].join('\n')
+                : `I did not find matching Detection Engine events for ${filterLabel} in the current feed.`,
+            tool: 'get_detection_filtered',
+            data: {
+                totalEvents: allEvents?.length || 0,
+                matchingEvents: matches.length,
+                filters,
+                events: visible.map(assistantEventReference)
+            },
+            actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+        };
+    }
+
+    if (request.tool === 'explain_detection_admission') {
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        if (!tokenQuery) {
+            return {
+                answer: 'I can explain why a token was admitted, but I need the token ticker, name, or address first.',
+                tool: 'explain_detection_admission_needs_query',
+                actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+            };
+        }
+
+        const contextEvents = await getAssistantDetectionContext(tokenQuery, chain);
+        const event = contextEvents[0];
+        if (!event) {
+            return {
+                answer: `I could not find a stored Detection Engine admission for "${tokenQuery}" in the current feed. It may have aged out, failed quality gates, or need the exact contract/chain.`,
+                tool: 'explain_detection_admission',
+                actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+            };
+        }
+
+        const token = event?.token || {};
+        return {
+            answer: [
+                `${token.ticker || token.name || tokenQuery} was admitted because Atlaix classified it as ${event.eventType || 'a detection event'} with ${event.severity || 'Medium'} severity and score ${event.score || 0}.`,
+                explainAssistantDetectionImplication(event),
+                `Market context: 24h volume ${compactUsd(event?.metrics?.volume24h)}, liquidity ${compactUsd(event?.metrics?.liquidity)}, market cap ${compactUsd(event?.metrics?.marketCap)}.`,
+                event.summary ? `Feed note: ${event.summary}` : '',
+                'This is not a buy signal by itself; it is a quality-gated reason to inspect the token details, liquidity, holders, and follow-through.'
+            ].filter(Boolean).join('\n'),
+            tool: 'explain_detection_admission',
+            data: { events: [assistantEventReference(event)] },
+            actions: [
+                { label: 'Open Detection View', href: eventTokenHref(event), kind: 'navigate' },
+                { label: 'Open Token Details', href: tokenDetailsHref(token), kind: 'navigate' }
+            ]
+        };
+    }
+
     if (request.tool === 'run_safe_scan') {
         if (!address) {
             return {
@@ -1787,6 +2243,48 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
         };
     }
 
+    if (request.tool === 'watch_token_activity') {
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        if (!tokenQuery) {
+            return {
+                answer: 'I can help monitor token activity, but I need the token address, ticker, or name first.',
+                tool: 'watch_token_activity_needs_query',
+                actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+            };
+        }
+
+        const resolution = await resolveAssistantEntity(tokenQuery, chain, 'token');
+        if (resolution.kind !== 'token' || !resolution.token) {
+            return {
+                answer: `I could not resolve "${tokenQuery}" to a single token yet. Send the exact contract address and chain to start from the live token detection view.`,
+                tool: 'watch_token_activity',
+                actions: [{ label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }]
+            };
+        }
+
+        const token = resolution.token;
+        const params = new URLSearchParams({ source: 'assistant-watch' });
+        if (token.chain || resolution.chain) params.set('chain', normalizeAssistantChainId(token.chain || resolution.chain));
+        if (token.pairAddress) params.set('pair', token.pairAddress);
+        const href = `/detection/token/${encodeURIComponent(token.address || token.pairAddress || token.ticker)}?${params.toString()}`;
+        const alertHref = `/smart-alerts?${new URLSearchParams({
+            setup: '1',
+            address: token.address || tokenQuery,
+            chain: normalizeAssistantChainId(token.chain || resolution.chain),
+            type: 'alpha'
+        }).toString()}`;
+
+        return {
+            answer: `Open the token detection view for ${token.name || token.ticker} to monitor live detection context, wallet activity, and market movement. I am not silently creating a saved alert; use Smart Alerts if you want persistent notifications.`,
+            tool: 'watch_token_activity',
+            data: { token: { ...token, href } },
+            actions: [
+                { label: 'Open Token Detection', href, kind: 'navigate' },
+                { label: 'Prepare Smart Alert', href: alertHref, kind: 'navigate' }
+            ]
+        };
+    }
+
     if (request.tool === 'get_token_overview') {
         const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
         if (!tokenQuery) {
@@ -1832,7 +2330,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
 
         const tokenAddress = token.address || tokenQuery;
         const tokenHref = token.address
-            ? `/token/${encodeURIComponent(token.address)}`
+            ? tokenDetailsHref(token, resolution.chain)
             : `/detection/token/${encodeURIComponent(tokenQuery)}`;
 
         return {
@@ -1871,6 +2369,61 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             tool: 'get_smart_alert_status',
             data: status,
             actions: [{ label: 'Open Smart Alerts', href: '/smart-alerts' }]
+        };
+    }
+
+    if (request.tool === 'prepare_detection_alert' || request.tool === 'prepare_linked_alert') {
+        const tokenQuery = request.query || address || extractAssistantTokenQuery(message, history);
+        const filters = extractAssistantDetectionFilters(message, request);
+        const params = new URLSearchParams();
+        let alertType = filters.severity && !filters.eventType ? 'risk' : 'alpha';
+        let condition = filters.severity && !filters.eventType ? 'severity_is' : 'event_is';
+        let thresholdKind = filters.severity && !filters.eventType ? 'severity' : 'event';
+        let threshold = filters.severity && !filters.eventType ? filters.severity : (filters.eventType || 'Accumulation');
+
+        if (typeof filters.scoreMin === 'number' && !filters.eventType && !filters.severity) {
+            alertType = 'alpha';
+            condition = 'event_is';
+            thresholdKind = 'event';
+            threshold = 'Unusual Activity';
+        }
+
+        let resolvedToken: any = null;
+        if (tokenQuery) {
+            const resolution = await resolveAssistantEntity(tokenQuery, chain || filters.chain, 'token');
+            if (resolution.kind === 'token' && resolution.token) {
+                resolvedToken = resolution.token;
+                params.set('address', resolution.token.address || tokenQuery);
+                params.set('chain', normalizeAssistantChainId(resolution.token.chain || resolution.chain));
+            }
+        }
+        if (!params.has('chain') && (chain || filters.chain)) params.set('chain', normalizeAssistantChainId(chain || filters.chain));
+
+        params.set('setup', '1');
+        params.set('type', alertType);
+        params.set('condition', condition);
+        params.set('thresholdKind', thresholdKind);
+        params.set('threshold', threshold);
+        if (request.tool === 'prepare_linked_alert') {
+            params.set('alertMode', 'linked');
+            params.set('linked', '1');
+        }
+
+        const href = `/smart-alerts?${params.toString()}`;
+        const subject = resolvedToken?.ticker || resolvedToken?.name || (tokenQuery ? tokenQuery : 'matching tokens');
+        return {
+            answer: request.tool === 'prepare_linked_alert'
+                ? [
+                    `I prepared a linked Smart Alert draft for ${subject}.`,
+                    `First condition: ${condition.replace(/_/g, ' ')} ${threshold}. Add or confirm the second condition in Smart Alerts before saving.`
+                ].join('\n')
+                : [
+                    `I prepared a Detection-based Smart Alert draft for ${subject}.`,
+                    `Trigger: ${condition.replace(/_/g, ' ')} ${threshold}. Open Smart Alerts, review it, then confirm there. I will not save it silently.`
+                ].join('\n'),
+            tool: request.tool,
+            data: { token: resolvedToken, filters, href },
+            actions: [{ label: 'Open Smart Alerts', href, kind: 'navigate' }]
         };
     }
 

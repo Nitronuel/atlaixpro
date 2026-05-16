@@ -250,7 +250,7 @@ const applySnapshotClassification = (event: AlphaGauntletEvent, deltas: Detectio
     if (strongestContraction) {
         const eventType = event.metrics.priceChange24h <= -8 || event.triggers.includes('Strong Sell Pressure')
             ? 'Market Stress'
-            : 'Liquidity Event';
+            : 'Confirmed Liquidity Removed';
 
         return {
             eventType,
@@ -259,9 +259,9 @@ const applySnapshotClassification = (event: AlphaGauntletEvent, deltas: Detectio
         } as Pick<AlphaGauntletEvent, 'eventType' | 'lane' | 'severity'>;
     }
 
-    if (strongestExpansion && event.eventType === 'Liquidity Event') {
+    if (strongestExpansion && (event.eventType === 'Liquidity Event' || event.eventType === 'Deep Liquidity Structure')) {
         return {
-            eventType: 'Liquidity Event',
+            eventType: 'Confirmed Liquidity Added',
             lane: event.lane || 'Emerging Momentum',
             severity: event.severity
         } as Pick<AlphaGauntletEvent, 'eventType' | 'lane' | 'severity'>;

@@ -96,9 +96,9 @@ export const buildDetectionTimelineCards = (event: AlphaGauntletEvent): Detectio
         `${event.eventType} Admission`,
         `${tokenLabel} entered the Detection Engine as ${event.eventType} with activity score ${event.score}.`,
         valueBasis,
-        event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.eventType === 'Recovery'
+        event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.eventType === 'Momentum Breakout' || event.eventType === 'Recovery' || event.eventType === 'Recovery Attempt' || event.eventType === 'Confirmed Recovery' || event.eventType === 'Deep Liquidity Structure'
             ? 'bullish'
-            : event.eventType === 'Distribution' || event.eventType === 'Potential Distribution' || event.eventType === 'Market Stress'
+            : event.eventType === 'Distribution' || event.eventType === 'Potential Distribution' || event.eventType === 'Market Stress' || event.eventType === 'Thin Liquidity Risk' || event.eventType === 'Confirmed Liquidity Removed' || event.eventType === 'Overextended Momentum'
                 ? 'bearish'
                 : 'neutral'
     ));
@@ -149,7 +149,29 @@ export const buildDetectionTimelineCards = (event: AlphaGauntletEvent): Detectio
         ));
     }
 
-    if (event.metrics.priceChange24h >= 12 && !event.triggers.includes('Price Recovery') && !event.triggers.includes('Confirmed Recovery')) {
+    if (event.triggers.includes('Momentum Breakout')) {
+        cards.push(makeCard(
+            event,
+            'momentum-breakout',
+            getHonestTriggerLabel('Momentum Breakout'),
+            `${tokenLabel} is breaking out with ${event.metrics.priceChange24h >= 0 ? '+' : ''}${event.metrics.priceChange24h.toFixed(2)}% 24h price movement and active volume.`,
+            event.metrics.volume24h,
+            'bullish'
+        ));
+    }
+
+    if (event.triggers.includes('Overextended Momentum')) {
+        cards.push(makeCard(
+            event,
+            'overextended-momentum',
+            getHonestTriggerLabel('Overextended Momentum'),
+            `${tokenLabel} is extended after a ${event.metrics.priceChange24h.toFixed(2)}% 24h move, so execution and pullback risk are elevated.`,
+            event.metrics.volume24h,
+            'bearish'
+        ));
+    }
+
+    if (event.metrics.priceChange24h >= 12 && !event.triggers.includes('Momentum Breakout') && !event.triggers.includes('Price Recovery') && !event.triggers.includes('Confirmed Recovery')) {
         cards.push(makeCard(
             event,
             'price-pump',
@@ -172,22 +194,24 @@ export const buildDetectionTimelineCards = (event: AlphaGauntletEvent): Detectio
         ));
     }
 
-    if (event.triggers.includes('Liquidity Added')) {
+    if (event.triggers.includes('Liquidity Added') || event.triggers.includes('Deep Liquidity Structure') || event.triggers.includes('Confirmed Liquidity Added')) {
+        const trigger = event.triggers.includes('Confirmed Liquidity Added') ? 'Confirmed Liquidity Added' : event.triggers.includes('Deep Liquidity Structure') ? 'Deep Liquidity Structure' : 'Liquidity Added';
         cards.push(makeCard(
             event,
             'liquidity-added',
-            getHonestTriggerLabel('Liquidity Added'),
+            getHonestTriggerLabel(trigger),
             `${tokenLabel} has deep current liquidity structure with ${formatCompactUsd(event.metrics.liquidity)} active liquidity. Fresh liquidity addition is not yet snapshot-confirmed.`,
             event.metrics.liquidity,
             'bullish'
         ));
     }
 
-    if (event.triggers.includes('Liquidity Removed')) {
+    if (event.triggers.includes('Liquidity Removed') || event.triggers.includes('Thin Liquidity Risk') || event.triggers.includes('Confirmed Liquidity Removed')) {
+        const trigger = event.triggers.includes('Confirmed Liquidity Removed') ? 'Confirmed Liquidity Removed' : event.triggers.includes('Thin Liquidity Risk') ? 'Thin Liquidity Risk' : 'Liquidity Removed';
         cards.push(makeCard(
             event,
             'liquidity-removed',
-            getHonestTriggerLabel('Liquidity Removed'),
+            getHonestTriggerLabel(trigger),
             `${tokenLabel} has thin liquidity risk with ${formatCompactUsd(event.metrics.liquidity)} active liquidity remaining. Actual liquidity removal is not yet snapshot-confirmed.`,
             event.metrics.liquidity,
             'bearish'
@@ -207,13 +231,24 @@ export const buildDetectionTimelineCards = (event: AlphaGauntletEvent): Detectio
         ));
     }
 
-    if (event.triggers.includes('Possible Artificial Volume')) {
+    if (event.triggers.includes('Possible Artificial Volume') || event.triggers.includes('Possible Wash Trading')) {
         cards.push(makeCard(
             event,
             'possible-artificial-volume',
-            getHonestTriggerLabel('Possible Artificial Volume'),
+            event.triggers.includes('Possible Wash Trading') ? getHonestTriggerLabel('Possible Wash Trading') : getHonestTriggerLabel('Possible Artificial Volume'),
             `${tokenLabel} has unusually high activity with balanced buy/sell flow and muted price movement.`,
             event.metrics.volume24h,
+            'neutral'
+        ));
+    }
+
+    if (event.triggers.includes('Conflicting Signals')) {
+        cards.push(makeCard(
+            event,
+            'conflicting-signals',
+            getHonestTriggerLabel('Conflicting Signals'),
+            `${tokenLabel} has price and flow signals pointing in different directions, so follow-through needs confirmation.`,
+            valueBasis,
             'neutral'
         ));
     }

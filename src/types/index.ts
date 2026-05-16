@@ -92,8 +92,19 @@ export type AlphaGauntletEventType =
     | 'Potential Accumulation'
     | 'Distribution'
     | 'Potential Distribution'
+    | 'Momentum Breakout'
+    | 'Overextended Momentum'
+    | 'Flow Imbalance'
+    | 'Possible Wash Trading'
+    | 'Deep Liquidity Structure'
+    | 'Thin Liquidity Risk'
+    | 'Confirmed Liquidity Added'
+    | 'Confirmed Liquidity Removed'
+    | 'Conflicting Signals'
     | 'Market Stress'
     | 'Recovery'
+    | 'Recovery Attempt'
+    | 'Confirmed Recovery'
     | 'Liquidity Event'
     | 'Unusual Activity';
 
@@ -103,16 +114,25 @@ export type AlphaGauntletTrigger =
     | 'Transaction Spike'
     | 'Strong Buy Pressure'
     | 'Strong Sell Pressure'
+    | 'Momentum Breakout'
+    | 'Overextended Momentum'
     | 'Liquidity Added'
     | 'Liquidity Removed'
+    | 'Deep Liquidity Structure'
+    | 'Thin Liquidity Risk'
+    | 'Confirmed Liquidity Added'
+    | 'Confirmed Liquidity Removed'
     | 'Holder Growth Spike'
     | 'Sharp Pullback'
     | 'Price Dump'
     | 'Major Dump'
     | 'Price Recovery'
     | 'Confirmed Recovery'
+    | 'Flow Imbalance'
+    | 'Conflicting Signals'
     | 'Abnormal Large Trades'
-    | 'Possible Artificial Volume';
+    | 'Possible Artificial Volume'
+    | 'Possible Wash Trading';
 
 export interface AlphaGauntletScores {
     marketStructure: number;

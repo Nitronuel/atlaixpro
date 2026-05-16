@@ -1,12 +1,33 @@
 // Intelligence service module for Atlaix data workflows.
 import { AlphaGauntletEvent, AlphaGauntletEventType, AlphaGauntletTrigger, DetectionLane, MarketCoin } from '../types';
 import { buildDetectionSummary, enrichDetectionEvent, getHonestTriggerLabel } from './detection/DetectionEventPresenter';
-import { isExcludedAlphaToken } from '../utils/tokenFilters';
+import { hasQualityTokenMetadata, isExcludedAlphaToken } from '../utils/tokenFilters';
 
 const OVERVIEW_THRESHOLD = 70;
 const DETECTION_THRESHOLD = 65;
-const ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD = 50;
-const POTENTIAL_ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD = 35;
+const DETECTION_THRESHOLDS = {
+    potentialAccumulationMove: 25,
+    confirmedAccumulationMove: 40,
+    potentialDistributionMove: -15,
+    confirmedDistributionMove: -30,
+    recoveryAttemptMove: 12,
+    confirmedRecoveryMove: 25,
+    momentumBreakoutMove: 25,
+    overextendedMomentumMove: 80,
+    momentumBreakout1hMove: 8,
+    priceDump1hMove: -10,
+    marketStress24hMove: -18,
+    buyerDominance: 1.2,
+    strongBuyerDominance: 1.35,
+    sellerDominance: 1.2,
+    strongSellerDominance: 1.35,
+    elevatedTurnover: 1.2,
+    momentumTurnover: 0.7,
+    highTurnoverRisk: 5,
+    extremeTurnoverRisk: 8,
+    deepLiquidityRatio: 0.25,
+    thinLiquidityRatio: 0.08
+};
 
 const parseMetric = (value: string | number | undefined): number => {
     if (typeof value === 'number') return value;
@@ -40,6 +61,21 @@ const getAgeHours = (coin: MarketCoin) => {
 
 const hasBothSides = (buys: number, sells: number) => buys > 0 && sells > 0;
 
+const hasMinimumTokenIdentity = (coin: MarketCoin) => {
+    const hasIdentity = Boolean(coin.address && coin.pairAddress && coin.ticker?.trim() && coin.name?.trim());
+    if (!hasIdentity) return false;
+
+    if (hasQualityTokenMetadata(coin)) return true;
+
+    const marketCap = parseMetric(coin.cap);
+    const liquidity = parseMetric(coin.liquidity);
+    const volume24h = parseMetric(coin.volume24h);
+
+    // Do not hard-block strong markets solely because the upstream image is missing,
+    // but keep weak/no-profile tokens out of the discovery feed.
+    return marketCap >= 2_000_000 && liquidity >= 500_000 && volume24h >= 1_000_000;
+};
+
 const hasHealthyLiquidityStructure = (marketCap: number, liquidity: number, volume24h: number) => {
     if (marketCap <= 0) return false;
 
@@ -63,7 +99,13 @@ const inferLane = (
     triggers: AlphaGauntletTrigger[]
 ): DetectionLane => {
     if (eventType === 'Market Stress') return 'Market Stress';
-    if (triggers.includes('Liquidity Removed') || lpToMarketCapRatio <= 0.08) return 'Liquidity Risk';
+    if (
+        eventType === 'Thin Liquidity Risk' ||
+        eventType === 'Confirmed Liquidity Removed' ||
+        triggers.includes('Thin Liquidity Risk') ||
+        triggers.includes('Liquidity Removed') ||
+        lpToMarketCapRatio <= DETECTION_THRESHOLDS.thinLiquidityRatio
+    ) return 'Liquidity Risk';
     if (ageHours <= 6) return 'Fresh Launch';
     if (ageHours <= 72) return 'Emerging Momentum';
     if (score < 72) return 'Watchlist Candidate';
@@ -73,34 +115,37 @@ const inferLane = (
 const classifyEvent = (
     triggers: AlphaGauntletTrigger[],
     priceChange24h: number,
+    priceChange1h: number,
     buySellRatio: number,
     lpToMarketCapRatio: number,
     volumeFlowRatio: number,
-    netFlow: number
+    netFlow: number,
+    volumeToLiquidity: number
 ): AlphaGauntletEventType => {
-    const confirmedAccumulationMove = priceChange24h >= ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
-    const confirmedDistributionMove = priceChange24h <= -ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
-    const potentialAccumulationMove = priceChange24h >= POTENTIAL_ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
-    const potentialDistributionMove = priceChange24h <= -POTENTIAL_ACCUMULATION_DISTRIBUTION_MOVE_THRESHOLD;
-    const recoveryMomentum = priceChange24h >= 12;
-    const buyVolumeLeads = volumeFlowRatio >= 1.02 || netFlow > 0;
-    const sellVolumeLeads = volumeFlowRatio <= 0.98 || netFlow < 0;
-    const buyPressureConfirmed = triggers.includes('Strong Buy Pressure') && (triggers.includes('Volume Spike') || triggers.includes('Elevated Volume') || buySellRatio >= 1.4);
+    const buyVolumeLeads = volumeFlowRatio >= DETECTION_THRESHOLDS.buyerDominance || netFlow > 0;
+    const sellVolumeLeads = volumeFlowRatio <= (1 / DETECTION_THRESHOLDS.sellerDominance) || netFlow < 0;
+    const strongBuyPressure = triggers.includes('Strong Buy Pressure') && volumeFlowRatio >= DETECTION_THRESHOLDS.strongBuyerDominance && netFlow > 0;
+    const strongSellPressure = triggers.includes('Strong Sell Pressure') && (volumeFlowRatio <= (1 / DETECTION_THRESHOLDS.strongSellerDominance) || buySellRatio <= 0.67 || netFlow < 0);
+    const flowPriceConflict = triggers.includes('Conflicting Signals');
 
-    if (triggers.includes('Strong Sell Pressure')) {
-        if (recoveryMomentum && buyVolumeLeads) return 'Recovery';
-        if (recoveryMomentum) return 'Recovery';
-        if (confirmedDistributionMove && sellVolumeLeads) return 'Distribution';
-        if (potentialDistributionMove && sellVolumeLeads) return 'Potential Distribution';
-        if ((triggers.includes('Major Dump') || triggers.includes('Price Dump')) && (triggers.includes('Strong Sell Pressure') || lpToMarketCapRatio < 0.15)) return 'Market Stress';
-        return 'Unusual Activity';
+    if (triggers.includes('Possible Wash Trading')) return 'Possible Wash Trading';
+    if (triggers.includes('Major Dump') || priceChange1h <= DETECTION_THRESHOLDS.priceDump1hMove || (priceChange24h <= DETECTION_THRESHOLDS.marketStress24hMove && (triggers.includes('Thin Liquidity Risk') || volumeToLiquidity >= DETECTION_THRESHOLDS.highTurnoverRisk)) || (priceChange24h < 0 && triggers.includes('Thin Liquidity Risk') && volumeToLiquidity >= DETECTION_THRESHOLDS.highTurnoverRisk)) {
+        return 'Market Stress';
     }
-    if (triggers.includes('Possible Artificial Volume')) return 'Unusual Activity';
-    if (buyPressureConfirmed && confirmedAccumulationMove) return 'Accumulation';
-    if (buyPressureConfirmed && potentialAccumulationMove) return 'Potential Accumulation';
-    if ((triggers.includes('Price Recovery') || triggers.includes('Confirmed Recovery')) && (triggers.includes('Volume Spike') || triggers.includes('Elevated Volume'))) return 'Recovery';
-    if (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed')) return 'Liquidity Event';
-    if (triggers.includes('Major Dump') || priceChange24h < -18) return 'Market Stress';
+    if (triggers.includes('Confirmed Liquidity Removed')) return 'Confirmed Liquidity Removed';
+    if (strongSellPressure && priceChange24h <= DETECTION_THRESHOLDS.confirmedDistributionMove && sellVolumeLeads) return 'Distribution';
+    if (strongSellPressure && priceChange24h <= DETECTION_THRESHOLDS.potentialDistributionMove && sellVolumeLeads) return 'Potential Distribution';
+    if (flowPriceConflict) return 'Conflicting Signals';
+    if (priceChange24h >= DETECTION_THRESHOLDS.overextendedMomentumMove || (triggers.includes('Overextended Momentum') && volumeToLiquidity >= DETECTION_THRESHOLDS.highTurnoverRisk)) return 'Overextended Momentum';
+    if (strongBuyPressure && priceChange24h >= DETECTION_THRESHOLDS.confirmedAccumulationMove && buyVolumeLeads && volumeToLiquidity < DETECTION_THRESHOLDS.highTurnoverRisk) return 'Accumulation';
+    if (strongBuyPressure && priceChange24h >= DETECTION_THRESHOLDS.potentialAccumulationMove && buyVolumeLeads) return 'Potential Accumulation';
+    if (triggers.includes('Momentum Breakout')) return 'Momentum Breakout';
+    if (triggers.includes('Confirmed Liquidity Added')) return 'Confirmed Liquidity Added';
+    if (triggers.includes('Deep Liquidity Structure')) return 'Deep Liquidity Structure';
+    if (triggers.includes('Thin Liquidity Risk')) return 'Thin Liquidity Risk';
+    if (triggers.includes('Confirmed Recovery')) return 'Confirmed Recovery';
+    if (triggers.includes('Price Recovery')) return 'Recovery Attempt';
+    if (triggers.includes('Flow Imbalance')) return 'Flow Imbalance';
     return 'Unusual Activity';
 };
 
@@ -127,8 +172,8 @@ const computeV2Scores = (
     const volumeToLiquidity = metrics.liquidity > 0 ? metrics.volume24h / metrics.liquidity : 0;
     const flowShare = metrics.volume24h > 0 ? Math.abs(metrics.netFlow) / metrics.volume24h : 0;
     const buySellBalance = Math.max(0, 100 - Math.abs((metrics.buySellRatio || 1) - 1) * 45);
-    const turnoverPenalty = volumeToLiquidity >= 8 ? 35 : volumeToLiquidity >= 5 ? 22 : volumeToLiquidity >= 3 ? 10 : 0;
-    const thinLiquidityPenalty = metrics.lpToMarketCapRatio <= 0.08 ? 26 : metrics.lpToMarketCapRatio <= 0.12 ? 12 : 0;
+    const turnoverPenalty = volumeToLiquidity >= DETECTION_THRESHOLDS.extremeTurnoverRisk ? 35 : volumeToLiquidity >= DETECTION_THRESHOLDS.highTurnoverRisk ? 22 : volumeToLiquidity >= 3 ? 10 : 0;
+    const thinLiquidityPenalty = metrics.lpToMarketCapRatio <= DETECTION_THRESHOLDS.thinLiquidityRatio ? 26 : metrics.lpToMarketCapRatio <= 0.12 ? 12 : 0;
     const contradictionPenalty =
         metrics.priceChange24h > 10 && metrics.netFlow < 0 ? 18 :
             metrics.priceChange24h < -8 && metrics.netFlow > 0 ? 12 :
@@ -148,16 +193,16 @@ const computeV2Scores = (
         thinLiquidityPenalty +
         contradictionPenalty +
         (flowShare >= 0.2 ? 18 : flowShare >= 0.12 ? 10 : 0) +
-        (triggers.includes('Liquidity Removed') ? 12 : 0) +
-        (triggers.includes('Possible Artificial Volume') ? 18 : 0)
+        (triggers.includes('Thin Liquidity Risk') || triggers.includes('Confirmed Liquidity Removed') ? 12 : 0) +
+        (triggers.includes('Possible Artificial Volume') || triggers.includes('Possible Wash Trading') ? 18 : 0)
     ));
     const evidenceQualityScore = Math.round(clamp(
         55 +
         (triggers.includes('Volume Spike') ? 14 : 0) +
         (triggers.includes('Confirmed Recovery') ? 12 : 0) +
         (triggers.includes('Elevated Volume') ? -8 : 0) +
-        (triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed') ? -6 : 0) +
-        (triggers.includes('Possible Artificial Volume') ? -10 : 0)
+        (triggers.includes('Deep Liquidity Structure') || triggers.includes('Thin Liquidity Risk') || triggers.includes('Liquidity Added') || triggers.includes('Liquidity Removed') ? -6 : 0) +
+        (triggers.includes('Possible Artificial Volume') || triggers.includes('Possible Wash Trading') ? -10 : 0)
     ));
     const detectionGrade = Math.round(clamp(
         activityScore * 0.3 +
@@ -197,7 +242,7 @@ const shouldAdmitEvent = (event: AlphaGauntletEvent, fallbackThreshold: number) 
     const threshold = Math.max(Math.min(fallbackThreshold, 70), laneThreshold(lane));
 
     if (lane === 'Liquidity Risk') {
-        return event.triggers.includes('Liquidity Removed') && (
+        return (event.triggers.includes('Thin Liquidity Risk') || event.triggers.includes('Confirmed Liquidity Removed') || event.triggers.includes('Liquidity Removed')) && (
             event.metrics.volume24h >= 500000 ||
             event.metrics.lpToMarketCapRatio <= 0.06 ||
             event.snapshotDeltas?.some((delta) => delta.liquidityChangePct <= -20)
@@ -217,6 +262,7 @@ export const AlphaGauntletService = {
 
     qualifyToken(coin: MarketCoin): AlphaGauntletEvent | null {
         if (isExcludedAlphaToken(coin)) return null;
+        if (!hasMinimumTokenIdentity(coin)) return null;
 
         const marketCap = parseMetric(coin.cap);
         const liquidity = parseMetric(coin.liquidity);
@@ -236,15 +282,22 @@ export const AlphaGauntletService = {
         const netFlow = parseMetric(coin.netFlow);
         const absNetFlow = Math.abs(netFlow);
 
-        const marketEligible =
+        const baseMarketEligible =
             marketCap >= 500000 &&
-            liquidity >= 100000 &&
+            liquidity >= (ageHours < 24 ? 150000 : 100000) &&
             volume24h >= 250000 &&
             holderProxy >= 500 &&
             transactions24h >= 500 &&
             ageHours >= 3 &&
-            hasHealthyLiquidityStructure(marketCap, liquidity, volume24h) &&
             hasBothSides(buys, sells);
+        const highActivityRiskEligible =
+            marketCap >= 1_000_000 &&
+            liquidity >= 250_000 &&
+            volume24h >= 1_000_000 &&
+            transactions24h >= 1_000 &&
+            ageHours >= 3 &&
+            hasBothSides(buys, sells);
+        const marketEligible = baseMarketEligible && (hasHealthyLiquidityStructure(marketCap, liquidity, volume24h) || highActivityRiskEligible);
 
         if (!marketEligible) return null;
 
@@ -256,21 +309,36 @@ export const AlphaGauntletService = {
             : liquidity < 1000000
                 ? Math.max(150000, liquidity * 0.12, volume24h * 0.15)
                 : Math.max(300000, liquidity * 0.08, volume24h * 0.12);
-        const buyerDominance = buyVolume24h > 0 && buyVolume24h > sellVolume24h * 1.2;
-        const sellerDominance = sellVolume24h > 0 && sellVolume24h > buyVolume24h * 1.2;
+        const buyerDominance = buyVolume24h > 0 && buyVolume24h >= sellVolume24h * DETECTION_THRESHOLDS.buyerDominance;
+        const sellerDominance = sellVolume24h > 0 && sellVolume24h >= buyVolume24h * DETECTION_THRESHOLDS.sellerDominance;
+        const strongBuyerDominance = buyVolume24h > 0 && buyVolume24h >= sellVolume24h * DETECTION_THRESHOLDS.strongBuyerDominance;
+        const strongSellerDominance = sellVolume24h > 0 && sellVolume24h >= buyVolume24h * DETECTION_THRESHOLDS.strongSellerDominance;
         const sharpPullback = priceChange1h <= -8 && volumeToLiquidity >= 0.5;
-        const priceDump = priceChange1h <= -10 || priceChange24h <= -18 || (priceChange24h <= -12 && sellerDominance);
-        const majorDump = priceChange24h <= -22 && volume24h >= liquidity * 0.5;
-        const recoveryAttempt = priceChange1h >= 5 && buyVolume24h >= sellVolume24h && priceChange24h > -10 && volumeToLiquidity >= 0.5;
-        const confirmedRecovery = priceChange24h >= 12 && buyerDominance && lpToMarketCapRatio > 0.08;
+        const priceDump = priceChange1h <= DETECTION_THRESHOLDS.priceDump1hMove || priceChange24h <= DETECTION_THRESHOLDS.marketStress24hMove || (priceChange24h <= -12 && sellerDominance);
+        const majorDump = priceChange24h <= -45 && volume24h >= liquidity * 0.5;
+        const recoveryAttempt = priceChange24h >= DETECTION_THRESHOLDS.recoveryAttemptMove && buyVolume24h >= sellVolume24h && priceChange24h > -10 && volumeToLiquidity >= 0.5;
+        const confirmedRecovery = priceChange24h >= DETECTION_THRESHOLDS.confirmedRecoveryMove && buyerDominance && lpToMarketCapRatio > 0.08;
         const balancedFlow = buyVolume24h > 0 && sellVolume24h > 0 && volumeFlowRatio >= 0.95 && volumeFlowRatio <= 1.05;
         const possibleArtificialVolume =
             transactions24h >= 10000 &&
             balancedFlow &&
             Math.abs(priceChange24h) < 3 &&
             volumeToLiquidity >= 3;
+        const momentumBreakout = (
+            priceChange24h >= DETECTION_THRESHOLDS.momentumBreakoutMove ||
+            (priceChange1h >= DETECTION_THRESHOLDS.momentumBreakout1hMove && volumeToLiquidity >= DETECTION_THRESHOLDS.momentumTurnover)
+        ) && buyVolume24h >= sellVolume24h;
+        const overextendedMomentum = priceChange24h >= DETECTION_THRESHOLDS.overextendedMomentumMove || (priceChange24h >= DETECTION_THRESHOLDS.confirmedAccumulationMove && volumeToLiquidity >= DETECTION_THRESHOLDS.highTurnoverRisk);
+        const flowPriceConflict = (priceChange24h > 10 && netFlow < 0) || (priceChange24h < -8 && netFlow > 0);
+        const highTurnoverRisk = volumeToLiquidity >= DETECTION_THRESHOLDS.highTurnoverRisk;
+        const extremeTurnoverRisk = volumeToLiquidity >= DETECTION_THRESHOLDS.extremeTurnoverRisk;
+        const structurallyThinLiquidity = lpToMarketCapRatio <= DETECTION_THRESHOLDS.thinLiquidityRatio && (
+            marketCap < 10_000_000 ||
+            liquidity < 500_000 ||
+            highTurnoverRisk
+        );
 
-        if (volumeToLiquidity >= 1.2 || volumeToMarketCap >= 0.2 || volume24h >= 1000000) triggers.push('Elevated Volume');
+        if (volumeToLiquidity >= DETECTION_THRESHOLDS.elevatedTurnover || volumeToMarketCap >= 0.2 || volume24h >= 1000000) triggers.push('Elevated Volume');
         if (
             transactions24h >= 10000 ||
             (transactions24h >= 5000 && volumeToLiquidity >= 3) ||
@@ -278,8 +346,12 @@ export const AlphaGauntletService = {
         ) triggers.push('Transaction Spike');
         if (buyerDominance || (volumeFlowRatio >= 1.08 && priceChange24h >= 5) || (buySellRatio >= 1.5 && volume24h >= 500000 && netFlow > 0)) triggers.push('Strong Buy Pressure');
         if (sellerDominance || (volumeFlowRatio <= 0.92 && priceChange24h <= 5) || (buySellRatio <= 0.67 && volume24h >= 500000 && netFlow < 0)) triggers.push('Strong Sell Pressure');
-        if (lpToMarketCapRatio >= 0.25 && volumeToLiquidity >= 0.6) triggers.push('Liquidity Added');
-        if (lpToMarketCapRatio <= 0.08 && volume24h >= 500000) triggers.push('Liquidity Removed');
+        if (strongBuyerDominance && priceChange24h >= DETECTION_THRESHOLDS.potentialAccumulationMove) triggers.push('Flow Imbalance');
+        if (strongSellerDominance && priceChange24h <= DETECTION_THRESHOLDS.potentialDistributionMove) triggers.push('Flow Imbalance');
+        if (momentumBreakout) triggers.push('Momentum Breakout');
+        if (overextendedMomentum) triggers.push('Overextended Momentum');
+        if (lpToMarketCapRatio >= DETECTION_THRESHOLDS.deepLiquidityRatio && volumeToLiquidity >= 0.6) triggers.push('Deep Liquidity Structure');
+        if (structurallyThinLiquidity && volume24h >= 500000) triggers.push('Thin Liquidity Risk');
         if (sharpPullback && !priceDump) triggers.push('Sharp Pullback');
         if (priceDump) triggers.push('Price Dump');
         if (majorDump) triggers.push('Major Dump');
@@ -287,10 +359,13 @@ export const AlphaGauntletService = {
         if (confirmedRecovery) triggers.push('Confirmed Recovery');
         if (absNetFlow >= largeFlowThreshold) triggers.push('Abnormal Large Trades');
         if (possibleArtificialVolume) triggers.push('Possible Artificial Volume');
+        if (possibleArtificialVolume) triggers.push('Possible Wash Trading');
+        if (flowPriceConflict || (triggers.includes('Strong Buy Pressure') && triggers.includes('Strong Sell Pressure'))) triggers.push('Conflicting Signals');
+        if (highTurnoverRisk || extremeTurnoverRisk) triggers.push('Flow Imbalance');
 
         if (triggers.length === 0) return null;
 
-        const eventType = classifyEvent(triggers, priceChange24h, buySellRatio, lpToMarketCapRatio, volumeFlowRatio, netFlow);
+        const eventType = classifyEvent(triggers, priceChange24h, priceChange1h, buySellRatio, lpToMarketCapRatio, volumeFlowRatio, netFlow, volumeToLiquidity);
 
         const marketStructure = Math.round((
             scoreRatio(marketCap, 5000000) * 0.35 +

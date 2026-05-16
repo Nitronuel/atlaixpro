@@ -6,6 +6,7 @@ import {
     ArrowRight,
     Bell,
     CheckCircle2,
+    ExternalLink,
     Loader2,
     Megaphone,
     MessageSquare,
@@ -30,6 +31,7 @@ type ChatMessage = {
     role: 'user' | 'assistant';
     text: string;
     tool?: string;
+    data?: unknown;
     actions?: AiAssistantAction[];
     createdAt: number;
 };
@@ -114,6 +116,72 @@ const saveAssistantChatCache = (cache: Omit<AssistantChatCache, 'savedAt'>) => {
 };
 
 const splitLines = (text: string) => text.split('\n').filter(Boolean);
+
+type AssistantInlineReference = {
+    label: string;
+    href: string;
+    title: string;
+};
+
+const getAssistantDataReferences = (data: unknown): AssistantInlineReference[] => {
+    const payload = data as {
+        events?: Array<{ token?: string; href?: string; eventType?: string }>;
+        tokens?: Array<{ token?: string; name?: string; href?: string }>;
+        candidates?: Array<{ token?: string; name?: string; href?: string }>;
+        token?: { token?: string; ticker?: string; name?: string; href?: string };
+    } | null;
+    if (!payload) return [];
+
+    const items = [
+        ...(Array.isArray(payload.events) ? payload.events.map((event) => ({
+            label: event?.token,
+            href: event?.href,
+            title: event?.eventType ? `Open ${event.token} ${event.eventType} context` : `Open ${event.token} in Atlaix`
+        })) : []),
+        ...(Array.isArray(payload.tokens) ? payload.tokens.map((token) => ({
+            label: token?.token || token?.name,
+            href: token?.href,
+            title: `Open ${token?.token || token?.name} in Atlaix`
+        })) : []),
+        ...(Array.isArray(payload.candidates) ? payload.candidates.map((token) => ({
+            label: token?.token || token?.name,
+            href: token?.href,
+            title: `Open ${token?.token || token?.name} in Atlaix`
+        })) : []),
+        payload.token ? {
+            label: payload.token.token || payload.token.ticker || payload.token.name,
+            href: payload.token.href,
+            title: `Open ${payload.token.token || payload.token.ticker || payload.token.name} in Atlaix`
+        } : null
+    ];
+
+    return items
+        .map((item) => {
+            const label = String(item?.label || '').trim();
+            const href = String(item?.href || '').trim();
+            if (!label || !href) return null;
+
+            return {
+                label,
+                href,
+                title: item?.title || `Open ${label} in Atlaix`
+            };
+        })
+        .filter((reference): reference is AssistantInlineReference => Boolean(reference));
+};
+
+const normalizeReferenceLabel = (value: string) =>
+    value.trim().toLowerCase().replace(/^\d+\.\s*/, '').replace(/[:(].*$/, '').trim();
+
+const findInlineReference = (line: string, references: AssistantInlineReference[]) => {
+    const normalizedLineStart = normalizeReferenceLabel(line);
+    if (!normalizedLineStart) return null;
+
+    return references.find((reference) => {
+        const label = normalizeReferenceLabel(reference.label);
+        return normalizedLineStart === label || normalizedLineStart.startsWith(`${label} `);
+    }) || null;
+};
 
 const toConversationHistory = (messages: ChatMessage[]): AiAssistantConversationMessage[] =>
     messages.map((message) => ({
@@ -250,6 +318,7 @@ export const AiAssistant: React.FC = () => {
                     role: 'assistant',
                     text: response.answer,
                     tool: response.tool,
+                    data: response.data,
                     actions: response.actions || [],
                     createdAt: new Date(response.createdAt).getTime() || Date.now()
                 }
@@ -503,6 +572,7 @@ export const AiAssistant: React.FC = () => {
 
                                         {messages.map((message) => {
                                             const isUser = message.role === 'user';
+                                            const inlineReferences = isUser ? [] : getAssistantDataReferences(message.data);
                                             return (
                                                 <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                                                     <div className={`flex max-w-[86%] gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -522,9 +592,25 @@ export const AiAssistant: React.FC = () => {
                                                                 </div>
                                                             )}
                                                             <div className={`space-y-2 text-sm leading-relaxed ${isUser ? 'font-semibold' : 'font-medium'}`}>
-                                                                {splitLines(message.text).map((line, index) => (
-                                                                    <p key={index}>{line}</p>
-                                                                ))}
+                                                                {splitLines(message.text).map((line, index) => {
+                                                                    const reference = findInlineReference(line, inlineReferences);
+                                                                    return (
+                                                                        <p key={index} className="group/assistant-line flex items-start gap-2">
+                                                                            <span className="min-w-0 flex-1">{line}</span>
+                                                                            {reference && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => goToAction(reference.href)}
+                                                                                    className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-primary-green/30 bg-primary-green/10 text-primary-green opacity-80 transition-colors hover:border-primary-green hover:bg-primary-green/15 hover:opacity-100"
+                                                                                    title={reference.title}
+                                                                                    aria-label={reference.title}
+                                                                                >
+                                                                                    <ExternalLink size={12} />
+                                                                                </button>
+                                                                            )}
+                                                                        </p>
+                                                                    );
+                                                                })}
                                                             </div>
                                                             {message.actions && message.actions.length > 0 && (
                                                                 <div className="mt-3 flex flex-wrap gap-2">

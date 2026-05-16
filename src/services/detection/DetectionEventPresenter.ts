@@ -26,16 +26,25 @@ export const HONEST_TRIGGER_LABELS: Record<AlphaGauntletTrigger, string> = {
     'Transaction Spike': 'Trade Count Acceleration',
     'Strong Buy Pressure': 'Buyer Dominance',
     'Strong Sell Pressure': 'Seller Dominance',
+    'Momentum Breakout': 'Momentum Breakout',
+    'Overextended Momentum': 'Overextended Momentum',
     'Liquidity Added': 'Deep Liquidity Structure',
     'Liquidity Removed': 'Thin Liquidity Risk',
+    'Deep Liquidity Structure': 'Deep Liquidity Structure',
+    'Thin Liquidity Risk': 'Thin Liquidity Risk',
+    'Confirmed Liquidity Added': 'Confirmed Liquidity Added',
+    'Confirmed Liquidity Removed': 'Confirmed Liquidity Removed',
     'Holder Growth Spike': 'Active Trade Proxy Spike',
     'Sharp Pullback': 'Sharp Pullback',
     'Price Dump': 'Price Breakdown',
     'Major Dump': 'Major Dump',
     'Price Recovery': 'Recovery Attempt',
     'Confirmed Recovery': 'Confirmed Recovery',
+    'Flow Imbalance': 'Flow Imbalance',
+    'Conflicting Signals': 'Conflicting Signals',
     'Abnormal Large Trades': 'Large Flow Imbalance',
-    'Possible Artificial Volume': 'Possible Artificial Volume'
+    'Possible Artificial Volume': 'Possible Artificial Volume',
+    'Possible Wash Trading': 'Possible Wash Trading'
 };
 
 export const getHonestTriggerLabel = (trigger: AlphaGauntletTrigger | string) => {
@@ -60,9 +69,17 @@ const triggerStrength = (trigger: AlphaGauntletTrigger, event: AlphaGauntletEven
         case 'Strong Buy Pressure':
         case 'Strong Sell Pressure':
             return clamp((buySellSkew / 1.25) * 100 + netFlowShare * 30);
+        case 'Momentum Breakout':
+            return clamp(Math.max(metrics.priceChange24h * 2, volumeToLiquidity * 28));
+        case 'Overextended Momentum':
+            return clamp(Math.abs(metrics.priceChange24h) + volumeToLiquidity * 10);
         case 'Liquidity Added':
+        case 'Deep Liquidity Structure':
+        case 'Confirmed Liquidity Added':
             return clamp((metrics.lpToMarketCapRatio / 0.25) * 100);
         case 'Liquidity Removed':
+        case 'Thin Liquidity Risk':
+        case 'Confirmed Liquidity Removed':
             return clamp((0.12 - metrics.lpToMarketCapRatio) * 900);
         case 'Holder Growth Spike':
             return clamp((metrics.holders / 5000) * 100);
@@ -74,8 +91,12 @@ const triggerStrength = (trigger: AlphaGauntletTrigger, event: AlphaGauntletEven
         case 'Confirmed Recovery':
             return clamp(Math.abs(metrics.priceChange24h) * 2.5);
         case 'Abnormal Large Trades':
+        case 'Flow Imbalance':
             return clamp(netFlowShare * 350);
+        case 'Conflicting Signals':
+            return clamp(Math.abs(metrics.priceChange24h) * 1.5 + netFlowShare * 140);
         case 'Possible Artificial Volume':
+        case 'Possible Wash Trading':
             return clamp(volumeToLiquidity * 18 + (metrics.transactions24h / 10000) * 40);
         default:
             return 50;
@@ -98,10 +119,20 @@ const triggerExplanation = (trigger: AlphaGauntletTrigger, event: AlphaGauntletE
             return `Buy-side USD flow leads sell-side flow with an estimated ${formatCompactUsd(Math.max(m.buyVolume24h, 0))} buy volume.`;
         case 'Strong Sell Pressure':
             return `Sell-side USD flow is elevated with estimated sell volume of ${formatCompactUsd(Math.max(m.sellVolume24h, 0))}.`;
+        case 'Momentum Breakout':
+            return `Price and activity are expanding together, with 24h movement of ${m.priceChange24h.toFixed(2)}% and volume at ${volumeToLiquidity.toFixed(2)}x liquidity.`;
+        case 'Overextended Momentum':
+            return `Price is extended at ${m.priceChange24h.toFixed(2)}% over 24h, so continuation risk should be weighed against liquidity and turnover.`;
         case 'Liquidity Added':
+        case 'Deep Liquidity Structure':
             return `Liquidity depth is high relative to market cap, but no historical snapshot has confirmed fresh liquidity was added yet.`;
+        case 'Confirmed Liquidity Added':
+            return `Snapshot history indicates liquidity expanded enough to treat this as confirmed liquidity addition.`;
         case 'Liquidity Removed':
+        case 'Thin Liquidity Risk':
             return `Liquidity is thin relative to market cap and volume, but no historical snapshot has confirmed actual removal yet.`;
+        case 'Confirmed Liquidity Removed':
+            return `Snapshot history indicates liquidity contracted enough to treat this as confirmed liquidity removal.`;
         case 'Holder Growth Spike':
             return `The current holder figure is an active-trade proxy, not verified holder growth.`;
         case 'Sharp Pullback':
@@ -116,7 +147,12 @@ const triggerExplanation = (trigger: AlphaGauntletTrigger, event: AlphaGauntletE
             return `Price recovery is supported by buy-side flow and controlled liquidity conditions.`;
         case 'Abnormal Large Trades':
             return `Net flow is ${netFlow}, suggesting a large aggregate flow imbalance rather than a single-wallet whale trade.`;
+        case 'Flow Imbalance':
+            return `Net flow and side dominance are large enough to treat this as a flow imbalance that may affect execution.`;
+        case 'Conflicting Signals':
+            return `Price movement and estimated flow point in different directions, so this signal needs confirmation before it is treated as clean momentum.`;
         case 'Possible Artificial Volume':
+        case 'Possible Wash Trading':
             return `High activity is paired with balanced buy/sell flow and muted price movement, a pattern that can resemble artificial volume.`;
         default:
             return `${getHonestTriggerLabel(trigger)} contributed to this detection.`;
@@ -124,9 +160,10 @@ const triggerExplanation = (trigger: AlphaGauntletTrigger, event: AlphaGauntletE
 };
 
 const triggerKind = (trigger: AlphaGauntletTrigger) => {
-    if (trigger === 'Liquidity Added' || trigger === 'Liquidity Removed' || trigger === 'Holder Growth Spike') return 'inferred';
+    if (trigger === 'Liquidity Added' || trigger === 'Liquidity Removed' || trigger === 'Deep Liquidity Structure' || trigger === 'Thin Liquidity Risk' || trigger === 'Holder Growth Spike') return 'inferred';
     if (trigger === 'Elevated Volume') return 'inferred';
-    if (trigger === 'Abnormal Large Trades' || trigger === 'Possible Artificial Volume') return 'derived';
+    if (trigger === 'Confirmed Liquidity Added' || trigger === 'Confirmed Liquidity Removed') return 'observed';
+    if (trigger === 'Abnormal Large Trades' || trigger === 'Possible Artificial Volume' || trigger === 'Possible Wash Trading' || trigger === 'Flow Imbalance' || trigger === 'Conflicting Signals') return 'derived';
     return 'derived';
 };
 
@@ -152,7 +189,7 @@ export const inferDetectionLane = (event: AlphaGauntletEvent): DetectionLane => 
     const lpRatio = event.metrics.lpToMarketCapRatio;
 
     if (event.eventType === 'Market Stress') return 'Market Stress';
-    if (event.triggers.includes('Liquidity Removed') || lpRatio <= 0.08) return 'Liquidity Risk';
+    if (event.eventType === 'Thin Liquidity Risk' || event.eventType === 'Confirmed Liquidity Removed' || event.triggers.includes('Thin Liquidity Risk') || event.triggers.includes('Liquidity Removed') || lpRatio <= 0.08) return 'Liquidity Risk';
     if (ageHours <= 6) return 'Fresh Launch';
     if (ageHours <= 72) return 'Emerging Momentum';
     if (event.score < 72) return 'Watchlist Candidate';
@@ -170,7 +207,7 @@ export const buildConfidence = (event: AlphaGauntletEvent): DetectionConfidence 
         reasons.push('Token has enough age for basic market context.');
     }
 
-    if (event.triggers.some((trigger) => trigger === 'Liquidity Added' || trigger === 'Liquidity Removed')) {
+    if (event.triggers.some((trigger) => trigger === 'Liquidity Added' || trigger === 'Liquidity Removed' || trigger === 'Deep Liquidity Structure' || trigger === 'Thin Liquidity Risk')) {
         score -= 10;
         reasons.push('Liquidity signal is inferred until snapshot history confirms a real change.');
     }
@@ -194,9 +231,9 @@ export const buildConfidence = (event: AlphaGauntletEvent): DetectionConfidence 
         reasons.push('Buy/sell activity is incomplete.');
     }
 
-    if (event.triggers.includes('Strong Buy Pressure') && event.triggers.includes('Strong Sell Pressure')) {
+    if (event.triggers.includes('Conflicting Signals') || (event.triggers.includes('Strong Buy Pressure') && event.triggers.includes('Strong Sell Pressure'))) {
         score -= 8;
-        reasons.push('Buy and sell signals conflict.');
+        reasons.push('Price and flow signals conflict.');
     }
 
     const normalized = clamp(score);
@@ -220,11 +257,11 @@ export const buildCounterSignals = (event: AlphaGauntletEvent): string[] => {
     const counters: string[] = [];
     const m = event.metrics;
 
-    if (event.triggers.includes('Liquidity Added')) {
+    if (event.triggers.includes('Liquidity Added') || event.triggers.includes('Deep Liquidity Structure')) {
         counters.push('Liquidity depth is inferred from the current ratio; snapshot history has not confirmed fresh liquidity addition yet.');
     }
 
-    if (event.triggers.includes('Liquidity Removed')) {
+    if (event.triggers.includes('Liquidity Removed') || event.triggers.includes('Thin Liquidity Risk')) {
         counters.push('Thin liquidity does not prove liquidity was removed; it should be treated as liquidity risk until snapshots confirm contraction.');
     }
 
@@ -244,6 +281,10 @@ export const buildCounterSignals = (event: AlphaGauntletEvent): string[] => {
         counters.push('Volume turnover is very high relative to liquidity, so execution risk may be elevated.');
     }
 
+    if (event.eventType === 'Possible Wash Trading') {
+        counters.push('Balanced buy/sell flow with muted price movement can be artificial; wait for directional follow-through.');
+    }
+
     return counters.slice(0, 4);
 };
 
@@ -251,7 +292,7 @@ export const buildWatchConditions = (event: AlphaGauntletEvent): DetectionWatchC
     const m = event.metrics;
     const conditions: DetectionWatchCondition[] = [];
 
-    if (event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.triggers.includes('Strong Buy Pressure')) {
+    if (event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.eventType === 'Momentum Breakout' || event.triggers.includes('Strong Buy Pressure')) {
         conditions.push({
             label: 'Buyer dominance holds',
             direction: 'bullish',
@@ -261,7 +302,7 @@ export const buildWatchConditions = (event: AlphaGauntletEvent): DetectionWatchC
         });
     }
 
-    if (event.eventType === 'Market Stress' || event.triggers.includes('Strong Sell Pressure')) {
+    if (event.eventType === 'Market Stress' || event.eventType === 'Distribution' || event.eventType === 'Potential Distribution' || event.triggers.includes('Strong Sell Pressure')) {
         conditions.push({
             label: 'Sell pressure cools',
             direction: 'bullish',
@@ -289,6 +330,18 @@ export const buildDetectionSummary = (eventType: AlphaGauntletEventType, tokenLa
     }
     if (eventType === 'Potential Distribution') {
         return `${tokenLabel} is showing early distribution risk with ${triggerText || 'seller activity'} and a ${score} activity score.`;
+    }
+    if (eventType === 'Momentum Breakout') {
+        return `${tokenLabel} is showing momentum breakout conditions with ${triggerText || 'price and activity expansion'} and a ${score} activity score.`;
+    }
+    if (eventType === 'Overextended Momentum') {
+        return `${tokenLabel} is showing overextended momentum with ${triggerText || 'high turnover or price extension'} and a ${score} activity score.`;
+    }
+    if (eventType === 'Possible Wash Trading') {
+        return `${tokenLabel} is showing possible wash-trading conditions with ${triggerText || 'balanced high-volume churn'} and a ${score} activity score.`;
+    }
+    if (eventType === 'Deep Liquidity Structure' || eventType === 'Thin Liquidity Risk') {
+        return `${tokenLabel} qualified as ${eventType.toLowerCase()} with ${triggerText || 'liquidity structure evidence'} and a ${score} activity score.`;
     }
     return `${tokenLabel} qualified as ${eventType.toLowerCase()} with ${triggerText || 'unusual activity'} and a ${score} activity score.`;
 };

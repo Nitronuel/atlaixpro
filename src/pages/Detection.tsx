@@ -91,9 +91,9 @@ const buildGlobalTokenEvents = (event: AlphaGauntletEvent): GlobalTokenEvent[] =
         (event.metrics.marketCap || 0) * 0.01
     );
     const fallbackSentiment =
-        event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.eventType === 'Recovery'
+        event.eventType === 'Accumulation' || event.eventType === 'Potential Accumulation' || event.eventType === 'Momentum Breakout' || event.eventType === 'Recovery' || event.eventType === 'Recovery Attempt' || event.eventType === 'Confirmed Recovery' || event.eventType === 'Deep Liquidity Structure'
             ? 'bullish'
-            : event.eventType === 'Distribution' || event.eventType === 'Potential Distribution' || event.eventType === 'Market Stress'
+            : event.eventType === 'Distribution' || event.eventType === 'Potential Distribution' || event.eventType === 'Market Stress' || event.eventType === 'Thin Liquidity Risk' || event.eventType === 'Confirmed Liquidity Removed' || event.eventType === 'Overextended Momentum'
                 ? 'bearish'
                 : 'neutral';
 

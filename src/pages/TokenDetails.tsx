@@ -449,7 +449,7 @@ export const TokenDetails: React.FC = () => {
             </div>
             <div className="relative mx-auto h-[178px] max-w-[250px]">
                 <div className="absolute inset-x-0 top-6 mx-auto h-[138px] w-[138px]">
-                    <svg viewBox="0 0 140 140" className="h-full w-full overflow-visible drop-shadow-[0_0_26px_rgba(22,215,255,0.20)]" role="img" aria-label="Holder distribution chart">
+                    <svg viewBox="0 0 140 140" className="h-full w-full overflow-visible" role="img" aria-label="Holder distribution chart">
                         <circle cx="70" cy="70" r="38.5" fill="none" stroke="rgba(148,163,184,0.10)" strokeWidth="19" />
                         {holderDonutSegments.map((segment) => (
                             <path
@@ -500,8 +500,6 @@ export const TokenDetails: React.FC = () => {
 
     return (
         <div className="relative flex flex-col gap-4 animate-fade-in pb-10">
-            <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,209,255,0.09),transparent_32%),radial-gradient(circle_at_top_right,rgba(0,230,118,0.07),transparent_28%)]" />
-
             <div className="relative flex flex-col gap-1">
                 <button onClick={onBack} className="flex w-fit items-center gap-2 text-sm font-medium text-text-medium transition-colors hover:text-text-light">
                     <ArrowLeft size={16} /> Back to Market

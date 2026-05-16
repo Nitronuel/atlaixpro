@@ -1,7 +1,7 @@
 // Route-level token scan screen for the Atlaix application.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Activity, AlertTriangle, ArrowLeft, Bell, Copy, RefreshCw, Search, Shield } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, Bell, Copy, ExternalLink, RefreshCw, Search, Shield } from 'lucide-react';
 import { ChainActivityService } from '../services/ChainActivityService';
 import { DatabaseService } from '../services/DatabaseService';
 import { enrichDetectionEvent } from '../services/detection/DetectionEventPresenter';
@@ -548,6 +548,12 @@ export const TokenDetection: React.FC = () => {
     const hasMoreActivity = visibleActivityCount < activity.length;
     const tokenAddress = token?.address || '';
     const tokenChain = token?.chain || searchParams.get('chain') || 'solana';
+    const tokenDetailsUrl = tokenAddress
+        ? `/token/${encodeURIComponent(tokenAddress)}?${new URLSearchParams({
+            ...(token?.pairAddress ? { pair: token.pairAddress } : {}),
+            chain: tokenChain
+        }).toString()}`
+        : '';
 
     return (
         <div className="space-y-6 pb-10">
@@ -661,6 +667,14 @@ export const TokenDetection: React.FC = () => {
                 <div className="bg-card border border-border rounded-2xl p-6">
                     <h3 className="font-bold text-lg mb-6">Quick Actions</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
+                        <button
+                            onClick={() => tokenDetailsUrl && navigate(tokenDetailsUrl)}
+                            disabled={!tokenDetailsUrl}
+                            className="flex items-center gap-3 p-4 bg-transparent border border-border hover:border-text-light rounded-xl transition-all group text-left disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <ExternalLink size={20} className="text-text-medium group-hover:text-text-light" />
+                            <span className="font-bold text-sm text-text-medium group-hover:text-text-light">Token Details</span>
+                        </button>
                         <button
                             onClick={() => navigate(`/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: getSafeScanChain(tokenChain), autoScan: '1' }).toString()}`)}
                             disabled={!tokenAddress}
