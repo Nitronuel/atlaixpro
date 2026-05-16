@@ -316,6 +316,23 @@ const getInitialItemsPerPage = () => {
     return 16;
 };
 
+const getStartupRefreshDelay = () => {
+    if (typeof window === 'undefined') return 2500;
+
+    if (window.innerWidth <= 640) return 6500;
+    if (window.innerWidth <= 1180) return 3500;
+    return 1800;
+};
+
+const runWhenIdle = (callback: () => void) => {
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(callback, { timeout: 3000 });
+        return;
+    }
+
+    window.setTimeout(callback, 0);
+};
+
 export const Dashboard: React.FC<DashboardProps> = () => {
     const [timeFrame, setTimeFrame] = useState('12H');
     const [searchQuery, setSearchQuery] = useState('');
@@ -345,6 +362,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [chainDexVolumes, setChainDexVolumes] = useState<ChainDexVolume[]>([]);
     const [feedOrderState, setFeedOrderState] = useState<FeedOrderState>(() => loadFeedOrderState());
     const marketDataRef = useRef<MarketCoin[]>([]);
+    const startupRefreshTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
         marketDataRef.current = marketData;
@@ -363,6 +381,27 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
             return merged;
         });
+    };
+
+    const scheduleStartupRefresh = (hydratedFeed: MarketCoin[]) => {
+        if (startupRefreshTimerRef.current !== null) {
+            window.clearTimeout(startupRefreshTimerRef.current);
+        }
+
+        startupRefreshTimerRef.current = window.setTimeout(() => {
+            startupRefreshTimerRef.current = null;
+            runWhenIdle(() => {
+                void (async () => {
+                    try {
+                        const response = await DatabaseService.getMarketData(true, true);
+                        applyStableMarketData(response.data, hydratedFeed);
+                        setLastUpdated(new Date());
+                    } catch (e) {
+                        console.error("DB refresh error", e);
+                    }
+                })();
+            });
+        }, getStartupRefreshDelay());
     };
 
     // Live Search Filter Effect
@@ -463,15 +502,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 }
 
                 if (hasHydratedFeed) {
-                    window.setTimeout(async () => {
-                        try {
-                            const response = await DatabaseService.getMarketData(true, true);
-                            applyStableMarketData(response.data, hydratedFeed);
-                            setLastUpdated(new Date());
-                        } catch (e) {
-                            console.error("DB refresh error", e);
-                        }
-                    }, 1200);
+                    scheduleStartupRefresh(hydratedFeed);
                     return;
                 }
 
@@ -499,7 +530,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             }
             loadData(false, true);
         }, 15000);
-        return () => clearInterval(interval);
+        return () => {
+            clearInterval(interval);
+            if (startupRefreshTimerRef.current !== null) {
+                window.clearTimeout(startupRefreshTimerRef.current);
+                startupRefreshTimerRef.current = null;
+            }
+        };
     }, [timeFrame]);
 
     useEffect(() => {
