@@ -308,6 +308,14 @@ const getFeedEventLabel = (coin: MarketCoin, eventType?: AlphaGauntletEventType)
     return 'None';
 };
 
+const getInitialItemsPerPage = () => {
+    if (typeof window === 'undefined') return 16;
+
+    if (window.innerWidth <= 640) return 12;
+    if (window.innerWidth <= 1180) return 14;
+    return 16;
+};
+
 export const Dashboard: React.FC<DashboardProps> = () => {
     const [timeFrame, setTimeFrame] = useState('12H');
     const [searchQuery, setSearchQuery] = useState('');
@@ -320,7 +328,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = typeof window !== 'undefined' && window.innerWidth <= 640 ? 12 : 20;
+    const itemsPerPage = getInitialItemsPerPage();
 
     // Sorting State - Default is null (Neutral/Algorithm Rank)
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -336,6 +344,11 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [chainVolumeSlide, setChainVolumeSlide] = useState(0);
     const [chainDexVolumes, setChainDexVolumes] = useState<ChainDexVolume[]>([]);
     const [feedOrderState, setFeedOrderState] = useState<FeedOrderState>(() => loadFeedOrderState());
+    const marketDataRef = useRef<MarketCoin[]>([]);
+
+    useEffect(() => {
+        marketDataRef.current = marketData;
+    }, [marketData]);
 
     const applyStableMarketData = (nextData: MarketCoin[], stableBase?: MarketCoin[], preserveMissing = false) => {
         setMarketData((current) => {
@@ -415,7 +428,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         if (force) setIsLoading(true);
 
         try {
-            if (!force && marketData.length === 0) {
+            if (!force && marketDataRef.current.length === 0) {
                 let hasHydratedFeed = false;
                 let hydratedFeed: MarketCoin[] = [];
                 const cached = DatabaseService.getCachedMarketData();
@@ -449,8 +462,21 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     setLastUpdated(new Date());
                 }
 
-                const response = await DatabaseService.getMarketData(true, hasHydratedFeed);
-                applyStableMarketData(response.data, hasHydratedFeed ? hydratedFeed : []);
+                if (hasHydratedFeed) {
+                    window.setTimeout(async () => {
+                        try {
+                            const response = await DatabaseService.getMarketData(true, true);
+                            applyStableMarketData(response.data, hydratedFeed);
+                            setLastUpdated(new Date());
+                        } catch (e) {
+                            console.error("DB refresh error", e);
+                        }
+                    }, 1200);
+                    return;
+                }
+
+                const response = await DatabaseService.getMarketData(true, false);
+                applyStableMarketData(response.data, []);
                 setLastUpdated(new Date());
                 return;
             }
@@ -793,7 +819,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const paginatedData = useMemo(() => {
         const start = (currentPage - 1) * itemsPerPage;
         return sortedData.slice(start, start + itemsPerPage);
-    }, [sortedData, currentPage]);
+    }, [sortedData, currentPage, itemsPerPage]);
 
     const handleNextPage = () => { if (currentPage < totalPages) setCurrentPage(p => p + 1); };
     const handlePrevPage = () => { if (currentPage > 1) setCurrentPage(p => p - 1); };
