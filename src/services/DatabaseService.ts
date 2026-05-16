@@ -2,7 +2,7 @@
 import { AlphaGauntletEvent, MarketCoin, SavedWallet, WalletCategory } from '../types';
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from '../config';
-import { filterAlphaTokens, isExcludedAlphaToken } from '../utils/tokenFilters';
+import { filterAlphaTokens, hasQualityTokenMetadata, isExcludedAlphaToken } from '../utils/tokenFilters';
 
 // --- INITIALIZE SUPABASE ---
 const hasSupabaseConfig = Boolean(APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseAnonKey);
@@ -305,13 +305,19 @@ const getTokenAddressKey = (chain: string | undefined, address: string | undefin
 
 const getPairAddressKey = (pair: DexPair) => getTokenAddressKey(getChainId(pair.chainId), pair.baseToken.address);
 
-const isExcludedPair = (pair: DexPair) => isExcludedAlphaToken({
+const pairFilterInput = (pair: DexPair) => ({
     symbol: pair.baseToken?.symbol,
     name: pair.baseToken?.name,
     chain: getChainId(pair.chainId),
     chainId: pair.chainId,
-    address: pair.baseToken?.address
+    address: pair.baseToken?.address,
+    img: pair.info?.imageUrl
 });
+
+const isExcludedPair = (pair: DexPair) => {
+    const input = pairFilterInput(pair);
+    return isExcludedAlphaToken(input) || !hasQualityTokenMetadata(input);
+};
 
 const purgeExcludedSupabaseRows = async (rows: any[]) => {
     if (!rows.length || !supabase || !supabaseAvailable) return;

@@ -7,11 +7,12 @@ export interface TokenFilterInput {
     chain?: string;
     chainId?: string;
     address?: string;
+    img?: string;
 }
 
 export interface TokenExclusion {
     excluded: boolean;
-    reason?: 'stablecoin' | 'wrapped' | 'major_asset' | 'infrastructure' | 'denylist';
+    reason?: 'stablecoin' | 'wrapped' | 'major_asset' | 'infrastructure' | 'denylist' | 'weak_metadata';
 }
 
 const STABLECOIN_SYMBOLS = new Set([
@@ -135,6 +136,41 @@ const MAJOR_ASSET_NAMES = new Set([
     'ethereum classic'
 ]);
 
+const PLACEHOLDER_IMAGE_PATTERNS = [
+    /ui-avatars\.com/i,
+    /avatar/i,
+    /placeholder/i,
+    /default/i
+];
+
+const WEAK_PROFILE_NAMES = new Set([
+    'unknown',
+    'loading token',
+    'token',
+    'new token',
+    'dex token'
+]);
+
+const hasReliableTokenImage = (token: TokenFilterInput) => {
+    const image = (token.img || '').trim();
+    if (!image) return false;
+    if (!/^https?:\/\//i.test(image) && !image.startsWith('/')) return false;
+    return !PLACEHOLDER_IMAGE_PATTERNS.some((pattern) => pattern.test(image));
+};
+
+export const hasQualityTokenMetadata = (token: TokenFilterInput) => {
+    const symbol = normalizeSymbol(token.symbol || token.ticker);
+    const name = (token.name || '').trim();
+    const normalizedName = normalizeName(name);
+
+    if (!symbol || symbol.length > 16) return false;
+    if (!name || name.length < 2 || name.length > 80) return false;
+    if (WEAK_PROFILE_NAMES.has(normalizedName)) return false;
+    if (!hasReliableTokenImage(token)) return false;
+
+    return true;
+};
+
 export const classifyAlphaToken = (token: TokenFilterInput): TokenExclusion => {
     const symbol = normalizeSymbol(token.symbol || token.ticker);
     const name = (token.name || '').trim();
@@ -181,4 +217,4 @@ export const classifyAlphaToken = (token: TokenFilterInput): TokenExclusion => {
 export const isExcludedAlphaToken = (token: TokenFilterInput) => classifyAlphaToken(token).excluded;
 
 export const filterAlphaTokens = <T extends MarketCoin>(tokens: T[]): T[] =>
-    tokens.filter((token) => !isExcludedAlphaToken(token));
+    tokens.filter((token) => !isExcludedAlphaToken(token) && hasQualityTokenMetadata(token));
