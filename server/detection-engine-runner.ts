@@ -147,7 +147,7 @@ export class DetectionEngineRunner {
 
     constructor() {
         this.status = {
-            enabled: process.env.DETECTION_ENGINE_ENABLED !== 'false',
+            enabled: process.env.DETECTION_ENGINE_ENABLED === 'true',
             running: false,
             lastRunStartedAt: null,
             lastRunCompletedAt: null,
