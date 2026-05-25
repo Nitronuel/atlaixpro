@@ -9,6 +9,87 @@
   status = 200
   force = true
 
+# Block repository, environment, source, and build metadata probes before the SPA fallback.
+[[redirects]]
+  from = "/.git/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/.git"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/.svn/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/.svn"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/.hg/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/.hg"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/.env*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/netlify.toml"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/package*.json"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/vite.config.*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/tsconfig*.json"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/tailwind.config.*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/postcss.config.*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/src/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/server/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/supabase/*"
+  to = "/404.html"
+  status = 404
+
 # React Router fallback for browser-managed application routes.
 [[redirects]]
   from = "/*"

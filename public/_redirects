@@ -1,5 +1,23 @@
 # Production API gateway route for platform backend calls.
 /api/* https://atlaixpro-production.up.railway.app/api/:splat 200
 
+# Block repository, environment, source, and build metadata probes before the SPA fallback.
+/.git/* /404.html 404
+/.git /404.html 404
+/.svn/* /404.html 404
+/.svn /404.html 404
+/.hg/* /404.html 404
+/.hg /404.html 404
+/.env* /404.html 404
+/netlify.toml /404.html 404
+/package*.json /404.html 404
+/vite.config.* /404.html 404
+/tsconfig*.json /404.html 404
+/tailwind.config.* /404.html 404
+/postcss.config.* /404.html 404
+/src/* /404.html 404
+/server/* /404.html 404
+/supabase/* /404.html 404
+
 # React Router fallback for browser-managed application routes.
 /* /index.html 200
