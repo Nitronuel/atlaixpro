@@ -269,9 +269,17 @@ const alertIcon = (type: SmartAlertType) => {
 
 const currencyPattern = /^\$?\d+(?:\.\d+)?\s*[kKmMbB]?$/;
 const percentPattern = /^-?\d+(?:\.\d+)?%?$/;
+const evmAddressPattern = /^0x[a-fA-F0-9]{40}$/;
+const solanaAddressPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+const isLikelyTokenOrPairAddress = (value: string | null | undefined) => {
+    const trimmed = String(value || '').trim();
+    return evmAddressPattern.test(trimmed) || solanaAddressPattern.test(trimmed);
+};
 
 const validateDraft = (draft: AlertSetupDraft) => {
     if (!draft.target.trim() || !draft.chainId.trim() || !draft.tokenAddress.trim()) return 'Enter a token contract address and wait for Atlaix to identify it.';
+    if (!isLikelyTokenOrPairAddress(draft.tokenAddress)) return 'Use a full token contract address, not a ticker or token name.';
     if (!draft.threshold.trim()) return 'Enter a threshold.';
     if (draft.thresholdKind === 'currency' && !currencyPattern.test(draft.threshold.trim())) {
         return 'Use a currency value like $50K, $1.5M, or 50000.';
@@ -400,6 +408,11 @@ export const SmartAlerts: React.FC = () => {
             setTokenLookupError('Enter a token contract address.');
             return;
         }
+        if (!isLikelyTokenOrPairAddress(address)) {
+            setSelectedToken(null);
+            setTokenLookupError('Use a full token contract address, not a ticker or token name.');
+            return;
+        }
 
         setTokenLookupLoading(true);
         setTokenLookupError(null);
@@ -424,7 +437,12 @@ export const SmartAlerts: React.FC = () => {
 
         linkedTokenProcessedRef.current = linkedTokenAddress;
         setTokenQuery(linkedTokenAddress);
-        void lookupToken(linkedTokenAddress);
+        if (isLikelyTokenOrPairAddress(linkedTokenAddress)) {
+            void lookupToken(linkedTokenAddress);
+        } else {
+            setSelectedToken(null);
+            setTokenLookupError('Use a full token contract address, not a ticker or token name.');
+        }
     }, [searchParams]);
 
     useEffect(() => {
@@ -434,6 +452,12 @@ export const SmartAlerts: React.FC = () => {
         if (!address) {
             setSetupTokenLookupLoading(false);
             setSetupTokenLookupError(null);
+            return;
+        }
+        if (!isLikelyTokenOrPairAddress(address)) {
+            setSetupTokenLookupLoading(false);
+            setSelectedToken(null);
+            setSetupTokenLookupError('Use a full token contract address, not a ticker or token name.');
             return;
         }
 
@@ -484,7 +508,8 @@ export const SmartAlerts: React.FC = () => {
         const condition = searchParams.get('condition') as SmartAlertCondition | null;
         const thresholdKind = searchParams.get('thresholdKind') as SmartAlertThresholdKind | null;
         const threshold = searchParams.get('threshold');
-        const address = searchParams.get('address') || searchParams.get('token') || '';
+        const rawAddress = searchParams.get('address') || searchParams.get('token') || '';
+        const address = isLikelyTokenOrPairAddress(rawAddress) ? rawAddress : '';
         const chainParam = searchParams.get('chain') || '';
         const defaultDraft = getDefaultDraft(item);
         const allowedCondition = CONDITION_OPTIONS[item.type].some((option) => option.value === condition);

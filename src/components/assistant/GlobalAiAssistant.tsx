@@ -73,10 +73,38 @@ type LiveAlphaFeedSnapshot = {
     tokens?: LiveAlphaFeedToken[];
 };
 
+type DetectionEngineSnapshotEvent = {
+    token?: {
+        ticker?: string;
+        name?: string;
+        address?: string;
+        chain?: string;
+    };
+    eventType?: string;
+    severity?: string;
+    score?: number;
+    summary?: string;
+    detectedAt?: number;
+    metrics?: {
+        volume24h?: number;
+        liquidity?: number;
+        marketCap?: number;
+        priceChange24h?: number;
+        netFlow?: number;
+    };
+};
+
+type DetectionEngineSnapshot = {
+    generatedAt?: number;
+    total?: number;
+    events?: DetectionEngineSnapshotEvent[];
+};
+
 const GLOBAL_ASSISTANT_CACHE_KEY = 'atlaix-global-ai-assistant-v2';
 const GLOBAL_ASSISTANT_HANDOFF_KEY = 'atlaix-ai-assistant-handoff-v1';
 const GLOBAL_ASSISTANT_TTL_MS = 60 * 60 * 1000;
 const LIVE_ALPHA_FEED_SNAPSHOT_MAX_AGE_MS = 60 * 1000;
+const DETECTION_ENGINE_SNAPSHOT_MAX_AGE_MS = 2 * 60 * 1000;
 const MARKET_HISTORY_MAX_AGE_MS = 2 * 60 * 1000;
 
 const createWelcomeMessage = (title = 'Atlaix AI'): FloatingMessage => ({
@@ -238,6 +266,71 @@ const readLiveAlphaFeedSnapshot = (): LiveAlphaFeedSnapshot | null => {
         generatedAt: Date.now(),
         total: tokens.length,
         tokens
+    } : null;
+};
+
+const normalizeDetectionSnapshotEvent = (event: any): DetectionEngineSnapshotEvent | null => {
+    if (!event || typeof event !== 'object') return null;
+    const token = event.token || {};
+    const ticker = String(token.ticker || token.symbol || '').trim();
+    const name = String(token.name || ticker || '').trim();
+    if (!ticker && !name && !token.address) return null;
+
+    return {
+        token: {
+            ticker,
+            name,
+            address: String(token.address || '').trim(),
+            chain: String(token.chain || '').trim()
+        },
+        eventType: String(event.eventType || event.type || 'Unusual Activity'),
+        severity: String(event.severity || 'Medium'),
+        score: Number.isFinite(Number(event.score)) ? Number(event.score) : undefined,
+        summary: String(event.summary || '').slice(0, 220),
+        detectedAt: Number.isFinite(Number(event.detectedAt)) ? Number(event.detectedAt) : undefined,
+        metrics: {
+            volume24h: Number(event.metrics?.volume24h || 0),
+            liquidity: Number(event.metrics?.liquidity || 0),
+            marketCap: Number(event.metrics?.marketCap || 0),
+            priceChange24h: Number(event.metrics?.priceChange24h || 0),
+            netFlow: Number(event.metrics?.netFlow || 0)
+        }
+    };
+};
+
+const readDetectionEngineSnapshot = (): DetectionEngineSnapshot | null => {
+    if (typeof window === 'undefined') return null;
+
+    try {
+        const parsed = JSON.parse(window.localStorage.getItem('atlaix-detection-events-cache') || 'null') as { data?: unknown[]; timestamp?: number } | null;
+        const events = Array.isArray(parsed?.data)
+            ? parsed.data.map(normalizeDetectionSnapshotEvent).filter(Boolean) as DetectionEngineSnapshotEvent[]
+            : [];
+        if (events.length && parsed?.timestamp && Date.now() - parsed.timestamp <= DETECTION_ENGINE_SNAPSHOT_MAX_AGE_MS) {
+            return {
+                generatedAt: parsed.timestamp,
+                total: events.length,
+                events: events.slice(0, 10)
+            };
+        }
+    } catch {
+        // Fall through to reading rendered cards.
+    }
+
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('.detection-event-card')).slice(0, 10);
+    const events = cards.map((card) => {
+        const text = card.innerText.replace(/\s+/g, ' ').trim();
+        if (!text) return null;
+        return {
+            eventType: text.slice(0, 80),
+            summary: text.slice(0, 220)
+        } satisfies DetectionEngineSnapshotEvent;
+    }).filter(Boolean) as DetectionEngineSnapshotEvent[];
+
+    return events.length ? {
+        generatedAt: Date.now(),
+        total: events.length,
+        events
     } : null;
 };
 
@@ -423,19 +516,23 @@ const getRouteContext = (pathname: string, searchParams: URLSearchParams): Route
             title: 'Detection',
             subtitle: query ? shortAddress(query) : 'Market events',
             systemContext: query
-                ? `The user is viewing Detection context for token/query: ${query}.`
-                : 'The user is on the Detection Engine page.',
+                ? `The user is viewing Detection Engine context for token/query: ${query}. Explain admission reasons, event type, severity, score, triggers, risk/counter-signals, and next watch conditions for this token. If they ask "this event" or "why was it detected", use this token/query.`
+                : [
+                    'The user is on the Detection Engine page.',
+                    'They may ask what was detected, which events are high-risk, why a token qualified, what an event type means, which tokens are accumulating/distributing/moving, whether a signal is bullish or risky, what to watch next, or what Smart Alert to create.',
+                    'Detection Engine events are attention signals, not buy/sell commands. Explain them with event type, severity, score, market/liquidity/volume context, counter-signals, uncertainty, and next checks.'
+                ].join(' '),
             subjectKind: query ? 'detection' : undefined,
             subjectAddress: query,
             subjectChain: chain,
             module: 'detection',
-            preferredTools: ['get_detection_filtered', 'explain_detection_admission', 'get_detection_updates', 'get_token_deep_brief', 'prepare_detection_alert'],
+            preferredTools: ['get_detection_filtered', 'explain_detection_admission', 'get_detection_updates', 'get_token_deep_brief', 'get_token_activity', 'run_safe_scan', 'prepare_detection_alert'],
             icon: <Radar size={18} />,
             prompts: [
-                'Show high severity detections',
-                'Explain the strongest signals',
-                'Which tokens are accumulating?',
-                'What should I pay attention to today?'
+                query ? 'Why was this token detected?' : 'What events were detected?',
+                query ? 'Explain this event in plain English' : 'Show high severity detections',
+                query ? 'Is this signal bullish or risky?' : 'Which tokens are accumulating?',
+                query ? 'What should I watch next?' : 'What should I pay attention to today?'
             ]
         };
     }
@@ -583,7 +680,44 @@ const buildAssistantRequestText = (text: string, context: RouteContext) => {
 };
 
 const buildPageContextPayload = (context: RouteContext, pathname: string): AiAssistantPageContext => {
-    const snapshot = context.module === 'dashboard' ? readLiveAlphaFeedSnapshot() : null;
+    const liveAlphaSnapshot = context.module === 'dashboard' ? readLiveAlphaFeedSnapshot() : null;
+    const detectionSnapshot = context.module === 'detection' ? readDetectionEngineSnapshot() : null;
+    const visibleSnapshot = detectionSnapshot ? {
+        generatedAt: detectionSnapshot.generatedAt,
+        summary: `${detectionSnapshot.events?.length || 0} recent Detection Engine events visible or cached. Event questions should use Detection tools and explain event type, severity, score, liquidity, volume, net flow, and uncertainty.`,
+        tokens: (detectionSnapshot.events || []).slice(0, 10).map((event) => ({
+            name: event.token?.name,
+            ticker: event.token?.ticker,
+            chain: event.token?.chain,
+            address: event.token?.address,
+            eventType: event.eventType,
+            severity: event.severity,
+            score: event.score,
+            summary: event.summary,
+            volume24h: event.metrics?.volume24h,
+            liquidity: event.metrics?.liquidity,
+            marketCap: event.metrics?.marketCap,
+            priceChange24h: event.metrics?.priceChange24h,
+            netFlow: event.metrics?.netFlow,
+            detectedAt: event.detectedAt
+        }))
+    } : liveAlphaSnapshot ? {
+        generatedAt: liveAlphaSnapshot.generatedAt,
+        summary: `${liveAlphaSnapshot.tokens?.length || 0} current Live Alpha Feed rows available.`,
+        tokens: (liveAlphaSnapshot.tokens || []).slice(0, 10).map((token) => ({
+            name: token.name,
+            ticker: token.ticker,
+            chain: token.chain,
+            address: token.address,
+            price: token.price,
+            change24h: token.change24h,
+            marketCap: token.marketCap,
+            dexVolume: token.dexVolume,
+            liquidity: token.liquidity,
+            eventType: token.eventType
+        }))
+    } : undefined;
+
     return {
         route: pathname,
         module: context.module,
@@ -594,22 +728,7 @@ const buildPageContextPayload = (context: RouteContext, pathname: string): AiAss
         subjectChain: context.subjectChain,
         pairAddress: context.pairAddress,
         preferredTools: context.preferredTools,
-        visibleSnapshot: snapshot ? {
-            generatedAt: snapshot.generatedAt,
-            summary: `${snapshot.tokens?.length || 0} current Live Alpha Feed rows available.`,
-            tokens: (snapshot.tokens || []).slice(0, 10).map((token) => ({
-                name: token.name,
-                ticker: token.ticker,
-                chain: token.chain,
-                address: token.address,
-                price: token.price,
-                change24h: token.change24h,
-                marketCap: token.marketCap,
-                dexVolume: token.dexVolume,
-                liquidity: token.liquidity,
-                eventType: token.eventType
-            }))
-        } : undefined
+        visibleSnapshot
     };
 };
 
