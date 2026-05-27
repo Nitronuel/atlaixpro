@@ -4,28 +4,29 @@ export default {
   theme: {
     extend: {
       colors: {
-        main: '#111315',
-        sidebar: '#16181A',
-        card: '#1C1F22',
-        'card-hover': '#222529',
+        main: '#EEF8F2',
+        sidebar: '#E8F5EE',
+        card: '#F8FEFA',
+        'card-hover': '#FFFFFF',
         primary: {
-          green: '#26D356',
-          'green-light': '#2AF598',
-          'green-darker': '#1FA847',
-          yellow: '#F2C94C',
-          purple: '#9B51E0',
-          red: '#EB5757',
-          blue: '#2F80ED'
+          green: '#3FA34D',
+          'green-light': '#7DDC8A',
+          'green-darker': '#2E7D3C',
+          yellow: '#FFE66E',
+          purple: '#B8A7E8',
+          red: '#E85D75',
+          blue: '#4B8A63'
         },
         text: {
-          light: '#EAECEF',
-          medium: '#8F96A3',
-          dark: '#6C727A'
+          light: '#10131A',
+          medium: '#606978',
+          dark: '#98A1B1'
         },
-        border: '#2A2E33'
+        border: '#D7E8DC'
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'Segoe UI', 'Roboto', 'Arial', 'sans-serif']
+        sans: ['Roboto', 'Geist', 'ui-sans-serif', 'system-ui', 'Segoe UI', 'Arial', 'sans-serif'],
+        mono: ['Geist Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', 'monospace']
       },
       animation: {
         'fade-in': 'fadeIn 0.5s ease-out'

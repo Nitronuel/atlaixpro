@@ -911,7 +911,7 @@ export const SmartAlerts: React.FC = () => {
                                     key={item.id}
                                     type="button"
                                     onClick={() => openSetupModal(item)}
-                                    className={`group cursor-pointer rounded-xl border p-5 text-left transition-colors hover:bg-card-hover ${activeTypeKey === item.id ? 'border-primary-green/40 bg-card-hover' : 'border-border bg-card hover:border-text-dark/50'}`}
+                                    className={`green-corner-card group cursor-pointer rounded-xl border p-5 text-left transition-colors hover:bg-card-hover ${activeTypeKey === item.id ? 'border-primary-green/40 bg-card-hover' : 'border-border bg-card hover:border-text-dark/50'}`}
                                 >
                                     <div className="flex items-start gap-4">
                                         <div className="rounded-lg border border-border/50 bg-main p-3 text-primary-green">
@@ -939,7 +939,7 @@ export const SmartAlerts: React.FC = () => {
                             </button>
                         </div>
 
-                        <div className="overflow-hidden rounded-xl border border-border bg-card">
+                        <div className="green-corner-card overflow-hidden rounded-xl border border-border bg-card">
                             <div className="custom-scrollbar max-h-[560px] overflow-y-auto">
                                 {loadingAlerts ? (
                                     <div className="flex min-h-[180px] items-center justify-center gap-3 text-sm text-text-medium">
@@ -1018,7 +1018,7 @@ export const SmartAlerts: React.FC = () => {
                         <Clock size={18} className="text-text-medium" />
                         Trigger History
                     </h3>
-                    <div className="relative max-h-[680px] overflow-hidden rounded-xl border border-border bg-card">
+                    <div className="green-corner-card relative max-h-[680px] overflow-hidden rounded-xl border border-border bg-card">
                         <div className="custom-scrollbar max-h-[680px] space-y-1 overflow-y-auto p-5">
                             {historyItems.length ? historyItems.map((item, index) => (
                                 <div key={item.id} className="flex gap-4">

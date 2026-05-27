@@ -22,6 +22,7 @@ import {
     AiAssistantAction,
     AiAssistantConversationMessage,
     AiAssistantNotification,
+    AiAssistantPageContext,
     AiAssistantProvider,
     AiAssistantService
 } from '../services/AiAssistantService';
@@ -55,7 +56,9 @@ const SUGGESTED_PROMPTS = [
 
 const OFFICIAL_ANNOUNCEMENTS: AiAssistantNotification[] = [];
 const ASSISTANT_CHAT_CACHE_KEY = 'atlaix-ai-assistant-chat-v1';
+const ASSISTANT_HANDOFF_KEY = 'atlaix-ai-assistant-handoff-v1';
 const ASSISTANT_CHAT_TTL_MS = 60 * 60 * 1000;
+const MARKET_HISTORY_MAX_AGE_MS = 2 * 60 * 1000;
 
 type AssistantChatCache = {
     messages: ChatMessage[];
@@ -63,6 +66,14 @@ type AssistantChatCache = {
     activeMenu: 'assistant' | 'announcements';
     provider: AiAssistantProvider | null;
     savedAt: number;
+};
+
+type AssistantHandoff = {
+    messages?: ChatMessage[];
+    draft?: string;
+    provider?: AiAssistantProvider | null;
+    pageContext?: AiAssistantPageContext | null;
+    savedAt?: number;
 };
 
 const createWelcomeMessage = (): ChatMessage => ({
@@ -94,6 +105,29 @@ const loadAssistantChatCache = (): AssistantChatCache | null => {
             draft: typeof parsed.draft === 'string' ? parsed.draft : '',
             activeMenu: parsed.activeMenu === 'announcements' ? 'announcements' : 'assistant',
             provider: parsed.provider || null,
+            savedAt: parsed.savedAt
+        };
+    } catch {
+        return null;
+    }
+};
+
+const loadAssistantHandoff = (): AssistantHandoff | null => {
+    if (!canUseLocalStorage()) return null;
+
+    try {
+        const raw = window.sessionStorage.getItem(ASSISTANT_HANDOFF_KEY);
+        if (!raw) return null;
+        window.sessionStorage.removeItem(ASSISTANT_HANDOFF_KEY);
+
+        const parsed = JSON.parse(raw) as AssistantHandoff;
+        if (!parsed.savedAt || Date.now() - parsed.savedAt > ASSISTANT_CHAT_TTL_MS) return null;
+
+        return {
+            messages: Array.isArray(parsed.messages) ? parsed.messages.filter((message) => message?.id && message?.role && message?.text).slice(-40) : [],
+            draft: typeof parsed.draft === 'string' ? parsed.draft : '',
+            provider: parsed.provider || null,
+            pageContext: parsed.pageContext || null,
             savedAt: parsed.savedAt
         };
     } catch {
@@ -184,10 +218,16 @@ const findInlineReference = (line: string, references: AssistantInlineReference[
 };
 
 const toConversationHistory = (messages: ChatMessage[]): AiAssistantConversationMessage[] =>
-    messages.map((message) => ({
-        role: message.role,
-        text: message.text
-    }));
+    messages
+        .filter((message) => {
+            if (message.role !== 'assistant') return true;
+            const hasMarketFigures = /(?:\$[\d,.]+|\b\d+(?:\.\d+)?%|\bmarket cap\b|\bliquidity\b|\bvolume\b|\bprice\b)/i.test(message.text);
+            return !hasMarketFigures || Date.now() - message.createdAt <= MARKET_HISTORY_MAX_AGE_MS;
+        })
+        .map((message) => ({
+            role: message.role,
+            text: message.text
+        }));
 
 const formatRelative = (timestamp: number) => {
     const diff = Math.max(0, Date.now() - timestamp);
@@ -246,14 +286,26 @@ const promptToMessage = (prompt: string) => {
 
 export const AiAssistant: React.FC = () => {
     const navigate = useNavigate();
+    const handoffRef = useRef<AssistantHandoff | null>(loadAssistantHandoff());
     const cachedChatRef = useRef<AssistantChatCache | null>(loadAssistantChatCache());
+    const pageContextRef = useRef<AiAssistantPageContext | null>(handoffRef.current?.pageContext || {
+        route: '/ai-assistant',
+        module: 'assistant',
+        title: 'AI Assistant',
+        systemContext: 'The user is on the full AI Assistant page. Continue the conversation naturally and use Atlaix tools when needed.',
+        preferredTools: ['get_platform_updates', 'get_token_deep_brief', 'get_detection_updates', 'run_safe_scan', 'prepare_alert_setup']
+    });
     const [notifications, setNotifications] = useState<AiAssistantNotification[]>([]);
-    const [provider, setProvider] = useState<AiAssistantProvider | null>(cachedChatRef.current?.provider || null);
-    const [activeMenu, setActiveMenu] = useState<'assistant' | 'announcements'>(cachedChatRef.current?.activeMenu || 'assistant');
+    const [provider, setProvider] = useState<AiAssistantProvider | null>(handoffRef.current?.provider || cachedChatRef.current?.provider || null);
+    const [activeMenu, setActiveMenu] = useState<'assistant' | 'announcements'>(handoffRef.current ? 'assistant' : cachedChatRef.current?.activeMenu || 'assistant');
     const [loadingNotifications, setLoadingNotifications] = useState(true);
     const [notificationError, setNotificationError] = useState('');
-    const [messages, setMessages] = useState<ChatMessage[]>(cachedChatRef.current?.messages?.length ? cachedChatRef.current.messages : [createWelcomeMessage()]);
-    const [draft, setDraft] = useState(cachedChatRef.current?.draft || '');
+    const [messages, setMessages] = useState<ChatMessage[]>(
+        handoffRef.current?.messages?.length
+            ? handoffRef.current.messages
+            : cachedChatRef.current?.messages?.length ? cachedChatRef.current.messages : [createWelcomeMessage()]
+    );
+    const [draft, setDraft] = useState(handoffRef.current?.draft || cachedChatRef.current?.draft || '');
     const [sending, setSending] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -309,7 +361,7 @@ export const AiAssistant: React.FC = () => {
         setMessages((current) => [...current, userMessage]);
 
         try {
-            const response = await AiAssistantService.sendMessage(trimmed, history);
+            const response = await AiAssistantService.sendMessage(trimmed, history, pageContextRef.current);
             setProvider(response.provider);
             setMessages((current) => [
                 ...current,
@@ -361,9 +413,10 @@ export const AiAssistant: React.FC = () => {
     const hasUserMessages = messages.some((message) => message.role === 'user');
     const conversationMode = hasUserMessages || sending;
     return (
-        <div className="h-[calc(100vh-132px)] overflow-hidden rounded-xl border border-border bg-card shadow-[0_24px_80px_rgba(0,0,0,0.3)]">
+        <div className="ai-assistant-page h-[calc(100vh-132px)] overflow-hidden rounded-xl border border-border bg-card shadow-[0_24px_80px_rgba(0,0,0,0.3)]">
             <div className="flex h-full">
-                <aside className="group/assistant-rail relative z-20 hidden h-full w-[72px] shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-300 ease-out hover:w-[292px] focus-within:w-[292px] lg:flex">
+                <div className="relative z-30 hidden h-full w-[72px] shrink-0 lg:block">
+                <aside className="ai-assistant-rail group/assistant-rail absolute inset-y-0 left-0 z-30 flex h-full w-[72px] flex-col border-r border-border bg-sidebar transition-[width,box-shadow] duration-300 ease-out hover:w-[292px] hover:shadow-[18px_0_48px_rgba(93,112,145,0.20)] focus-within:w-[292px] focus-within:shadow-[18px_0_48px_rgba(93,112,145,0.20)]">
                     <div className="flex h-20 items-center gap-3 px-4">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-green text-main shadow-[0_0_24px_rgba(38,211,86,0.22)]">
                             <PanelLeft size={19} />
@@ -379,7 +432,7 @@ export const AiAssistant: React.FC = () => {
                                 key={item.id}
                                 type="button"
                                 onClick={() => setActiveMenu(item.id)}
-                                className={`group/item flex h-12 w-full items-center gap-3 rounded-lg px-3 text-left transition-all ${
+                                className={`ai-assistant-rail-item group/item flex h-12 w-full items-center gap-3 rounded-lg px-3 text-left transition-all ${
                                     item.active
                                         ? 'bg-primary-green text-main shadow-[0_0_22px_rgba(38,211,86,0.16)]'
                                         : 'text-text-medium hover:bg-card hover:text-text-light'
@@ -404,7 +457,7 @@ export const AiAssistant: React.FC = () => {
                         <button
                             type="button"
                             onClick={loadNotifications}
-                            className="flex h-12 w-full items-center gap-3 rounded-lg px-3 text-text-medium transition-colors hover:bg-card hover:text-text-light"
+                            className="ai-assistant-rail-item flex h-12 w-full items-center gap-3 rounded-lg px-3 text-text-medium transition-colors hover:bg-card hover:text-text-light"
                             title="Refresh"
                         >
                             <RefreshCw size={18} className={loadingNotifications ? 'animate-spin' : ''} />
@@ -412,9 +465,10 @@ export const AiAssistant: React.FC = () => {
                         </button>
                     </div>
                 </aside>
+                </div>
 
-                <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-main">
-                    <header className="shrink-0 border-b border-border bg-card/95 px-3 py-3 backdrop-blur-md lg:hidden">
+                <section className="ai-assistant-stage relative flex min-w-0 flex-1 flex-col overflow-hidden bg-main">
+                    <header className="ai-assistant-mobile-header shrink-0 border-b border-border bg-card/95 px-3 py-3 backdrop-blur-md lg:hidden">
                         <div className="custom-scrollbar flex items-center gap-2 overflow-x-auto">
                             {chatItems.map((item) => (
                                 <button
@@ -524,7 +578,7 @@ export const AiAssistant: React.FC = () => {
                                                     event.preventDefault();
                                                     sendMessage();
                                                 }}
-                                                className="rounded-2xl border border-primary-green/25 bg-main/95 p-3 text-left shadow-[0_20px_70px_rgba(0,0,0,0.35)]"
+                                                className="ai-assistant-hero-composer rounded-2xl border border-primary-green/25 bg-main/95 p-3 text-left shadow-[0_20px_70px_rgba(0,0,0,0.35)]"
                                             >
                                                 <textarea
                                                     value={draft}
@@ -536,7 +590,7 @@ export const AiAssistant: React.FC = () => {
                                                         }
                                                     }}
                                                     placeholder="Ask Atlaix AI"
-                                                    className="max-h-32 min-h-[48px] w-full resize-none bg-transparent px-1 py-1 text-base font-medium text-text-light outline-none placeholder:text-text-dark"
+                                                    className="ai-assistant-textarea max-h-32 min-h-[48px] w-full resize-none bg-transparent px-1 py-1 text-base font-medium text-text-light outline-none placeholder:text-text-dark"
                                                 />
                                                 <div className="flex items-center justify-end gap-3">
                                                     <button
@@ -557,7 +611,7 @@ export const AiAssistant: React.FC = () => {
                                                     type="button"
                                                     onClick={() => sendMessage(promptToMessage(prompt))}
                                                     disabled={sending}
-                                                    className="min-h-[50px] rounded-xl border border-border bg-card px-4 py-3 text-left text-xs font-bold leading-snug text-text-medium transition-colors hover:border-primary-green/35 hover:bg-primary-green/10 hover:text-text-light disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="ai-assistant-prompt-chip min-h-[50px] rounded-xl border border-border bg-card px-4 py-3 text-left text-xs font-bold leading-snug text-text-medium transition-colors hover:border-primary-green/35 hover:bg-primary-green/10 hover:text-text-light disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {prompt}
                                                 </button>
@@ -581,7 +635,7 @@ export const AiAssistant: React.FC = () => {
                                                                 {toolIcon(message.tool)}
                                                             </div>
                                                         )}
-                                                        <div className={`rounded-2xl px-4 py-3 shadow-sm ${
+                                                        <div className={`ai-assistant-message rounded-2xl px-4 py-3 shadow-sm ${
                                                             isUser
                                                                 ? 'rounded-br-md bg-primary-green text-main'
                                                                 : 'rounded-bl-md border border-border bg-card text-text-light'
@@ -675,7 +729,7 @@ export const AiAssistant: React.FC = () => {
                                             }
                                         }}
                                         placeholder="Message Atlaix AI"
-                                        className="max-h-32 min-h-[48px] flex-1 resize-none rounded-2xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
+                                        className="ai-assistant-textarea max-h-32 min-h-[48px] flex-1 resize-none rounded-2xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
                                     />
                                     <button
                                         type="submit"

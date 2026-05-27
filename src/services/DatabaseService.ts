@@ -2,6 +2,7 @@
 import { AlphaGauntletEvent, MarketCoin, SavedWallet, WalletCategory } from '../types';
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from '../config';
+import { classifyTokenSector } from '../utils/sectorClassification';
 import { filterAlphaTokens, hasQualityTokenMetadata, isExcludedAlphaToken } from '../utils/tokenFilters';
 
 // --- INITIALIZE SUPABASE ---
@@ -60,6 +61,7 @@ const DEXSCREENER_ROUTE_PREFIX = typeof window === 'undefined' ? 'https://api.de
 const DEXSCREENER_SEARCH_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/search`;
 const DEXSCREENER_PAIRS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/pairs`;
 const DEXSCREENER_TOKENS_URL = `${DEXSCREENER_ROUTE_PREFIX}/latest/dex/tokens`;
+const SECTOR_ENRICHMENT_BATCH_LIMIT = 80;
 const SMART_MONEY_TABLE = 'smart_money_wallets';
 const SMART_MONEY_EXCLUSIONS_TABLE = 'smart_money_exclusions';
 const DETECTION_EVENTS_TABLE = 'detection_engine_events';
@@ -158,7 +160,10 @@ interface DexPair {
     volume: { h24: number; h24Buy?: number; h24Sell?: number; buy?: number; sell?: number; buys?: number; sells?: number; };
     txns: { h24: { buys: number; sells: number; } };
     pairCreatedAt?: number;
-    info?: { imageUrl?: string; };
+    info?: { imageUrl?: string; labels?: string[]; tags?: string[]; categories?: string[]; };
+    labels?: string[];
+    tags?: string[];
+    categories?: string[];
 }
 
 interface Cache {
@@ -186,6 +191,7 @@ const ACTIVE_FEED_LIMIT = 1000;
 const STALE_PURGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const EXCLUDED_PURGE_INTERVAL_MS = 10 * 60 * 1000;
 const LOCAL_CACHE_KEY = 'atlaix-live-alpha-cache';
+const LOCAL_CACHE_SCHEMA_VERSION = 2;
 const LOCAL_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 const DEXSCREENER_SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
 const DEXSCREENER_RATE_LIMIT_COOLDOWN_MS = 45 * 1000;
@@ -241,7 +247,10 @@ const setCachedMarketData = (data: MarketCoin[]) => {
     if (!canUseLocalStorage()) return;
 
     try {
-        window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(cache.marketData));
+        window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({
+            ...cache.marketData,
+            schemaVersion: LOCAL_CACHE_SCHEMA_VERSION
+        }));
     } catch {
         // Ignore storage quota and privacy mode errors.
     }
@@ -254,8 +263,9 @@ const getLocalCachedMarketData = () => {
         const raw = window.localStorage.getItem(LOCAL_CACHE_KEY);
         if (!raw) return null;
 
-        const parsed = JSON.parse(raw) as Cache['marketData'];
+        const parsed = JSON.parse(raw) as Cache['marketData'] & { schemaVersion?: number };
         if (!parsed?.data || !Array.isArray(parsed.data) || typeof parsed.timestamp !== 'number') return null;
+        if (parsed.schemaVersion !== LOCAL_CACHE_SCHEMA_VERSION) return null;
         if (Date.now() - parsed.timestamp > LOCAL_CACHE_MAX_AGE_MS) return null;
 
         return parsed;
@@ -686,6 +696,108 @@ const updatePairsBulk = async (chainId: string, pairAddresses: string[]): Promis
     }
 };
 
+const readProviderStringArray = (value: unknown) =>
+    typeof value === 'string'
+        ? [value.trim()].filter(Boolean)
+        : Array.isArray(value)
+        ? value.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+
+const extractProviderSectorLabels = (pair: DexPair) => {
+    const rawPair = pair as any;
+    const launchpadDexLabels = ['pumpswap', 'pumpfun', 'pump-fun', 'letsbonk', 'lets-bonk', 'moonshot'];
+    const dexId = String(pair.dexId || '').trim().toLowerCase();
+    const labels = [
+        ...readProviderStringArray(pair.categories),
+        ...readProviderStringArray(rawPair.category),
+        ...readProviderStringArray(pair.tags),
+        ...readProviderStringArray(pair.labels),
+        ...readProviderStringArray(pair.info?.categories),
+        ...readProviderStringArray(pair.info?.tags),
+        ...readProviderStringArray(pair.info?.labels),
+        ...(launchpadDexLabels.includes(dexId) ? [dexId] : [])
+    ];
+
+    return [...new Set(labels)];
+};
+
+type TokenSectorEnrichment = {
+    key?: string;
+    chain?: string;
+    address?: string;
+    sectorLabels?: string[];
+    providerCategories?: string[];
+    providerTags?: string[];
+    providerLabels?: string[];
+    sectorSource?: string;
+};
+
+const marketCoinSectorKey = (coin: Pick<MarketCoin, 'chain' | 'address'>) =>
+    `${String(coin.chain || '').trim().toLowerCase()}:${String(coin.address || '').trim().toLowerCase()}`;
+
+const hasProviderSectorEvidence = (coin: MarketCoin) =>
+    classifyTokenSector(coin).confidence === 'provider';
+
+const mergeTokenSectorEnrichment = (coin: MarketCoin, enrichment?: TokenSectorEnrichment): MarketCoin => {
+    if (!enrichment) return coin;
+
+    const sectorLabels = [...new Set([
+        ...(enrichment.sectorLabels || []),
+        ...(enrichment.providerCategories || []),
+        ...(enrichment.providerTags || []),
+        ...(enrichment.providerLabels || [])
+    ].map((item) => String(item || '').trim()).filter(Boolean))];
+
+    if (!sectorLabels.length) return coin;
+
+    return {
+        ...coin,
+        sector: sectorLabels[0],
+        sectorLabels,
+        providerCategories: enrichment.providerCategories || [],
+        providerTags: enrichment.providerTags || [],
+        providerLabels: enrichment.providerLabels || [],
+        sectorSource: enrichment.sectorSource || 'sector-enrichment'
+    };
+};
+
+const enrichMarketCoinSectors = async (tokens: MarketCoin[]) => {
+    if (!tokens.length || typeof fetch === 'undefined') return tokens;
+
+    const candidates = tokens
+        .filter((coin) => coin.address && coin.chain && !hasProviderSectorEvidence(coin))
+        .slice(0, SECTOR_ENRICHMENT_BATCH_LIMIT);
+
+    if (!candidates.length) return tokens;
+
+    try {
+        const response = await fetch(apiUrl('/api/token-sector/enrich'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tokens: candidates.map((coin) => ({
+                    chain: coin.chain,
+                    address: coin.address,
+                    ticker: coin.ticker,
+                    name: coin.name
+                }))
+            })
+        });
+        if (!response.ok) return tokens;
+
+        const payload = await response.json() as { sectors?: TokenSectorEnrichment[] };
+        const sectorsByKey = new Map<string, TokenSectorEnrichment>();
+        (payload.sectors || []).forEach((sector) => {
+            const key = sector.key || marketCoinSectorKey({ chain: sector.chain || '', address: sector.address || '' });
+            if (key) sectorsByKey.set(key, sector);
+        });
+
+        return tokens.map((coin) => mergeTokenSectorEnrichment(coin, sectorsByKey.get(marketCoinSectorKey(coin))));
+    } catch {
+        return tokens;
+    }
+};
+
 
 export const DatabaseService = {
     getCachedMarketData: (): { data: MarketCoin[], source: string, latency: number } | null => {
@@ -777,9 +889,10 @@ export const DatabaseService = {
 
         const hydrated = await DatabaseService.fetchFromSupabase();
         if (hydrated.length) {
-            setCachedMarketData(hydrated);
+            const enrichedHydrated = await enrichMarketCoinSectors(hydrated);
+            setCachedMarketData(enrichedHydrated);
             return {
-                data: hydrated,
+                data: enrichedHydrated,
                 source: 'SUPABASE',
                 latency: Math.round(performance.now() - start)
             };
@@ -941,7 +1054,7 @@ export const DatabaseService = {
 
             // 5. Limit size & Sync
             // Return the top 1000 assets to maintain a broader market view.
-            const finalData = filterFeedEligibleTokens(mergedList.slice(0, ACTIVE_FEED_LIMIT).map((entry) => entry.coin));
+            const finalData = await enrichMarketCoinSectors(filterFeedEligibleTokens(mergedList.slice(0, ACTIVE_FEED_LIMIT).map((entry) => entry.coin)));
 
             // Persist accepted feed tokens before returning so reloads hydrate the same set.
             if (newPairs.length > 0 || updatedPairs.length > 0) {
@@ -960,8 +1073,9 @@ export const DatabaseService = {
         } catch (error) {
             console.error("Critical Fetch Error:", error);
             const stored = await DatabaseService.fetchFromSupabase();
+            const enrichedStored = await enrichMarketCoinSectors(stored.length ? stored : SEED_DATA);
             // Fallback to seed if DB is also dead
-            return { data: filterFeedEligibleTokens(stored.length ? stored : SEED_DATA), source: 'FALLBACK', latency: 0 };
+            return { data: filterFeedEligibleTokens(enrichedStored), source: 'FALLBACK', latency: 0 };
         }
     },
 
@@ -1077,6 +1191,7 @@ export const DatabaseService = {
         const liq = pair.liquidity?.usd || 0;
         const riskLevel: MarketCoin['riskLevel'] = liq < 5000 ? 'High' : liq < 50000 ? 'Medium' : 'Low';
         const smartMoneySignal: MarketCoin['smartMoneySignal'] = estimatedNetFlow > 50000 ? 'Inflow' : estimatedNetFlow < -50000 ? 'Outflow' : 'Neutral';
+        const providerLabels = extractProviderSectorLabels(pair);
 
         return {
             id: index,
@@ -1106,6 +1221,23 @@ export const DatabaseService = {
             chain: getChainId(pair.chainId),
             address: pair.baseToken.address,
             pairAddress: pair.pairAddress,
+            sector: providerLabels[0],
+            sectorLabels: providerLabels,
+            providerCategories: [
+                ...readProviderStringArray(pair.categories),
+                ...readProviderStringArray((pair as any).category),
+                ...readProviderStringArray(pair.info?.categories)
+            ],
+            providerTags: [
+                ...readProviderStringArray(pair.tags),
+                ...readProviderStringArray(pair.info?.tags),
+                ...readProviderStringArray(pair.dexId)
+            ],
+            providerLabels: [
+                ...readProviderStringArray(pair.labels),
+                ...readProviderStringArray(pair.info?.labels)
+            ],
+            sectorSource: providerLabels.length ? 'dexscreener' : undefined,
             // Attempt to capture makers if available in raw response (some endpoints provide it)
             activeWallets24h: (pair as any).boosts?.active || (pair as any).makers || 0
         };

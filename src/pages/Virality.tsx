@@ -42,11 +42,11 @@ export const Virality: React.FC = () => {
                 chart: { type: 'line', height: 280, background: 'transparent', toolbar: { show: false }, zoom: { enabled: false } },
                 colors: ['#F2C94C', '#EB5757', '#9B51E0', '#2AF598'],
                 stroke: { curve: 'smooth', width: 2 },
-                xaxis: { categories: categories, labels: { style: { colors: '#8F96A3', fontSize: '10px', fontFamily: 'Inter' } }, axisBorder: { show: false }, axisTicks: { show: false }, tickAmount: 5 },
-                yaxis: { show: true, labels: { style: { colors: '#8F96A3', fontFamily: 'Inter' } } },
+                xaxis: { categories: categories, labels: { style: { colors: '#8F96A3', fontSize: '10px', fontFamily: 'Geist' } }, axisBorder: { show: false }, axisTicks: { show: false }, tickAmount: 5 },
+                yaxis: { show: true, labels: { style: { colors: '#8F96A3', fontFamily: 'Geist' } } },
                 grid: { show: true, borderColor: '#2A2E33', strokeDashArray: 4, xaxis: { lines: { show: false } } },
                 theme: { mode: 'dark' },
-                legend: { position: 'top', horizontalAlign: 'left', labels: { colors: '#EAECEF', fontFamily: 'Inter' } }
+                legend: { position: 'top', horizontalAlign: 'left', labels: { colors: '#EAECEF', fontFamily: 'Geist' } }
             };
             
             if (chartInstance.current) { chartInstance.current.destroy(); }

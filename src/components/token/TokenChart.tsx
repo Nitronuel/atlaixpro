@@ -1,5 +1,5 @@
 // Reusable interface component for Atlaix product workflows.
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface TokenChartProps {
     chainId: string;
@@ -7,8 +7,36 @@ interface TokenChartProps {
 }
 
 export const TokenChart: React.FC<TokenChartProps> = ({ chainId, pairAddress }) => {
+    const [chartTheme, setChartTheme] = useState<'light' | 'dark'>(() => {
+        if (typeof document === 'undefined') return 'light';
+        return document.documentElement.dataset.atlaixTheme === 'dark' || document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'light';
+    });
+
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        const updateChartTheme = () => {
+            setChartTheme(document.documentElement.dataset.atlaixTheme === 'dark' || document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'light');
+        };
+        updateChartTheme();
+        const observer = new MutationObserver(updateChartTheme);
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-atlaix-theme'] });
+        return () => observer.disconnect();
+    }, []);
+
     const getChartUrl = (cId: string, pAddr: string) => {
-        return `https://dexscreener.com/${cId}/${pAddr}?embed=1&theme=dark&trades=0&info=0`;
+        const params = new URLSearchParams({
+            embed: '1',
+            theme: chartTheme,
+            chartTheme,
+            trades: '0',
+            info: '0',
+            loadChartSettings: '0'
+        });
+        return `https://dexscreener.com/${cId}/${pAddr}?${params.toString()}`;
+    };
+
+    const setCredentiallessFrame = (node: HTMLIFrameElement | null) => {
+        node?.setAttribute('credentialless', '');
     };
 
     return (
@@ -17,7 +45,10 @@ export const TokenChart: React.FC<TokenChartProps> = ({ chainId, pairAddress }) 
                 Loading Chart...
             </div>
             <iframe
+                key={`${pairAddress}-${chartTheme}`}
                 src={getChartUrl(chainId || 'ethereum', pairAddress || '')}
+                className={`token-dex-chart-frame ${chartTheme === 'light' ? 'is-light-mode' : ''}`}
+                ref={setCredentiallessFrame}
                 style={{ width: '100%', height: '100%', border: '0', position: 'relative', zIndex: 10 }}
                 title="Token Chart"
                 allow="clipboard-write"

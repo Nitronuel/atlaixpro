@@ -1,17 +1,20 @@
 // Reusable interface component for Atlaix product workflows.
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ViewState } from '../../types';
 import {
-  LayoutDashboard, Users, Target, Activity, Radar, MessageSquare,
-  Wallet, Zap, ShieldCheck, Bell, Settings, LogOut, LogIn, Menu, User, Briefcase
+  Activity, Bell, Briefcase,
+  LayoutDashboard, LogIn, LogOut, Menu, MessageSquare, Moon, PanelLeft, Radar,
+  Settings, ShieldCheck, Sun, Target, User, Wallet,
+  X, Zap
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { UserProfile } from '../../services/ProfileService';
+import { GlobalAiAssistant } from '../assistant/GlobalAiAssistant';
 
 interface LayoutProps {
   children: React.ReactNode;
-  currentView: ViewState; // Kept for interface compatibility but ignored
-  onViewChange: (view: ViewState) => void; // Kept for interface compatibility but ignored
+  currentView: ViewState;
+  onViewChange: (view: ViewState) => void;
   onLogout: () => void;
   isAuthenticated: boolean;
   authLoading?: boolean;
@@ -20,275 +23,450 @@ interface LayoutProps {
   onLogin: () => void;
 }
 
-const NavItem: React.FC<{
-  active: boolean;
-  icon: React.ReactNode;
+type NavItem = {
+  path: string;
   label: string;
-  onClick: () => void;
-  colorClass?: string;
-  tag?: string;
-}> = ({ active, icon, label, onClick, colorClass, tag }) => (
-  <button
-    onClick={onClick}
-    className={`w-full flex items-center px-3 py-2 rounded-lg mb-0.5 transition-all duration-200 text-[0.9rem] font-medium relative group text-left
-      ${active ? 'bg-card text-text-light font-semibold' : 'text-text-medium hover:bg-card hover:text-text-light'}
-      ${active && colorClass ? colorClass : ''}
-    `}
-  >
-    {active && (
-      <div className="absolute left-[-0.75rem] top-0 bottom-0 w-1 rounded-r-md bg-primary-green" />
-    )}
-    <span className={`mr-3 ${active ? 'text-current' : 'text-text-dark group-hover:text-current'}`}>
-      {icon}
-    </span>
-    <span className="flex-1 truncate">{label}</span>
-    {tag && (
-      <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded bg-primary-green/10 text-primary-green">
-        {tag}
-      </span>
-    )}
-  </button>
-);
+  shortLabel: string;
+  icon: React.ReactNode;
+  group: 'overview' | 'market' | 'capital' | 'tools' | 'account';
+  badge?: string;
+  action?: 'theme';
+};
+
+const navItems: NavItem[] = [
+  { path: '/dashboard', label: 'Overview', shortLabel: 'Overview', icon: <LayoutDashboard size={19} />, group: 'overview' },
+  { path: '/detection', label: 'Detection Engine', shortLabel: 'Detection', icon: <Radar size={19} />, group: 'market' },
+  { path: '/sentiment', label: 'Narrative Intelligence', shortLabel: 'Narrative', icon: <Target size={19} />, group: 'market' },
+  { path: '/smart-money', label: 'Smart Money Engine', shortLabel: 'Smart Money', icon: <Zap size={19} />, group: 'capital' },
+  { path: '/heatmap', label: 'Token Heatmap', shortLabel: 'Heatmap', icon: <Activity size={19} />, group: 'capital' },
+  { path: '/wallet', label: 'Wallet Tracker', shortLabel: 'Wallets', icon: <Wallet size={19} />, group: 'capital' },
+  { path: '/smart-alerts', label: 'Smart Alerts', shortLabel: 'Alerts', icon: <Bell size={19} />, group: 'tools' },
+  { path: '/ai-assistant', label: 'AI Assistant', shortLabel: 'Assistant', icon: <MessageSquare size={19} />, group: 'tools' },
+  { path: '/safe-scan', label: 'Safe Scan', shortLabel: 'Safe Scan', icon: <ShieldCheck size={19} />, group: 'tools' },
+  { path: '/settings', label: 'Settings', shortLabel: 'Settings', icon: <Settings size={19} />, group: 'account' },
+  { path: '#theme', label: 'Switch Theme', shortLabel: 'Theme', icon: <Sun size={19} />, group: 'account', action: 'theme' }
+];
+
+const navSections: Array<{ key: NavItem['group']; label: string }> = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'market', label: 'Market & Narrative Intelligence' },
+  { key: 'capital', label: 'Wallet & Capital Intelligence' },
+  { key: 'tools', label: 'Platform-wide Intelligence & Tools' },
+  { key: 'account', label: 'Account' }
+];
 
 const getInitial = (name?: string, email?: string) => {
   const source = (name || email || 'A').trim();
   return source.charAt(0).toUpperCase();
 };
 
+const getPageTitle = (pathname: string) => {
+  if (pathname === '/' || pathname.startsWith('/dashboard')) return 'Overview';
+  if (pathname.startsWith('/detection/token')) return 'Token Detection';
+  if (pathname.startsWith('/detection')) return 'Detection Engine';
+  if (pathname.startsWith('/sentiment')) return 'Narrative Intelligence';
+  if (pathname.startsWith('/smart-money/')) return 'Smart Wallet Profile';
+  if (pathname.startsWith('/smart-money')) return 'Smart Money Engine';
+  if (pathname.startsWith('/token-smart-money')) return 'Token Smart Money';
+  if (pathname.startsWith('/heatmap')) return 'Token Heatmap';
+  if (pathname.startsWith('/wallet/')) return 'Wallet Profile';
+  if (pathname.startsWith('/wallet')) return 'Wallet Tracker';
+  if (pathname.startsWith('/smart-alerts')) return 'Smart Alerts';
+  if (pathname.startsWith('/ai-assistant')) return 'AI Assistant';
+  if (pathname.startsWith('/safe-scan') || pathname.startsWith('/alchemy-hub')) return 'Safe Scan';
+  if (pathname.startsWith('/settings')) return 'Settings';
+  if (pathname.startsWith('/token/')) return 'Token Overview';
+  return 'Atlaix Workspace';
+};
+
+const formatPlanLabel = (plan?: string) => {
+  const normalized = (plan || 'free').trim();
+  return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)} Plan`;
+};
+
 export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthenticated, authLoading, profile, userEmail, onLogin }) => {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [navPinned, setNavPinned] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const stored = window.localStorage.getItem('atlaix-theme-preview');
+    if (stored) return stored === 'dark';
+    return false;
+  });
   const location = useLocation();
   const navigate = useNavigate();
   const displayName = profile?.display_name || (isAuthenticated ? 'Atlaix User' : 'Guest');
   const displayEmail = userEmail || (isAuthenticated ? 'Connected' : 'Not connected');
   const plan = profile?.plan || 'free';
+  const planLabel = formatPlanLabel(plan);
   const initial = getInitial(displayName, userEmail);
-
-  const handleNavigation = (path: string) => {
-    navigate(path);
-    setSidebarOpen(false);
-  };
+  const pageTitle = getPageTitle(location.pathname);
 
   const isActive = (path: string) => {
     if (path === '/dashboard' && location.pathname === '/') return true;
     return location.pathname.startsWith(path);
   };
 
-  const getPageTitle = () => {
-    const path = location.pathname;
-    if (path.includes('/dashboard')) return 'Overview';
-    if (path.includes('/detection/token/')) return 'Token Detection';
-    if (path.includes('/detection')) return 'Detection Engine';
-    if (path.includes('/token-smart-money/')) return 'Token Smart Money View';
-    if (path.includes('/token/')) return 'Token Details';
-
-    if (path.includes('/heatmap')) return 'Token Heatmap';
-    if (path.includes('/sentiment')) return 'Sentiment Intelligence';
-    if (path.includes('/ai-assistant')) return 'AI Assistant';
-    if (path.includes('/wallet')) return 'Wallet Tracker';
-    if (path.includes('/wallet')) return 'Wallet Tracker';
-    if (path.includes('/smart-money/')) return 'Smart Wallet Profile Page';
-    if (path.includes('/smart-money')) return 'Smart Money Engine';
-    if (path.includes('/safe-scan')) return 'Safe Scan';
-    if (path.includes('/smart-alerts')) return 'Smart Alerts';
-    if (path.includes('/settings')) return 'Settings';
-    return 'Overview';
+  const handleNavigation = (path: string) => {
+    setMobileNavOpen(false);
+    setNavPinned(false);
+    navigate(path);
   };
 
-  const getPageSubtitle = () => {
-    const path = location.pathname;
-    if (path.includes('/dashboard')) return 'Track token and stay ahead of the crowd';
-    if (path.includes('/detection/token/')) return 'Detection context, scoring signals, and market activity for this admitted token';
-    if (path.includes('/detection')) return 'Surface qualified token events from buy pressure, sell pressure, liquidity shifts, and unusual activity';
-    if (path.includes('/token-smart-money/')) return 'Wallet activity and smart-money context for this token';
-    if (path.includes('/token/')) return 'Live market data, chart, token intelligence, and wallet interactions';
-
-    if (path.includes('/heatmap')) return 'Visualize concentration of normal vs. abnormal activity';
-    if (path.includes('/sentiment')) return 'Monitor user opinions, reviews, and feedback trends.';
-    if (path.includes('/ai-assistant')) return 'Interact with Atlaix Intelligence';
-    if (path.includes('/safe-scan')) return 'Security analysis and risk scoring for tokens';
-    if (path.includes('/wallet')) return 'Monitor wallet activity, performance and patterns';
-    if (path.includes('/smart-alerts')) return 'Create AI-powered market alerts';
-    return '';
+  const handleAccountNavigation = (path: string) => {
+    setUserMenuOpen(false);
+    if (!isAuthenticated) {
+      onLogin();
+      return;
+    }
+    handleNavigation(path);
   };
+
+  const handleAuthAction = () => {
+    setUserMenuOpen(false);
+    setMobileNavOpen(false);
+    if (isAuthenticated) {
+      onLogout();
+      return;
+    }
+    onLogin();
+  };
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setUserMenuOpen(false);
+      }
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!userMenuRef.current?.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('pointerdown', handlePointerDown, true);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [userMenuOpen]);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
+      document.documentElement.dataset.atlaixTheme = darkMode ? 'dark' : 'light';
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('atlaix-theme-preview', darkMode ? 'dark' : 'light');
+    }
+  }, [darkMode]);
 
   return (
-    <div className="flex h-screen bg-main overflow-hidden text-base">
-      {/* Sidebar Overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/70 z-[1000] xl:hidden backdrop-blur-sm"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+    <div className={`min-h-screen bg-main text-text-light ${darkMode ? 'atlaix-dark-preview' : ''}`}>
+      <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_18%_8%,rgba(255,255,255,0.98),transparent_28%),radial-gradient(circle_at_76%_14%,rgba(211,239,218,0.24),transparent_22%),linear-gradient(135deg,#FFFFFF_0%,#FAFEFB_56%,#F4FBF6_100%)]" />
 
-      {/* Sidebar */}
-      <aside className={`
-        fixed xl:static inset-y-0 left-0 z-[1100] w-[300px] xl:w-[280px] bg-sidebar border-r border-border
-        transform transition-transform duration-300 ease-in-out flex flex-col shadow-2xl xl:shadow-none
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full xl:translate-x-0'}
-      `}>
-        <div className="px-3 py-4">
-          <div className="flex items-center gap-3 text-2xl font-bold text-text-light pl-2">
-            <img
-              src="/logo.png"
-              alt="Atlaix Logo"
-              className="w-9 h-9 rounded-lg object-contain"
-              onError={(e) => (e.currentTarget.style.display = 'none')}
-            />
-            Atlaix
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-3 pb-6">
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-2 pl-2">Overview</div>
-          <NavItem active={isActive('/dashboard')} onClick={() => handleNavigation('/dashboard')} icon={<LayoutDashboard size={20} />} label="Overview" />
-
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Market & Narrative Intelligence</div>
-          <NavItem active={isActive('/detection')} onClick={() => handleNavigation('/detection')} icon={<Radar size={20} />} label="Detection Engine" />
-          <NavItem active={isActive('/sentiment')} onClick={() => handleNavigation('/sentiment')} icon={<Target size={20} />} label="Sentiment Intelligence" />
-
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Wallet & Capital Intelligence</div>
-          <NavItem active={isActive('/smart-money')} onClick={() => handleNavigation('/smart-money')} icon={<Zap size={20} />} label="Smart Money Engine" />
-          <NavItem active={isActive('/heatmap')} onClick={() => handleNavigation('/heatmap')} icon={<Activity size={20} />} label="Token Heatmap" />
-          <NavItem active={isActive('/wallet')} onClick={() => handleNavigation('/wallet')} icon={<Wallet size={20} />} label="Wallet Tracker" />
-
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Platform-Wide Intelligence & Tools</div>
-          <NavItem active={isActive('/smart-alerts')} onClick={() => handleNavigation('/smart-alerts')} icon={<Bell size={20} />} label="Smart Alerts" />
-          <NavItem active={isActive('/ai-assistant')} onClick={() => handleNavigation('/ai-assistant')} icon={<MessageSquare size={20} />} label="AI Assistant" />
-          <NavItem active={isActive('/safe-scan')} onClick={() => handleNavigation('/safe-scan')} icon={<ShieldCheck size={20} />} label="Safe Scan" />
-
-          <div className="text-xs font-bold text-text-dark uppercase tracking-wider mb-2 mt-5 pl-2">Account</div>
-          <NavItem active={isActive('/settings')} onClick={() => handleNavigation('/settings')} icon={<Settings size={20} />} label="Settings" />
-
-          <div className="mt-4 pt-4 border-t border-border">
-            {isAuthenticated ? (
-              <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-card transition-colors cursor-pointer" onClick={onLogout}>
-                <div className="w-8 h-8 rounded-full bg-primary-purple flex items-center justify-center text-xs font-bold text-white">
-                  {initial}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-text-light truncate">{displayName}</div>
-                  <div className="text-[10px] text-text-medium capitalize">{plan} Plan</div>
-                </div>
-                <LogOut size={18} className="text-text-medium hover:text-primary-red transition-colors" />
+      <div className="relative z-10 min-h-screen">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-[60] w-full border-b border-white/70 bg-white/62 shadow-[0_12px_36px_rgba(93,112,145,0.12),inset_0_1px_0_rgba(255,255,255,0.94)] backdrop-blur-2xl">
+            <div className="relative flex h-14 items-center justify-between gap-4 px-4 sm:px-6">
+            <div className="flex min-w-0 items-center">
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMobileNavOpen(true)}
+                  className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/78 text-text-light shadow-[8px_10px_24px_rgba(101,116,145,0.12)] transition-all hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary-green/40 lg:hidden"
+                  aria-label="Open navigation menu"
+                  aria-haspopup="dialog"
+                  aria-expanded={mobileNavOpen}
+                >
+                  <Menu size={21} />
+                </button>
+                <button
+                  onClick={() => handleNavigation('/dashboard')}
+                  className="hidden min-w-0 items-center gap-3 rounded-full text-left lg:flex lg:min-w-[132px]"
+                  aria-label="Atlaix dashboard"
+                >
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/70 shadow-[8px_10px_24px_rgba(101,116,145,0.12),inset_0_1px_0_rgba(255,255,255,0.9)]">
+                    <img src="/logo.png" alt="" className="h-7 w-7 rounded-xl object-contain" onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-base font-black text-text-light">Atlaix</span>
+                  </span>
+                </button>
               </div>
-            ) : (
-              <button
-                onClick={onLogin}
-                className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-primary-green/10 border border-primary-green/20 text-primary-green font-bold hover:bg-primary-green hover:text-main transition-all"
-              >
-                <LogIn size={18} /> Sign In
-              </button>
-            )}
-          </div>
-        </div>
-      </aside>
+            </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 bg-main h-full">
-        {/* Header */}
-        <header className="h-[80px] xl:h-[100px] px-4 xl:px-6 flex items-center justify-between sticky top-0 bg-[#111315e6] backdrop-blur-md z-30 border-b border-border/50">
-          <div className="flex items-center gap-5 overflow-hidden">
-            <button
-              className="xl:hidden text-text-medium hover:text-text-light"
-              onClick={() => setSidebarOpen(true)}
+            <h1 className="pointer-events-none absolute left-1/2 max-w-[calc(100vw-8.5rem)] -translate-x-1/2 truncate text-center text-base font-black text-text-light sm:text-lg lg:max-w-[42vw]">
+              {pageTitle}
+            </h1>
+
+            <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDarkMode((current) => !current)}
+                  className="atlaix-appearance-trigger hidden items-center rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-primary-green/40 md:inline-flex"
+                  aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                  title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                  <span className="atlaix-appearance-thumb">
+                    {darkMode ? <Moon size={18} /> : <Sun size={19} />}
+                  </span>
+                </button>
+                <div ref={userMenuRef} className="relative">
+                  <button
+                    type="button"
+                    className="atlaix-profile-trigger grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-white text-text-light shadow-sm"
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    aria-label="Open user menu"
+                    aria-haspopup="menu"
+                    aria-expanded={userMenuOpen}
+                  >
+                    {isAuthenticated ? (
+                      <span className="grid h-full w-full place-items-center bg-[linear-gradient(135deg,#10131A,#3FA34D)] text-sm font-black text-white">{initial}</span>
+                    ) : (
+                      <User size={19} />
+                    )}
+                  </button>
+
+                  {userMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[70]" onClick={() => setUserMenuOpen(false)} />
+                      <div role="menu" className="atlaix-profile-menu absolute right-0 top-14 z-[80] w-72 overflow-hidden rounded-[24px] border border-[#D8EBDD] bg-white p-2 shadow-[0_18px_42px_rgba(50,74,59,0.16)] animate-fade-in">
+                        <div className="atlaix-profile-summary flex items-center gap-3 rounded-[20px] bg-[#F2FAF5] p-3">
+                          <div className="atlaix-profile-avatar grid h-12 w-12 shrink-0 place-items-center rounded-full bg-black text-base font-black text-white">
+                            {isAuthenticated ? initial : <User size={20} />}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-black text-text-light">{authLoading ? 'Loading...' : displayName}</div>
+                            <div className="truncate text-xs font-semibold text-text-medium">{displayEmail}</div>
+                            <div className="mt-1 text-[10px] font-black uppercase tracking-wider text-primary-green">{planLabel}</div>
+                          </div>
+                        </div>
+                        <div className="mt-2 grid gap-1">
+                          <button type="button" role="menuitem" onClick={() => handleAccountNavigation('/settings')} className="atlaix-profile-menu-item flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-bold text-text-light hover:bg-[#F2FAF5]">
+                            <User size={16} /> Profile
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => handleAccountNavigation('/settings')} className="atlaix-profile-menu-item flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-bold text-text-medium hover:bg-[#F2FAF5] hover:text-text-light">
+                            <Briefcase size={16} /> Plan & Billing
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => setDarkMode((current) => !current)}
+                            className="atlaix-profile-menu-item flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-bold text-text-medium hover:bg-[#F2FAF5] hover:text-text-light"
+                          >
+                            {darkMode ? <Moon size={16} /> : <Sun size={16} />}
+                            Switch Theme
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => { isAuthenticated ? onLogout() : onLogin(); setUserMenuOpen(false); }} className="atlaix-profile-menu-item flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-bold text-text-medium hover:bg-[#F2FAF5] hover:text-text-light">
+                            {isAuthenticated ? <LogOut size={16} /> : <LogIn size={16} />}
+                            {isAuthenticated ? 'Log out' : 'Log in'}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+            </div>
+            </div>
+          </header>
+
+          {mobileNavOpen && (
+            <div className="fixed inset-0 z-[90] lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+              <button
+                type="button"
+                className="absolute inset-0 h-full w-full cursor-default bg-[#10131A]/42 backdrop-blur-[2px]"
+                onClick={() => setMobileNavOpen(false)}
+                aria-label="Close navigation menu"
+              />
+              <aside className="relative flex h-dvh w-[min(86vw,340px)] flex-col overflow-hidden border-r border-white/70 bg-white/92 shadow-[24px_0_70px_rgba(40,67,48,0.22)] backdrop-blur-2xl">
+                <div className="flex h-16 items-center justify-between gap-3 border-b border-[#D8EBDD]/70 px-4">
+                  <button
+                    type="button"
+                    onClick={() => handleNavigation('/dashboard')}
+                    className="flex min-w-0 items-center gap-3 rounded-full text-left"
+                    aria-label="Atlaix dashboard"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white shadow-[8px_10px_24px_rgba(101,116,145,0.12)]">
+                      <img src="/logo.png" alt="" className="h-7 w-7 rounded-xl object-contain" onError={(event) => { event.currentTarget.style.display = 'none'; }} />
+                    </span>
+                    <span className="truncate text-base font-black text-text-light">Atlaix</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMobileNavOpen(false)}
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#F2FAF5] text-text-light transition-all hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary-green/40"
+                    aria-label="Close navigation menu"
+                  >
+                    <X size={21} />
+                  </button>
+                </div>
+
+                <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4" aria-label="Mobile navigation">
+                  {navSections.map((section) => {
+                    const sectionItems = navItems.filter((item) => item.group === section.key);
+                    if (!sectionItems.length) return null;
+
+                    return (
+                      <div key={section.key} className="mb-4 grid gap-1">
+                        <div className="px-3 pb-1 text-[11px] font-black uppercase leading-tight tracking-[0.12em] text-text-dark">
+                          {section.label}
+                        </div>
+                        {sectionItems.map((item) => (
+                          <button
+                            key={item.path}
+                            type="button"
+                            onClick={() => {
+                              if (item.action === 'theme') {
+                                setDarkMode((current) => !current);
+                                return;
+                              }
+                              handleNavigation(item.path);
+                            }}
+                            className={`atlaix-nav-item flex min-h-12 w-full items-center gap-3 rounded-[18px] px-3 py-3 text-left transition-all ${
+                              isActive(item.path)
+                                ? 'is-active'
+                                : 'text-text-medium hover:bg-[#F2FAF5] hover:text-text-light'
+                            }`}
+                            aria-current={!item.action && isActive(item.path) ? 'page' : undefined}
+                          >
+                            <span className="grid h-6 w-6 shrink-0 place-items-center">{item.action === 'theme' && darkMode ? <Moon size={19} /> : item.icon}</span>
+                            <span className="min-w-0 flex-1 truncate text-sm font-black">{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </nav>
+                <div className="border-t border-border p-3">
+                  <button
+                    type="button"
+                    onClick={handleAuthAction}
+                    className="atlaix-side-account-card flex w-full items-center gap-3 rounded-[18px] border border-border bg-card px-3 py-3 text-left shadow-sm transition-all hover:border-primary-green/45 hover:bg-primary-green/10"
+                    aria-label={isAuthenticated ? 'Log out' : 'Log in'}
+                  >
+                    <span className={`atlaix-profile-avatar grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-black ${
+                      isAuthenticated ? 'bg-primary-green text-main' : 'bg-card-hover text-text-light ring-1 ring-border'
+                    }`}>
+                      {isAuthenticated ? initial : <User size={20} />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-black text-text-light">{authLoading ? 'Loading...' : displayName}</span>
+                      <span className="block truncate text-xs font-bold text-text-medium">{planLabel}</span>
+                    </span>
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-text-medium">
+                      {isAuthenticated ? <LogOut size={18} /> : <LogIn size={18} />}
+                    </span>
+                  </button>
+                </div>
+              </aside>
+            </div>
+          )}
+
+          <div className="pointer-events-none fixed bottom-5 left-0 top-[76px] z-50 hidden w-[72px] lg:block">
+            <aside
+              className={`atlaix-app-rail group/app-rail pointer-events-auto absolute inset-y-0 left-0 flex flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/58 shadow-[18px_24px_70px_rgba(93,112,145,0.16),inset_0_1px_0_rgba(255,255,255,0.92)] backdrop-blur-2xl transition-[width,box-shadow] duration-300 ease-out hover:w-[286px] hover:shadow-[22px_28px_80px_rgba(73,119,88,0.20)] focus-within:w-[286px] focus-within:shadow-[22px_28px_80px_rgba(73,119,88,0.20)] ${navPinned ? 'is-pinned w-[286px]' : 'w-[72px]'}`}
+              aria-label="Primary navigation"
             >
-              <Menu size={28} />
-            </button>
-            <div className="min-w-0">
-              <h1 className="text-2xl md:text-3xl font-bold text-text-light flex items-center gap-3 truncate">
-                {getPageTitle()}
-                {isActive('/dashboard') && (
-                  <span className="text-xs px-2.5 py-0.5 rounded bg-card border border-border text-text-light font-semibold uppercase">Free</span>
-                )}
-              </h1>
-              <p className="text-base text-text-medium truncate hidden xl:block mt-1">{getPageSubtitle()}</p>
-            </div>
+              <div className="flex h-20 items-center gap-3 px-3">
+                <button
+                  type="button"
+                  onClick={() => setNavPinned((current) => !current)}
+                  className={`grid h-12 w-12 shrink-0 place-items-center rounded-full transition-all ${
+                    navPinned
+                      ? 'bg-primary-green text-white shadow-[0_12px_30px_rgba(63,163,77,0.28)]'
+                      : 'bg-white/74 text-text-light shadow-[8px_10px_24px_rgba(101,116,145,0.12)] hover:bg-white'
+                  }`}
+                  title={navPinned ? 'Collapse navigation' : 'Keep navigation open'}
+                  aria-label={navPinned ? 'Collapse navigation' : 'Keep navigation open'}
+                  aria-pressed={navPinned}
+                >
+                  <PanelLeft size={20} />
+                </button>
+                <div className={`atlaix-rail-reveal min-w-0 ${navPinned ? 'opacity-100 translate-x-0' : ''}`}>
+                  <div className="truncate text-sm font-black text-text-light">Dashboard</div>
+                </div>
+              </div>
+
+              <nav className="atlaix-app-nav flex min-h-0 flex-1 flex-col px-2 pb-2" aria-label="Atlaix sections">
+                {navSections.map((section) => {
+                  const sectionItems = navItems.filter((item) => item.group === section.key);
+                  if (!sectionItems.length) return null;
+
+                  return (
+                    <div key={section.key} className="atlaix-nav-section grid gap-1">
+                      <div
+                        className={`atlaix-rail-reveal h-0 overflow-hidden px-3 text-[11px] font-black uppercase leading-tight tracking-[0.12em] text-text-dark group-hover/app-rail:h-auto group-hover/app-rail:pb-1 group-hover/app-rail:pt-2 group-focus-within/app-rail:h-auto group-focus-within/app-rail:pb-1 group-focus-within/app-rail:pt-2 ${navPinned ? 'h-auto pb-1 pt-2 opacity-100' : ''}`}
+                      >
+                        {section.label}
+                      </div>
+                      {sectionItems.map((item) => (
+                        <button
+                          key={item.path}
+                          type="button"
+                          onClick={() => item.action === 'theme' ? setDarkMode((current) => !current) : handleNavigation(item.path)}
+                          className={`atlaix-nav-item group/item flex h-12 w-full items-center gap-3 rounded-[18px] px-3 text-left transition-all ${
+                            isActive(item.path)
+                              ? 'is-active'
+                              : 'text-text-medium hover:bg-white/78 hover:text-text-light'
+                          }`}
+                          title={item.label}
+                          aria-current={!item.action && isActive(item.path) ? 'page' : undefined}
+                        >
+                          <span className="grid h-6 w-6 shrink-0 place-items-center">{item.action === 'theme' && darkMode ? <Moon size={19} /> : item.icon}</span>
+                          <span className={`atlaix-rail-reveal min-w-0 flex-1 ${navPinned ? 'opacity-100 translate-x-0' : ''}`}>
+                            <span className="block truncate text-sm font-black">{item.label}</span>
+                          </span>
+                          {item.badge ? (
+                            <span className={`atlaix-rail-reveal shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${navPinned ? 'opacity-100 translate-x-0' : ''} ${isActive(item.path) ? 'bg-white text-primary-green' : 'bg-primary-green/10 text-primary-green'}`}>
+                              {item.badge}
+                            </span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </nav>
+
+              <div className="shrink-0 px-2 pb-3">
+                <button
+                  type="button"
+                  onClick={handleAuthAction}
+                  className="atlaix-side-account-card group/account-card flex h-14 w-full items-center gap-3 overflow-hidden rounded-[18px] border border-border bg-card px-2.5 text-left shadow-sm transition-all hover:border-primary-green/45 hover:bg-primary-green/10"
+                  aria-label={isAuthenticated ? 'Log out' : 'Log in'}
+                  title={isAuthenticated ? 'Log out' : 'Log in'}
+                >
+                  <span className={`atlaix-profile-avatar grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-black ${
+                    isAuthenticated ? 'bg-primary-green text-main' : 'bg-card-hover text-text-light ring-1 ring-border'
+                  }`}>
+                    {isAuthenticated ? initial : <User size={19} />}
+                  </span>
+                  <span className={`atlaix-rail-reveal min-w-0 flex-1 ${navPinned ? 'opacity-100 translate-x-0' : ''}`}>
+                    <span className="block truncate text-sm font-black text-text-light">{authLoading ? 'Loading...' : displayName}</span>
+                    <span className="block truncate text-xs font-bold text-text-medium">{planLabel}</span>
+                  </span>
+                  <span className={`atlaix-rail-reveal grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-medium group-hover/account-card:text-primary-green ${navPinned ? 'opacity-100 translate-x-0' : ''}`}>
+                    {isAuthenticated ? <LogOut size={18} /> : <LogIn size={18} />}
+                  </span>
+                </button>
+              </div>
+
+            </aside>
           </div>
 
-          <div className="flex items-center gap-4 flex-shrink-0">
-            <div className="relative">
-              <button
-                className="w-10 h-10 rounded-full bg-[#1C1F22] border border-[#2A2E33] flex items-center justify-center text-text-light hover:bg-[#222529] hover:border-text-medium transition-all shadow-sm group"
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-              >
-                {isAuthenticated ? (
-                  <div className="w-full h-full rounded-full bg-primary-purple flex items-center justify-center text-white font-bold text-sm">{initial}</div>
-                ) : (
-                  <User size={20} className="text-primary-green group-hover:scale-110 transition-transform" />
-                )}
-              </button>
-
-              {userMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
-                  <div className="absolute right-0 top-14 w-64 bg-[#111315] border border-[#2A2E33] rounded-xl shadow-2xl p-1.5 z-50 animate-fade-in overflow-hidden">
-                    {/* User Info Header */}
-                    <div className="flex items-center gap-3 p-3 mb-1 border-b border-[#2A2E33]/50">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-base shrink-0 ${isAuthenticated ? 'bg-primary-purple' : 'bg-[#222529]'}`}>
-                        {isAuthenticated ? initial : <User size={20} className="text-[#8F96A3]" />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-bold text-sm text-[#EAECEF] truncate">
-                          {authLoading ? 'Loading...' : displayName}
-                        </div>
-                        <div className="text-[11px] text-[#8F96A3] truncate">
-                          {displayEmail}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Menu Options */}
-                    <div className="flex flex-col gap-0.5">
-                      <button
-                        onClick={() => { handleNavigation('/settings'); setUserMenuOpen(false); }}
-                        className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors group"
-                      >
-                        <User size={16} className="text-primary-green" />
-                        Profile
-                      </button>
-                      <button
-                        onClick={() => { handleNavigation('/settings'); setUserMenuOpen(false); }}
-                        className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#8F96A3] hover:text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors"
-                      >
-                        <Briefcase size={16} />
-                        Plan & Billing
-                      </button>
-                      <button
-                        onClick={() => { handleNavigation('/settings'); setUserMenuOpen(false); }}
-                        className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#8F96A3] hover:text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors"
-                      >
-                        <Settings size={16} />
-                        Settings
-                      </button>
-
-                      <div className="h-px bg-[#2A2E33]/50 my-1" />
-
-                      <button
-                        onClick={() => {
-                          if (isAuthenticated) onLogout();
-                          else onLogin();
-                          setUserMenuOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2.5 text-sm font-medium text-[#8F96A3] hover:text-[#EAECEF] hover:bg-[#222529] rounded-lg flex items-center gap-3 transition-colors"
-                      >
-                        <LogOut size={16} />
-                        {isAuthenticated ? 'Log out' : 'Log in'}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </header>
-
-        {/* View Content */}
-        <main className="flex-1 overflow-y-auto p-4 xl:p-6 relative">
-          {children}
-        </main>
+          <main className="relative flex-1 px-3 pb-8 pt-5 sm:px-5 lg:pl-[96px]">
+            {children}
+          </main>
+          <GlobalAiAssistant />
+        </div>
       </div>
     </div>
   );

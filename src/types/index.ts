@@ -85,6 +85,12 @@ export interface MarketCoin {
     address?: string;
     pairAddress?: string;
     activeWallets24h?: number;
+    sector?: string;
+    sectorLabels?: string[];
+    providerCategories?: string[];
+    providerTags?: string[];
+    providerLabels?: string[];
+    sectorSource?: string;
 }
 
 export type AlphaGauntletEventType =

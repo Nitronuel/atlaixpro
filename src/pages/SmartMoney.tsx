@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Search, Filter, ChevronDown,
-    Wallet, Activity, Layers
+    Wallet, Activity, Layers, ArrowUpRight
 } from 'lucide-react';
 import { DatabaseService } from '../services/DatabaseService';
 import { SmartMoneyService } from '../services/SmartMoneyService';
@@ -37,6 +37,17 @@ interface SmartWalletEvent {
 const STABLE_TOKEN_SYMBOLS = new Set(['USDC', 'USDT', 'DAI', 'USDE', 'FDUSD', 'USDS', 'TUSD']);
 
 const shortenWallet = (wallet: string) => `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
+
+const shortAddress = (wallet: string) => `${wallet.slice(0, 8)}...${wallet.slice(-6)}`;
+
+const getWalletScore = (wallet: SavedWallet) => wallet.qualification?.score || 0;
+
+const getWalletInitial = (wallet: SavedWallet) => (wallet.name || wallet.addr || 'W').slice(0, 1).toUpperCase();
+
+const getWalletDisplayName = (wallet: SavedWallet) => {
+    const name = (wallet.name || '').replace(/^Tracked\s+/i, '').trim();
+    return name || shortenWallet(wallet.addr);
+};
 
 const parseUsd = (value: string) => {
     const numeric = Number.parseFloat(value.replace(/[$,]/g, '').trim());
@@ -364,87 +375,108 @@ export const SmartMoney: React.FC = () => {
 
                 {/* --- Column 1: Trending Smart Wallets (Moved from Col 2) --- */}
                 <div className="xl:col-span-4 flex flex-col gap-6">
-                    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm h-full">
-                        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-                            <h3 className="font-bold text-text-light flex items-center gap-2">
-                                <Wallet size={18} className="text-primary-green" />
-                                Trending Smart Wallets
-                            </h3>
+                    <div className="green-corner-card smart-wallet-panel overflow-hidden h-full">
+                        <div className="atlaix-soft-divider px-5 py-4 border-b flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-primary-green/10 text-primary-green ring-1 ring-primary-green/20">
+                                        <Wallet size={18} />
+                                    </span>
+                                    <div>
+                                        <h3 className="text-base font-black text-text-light">Trending Smart Wallets</h3>
+                                        <p className="mt-0.5 text-xs font-semibold text-text-medium">Qualified wallet signals across score, PnL and tracked capital.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="shrink-0 rounded-full border border-primary-green/20 bg-primary-green/10 px-3 py-1 text-xs font-black text-primary-green">
+                                {loadingWallets ? 'Live' : `${smartWallets.length} tracked`}
+                            </div>
                         </div>
-                        <div className="p-2 space-y-1">
+                        <div className="p-3 space-y-3">
                             {loadingWallets && (
-                                <div className="flex items-center gap-3 p-4 text-sm text-text-medium">
+                                <div className="flex items-center gap-3 rounded-[22px] border border-border/70 bg-main/40 p-4 text-sm font-semibold text-text-medium">
                                     <div className="h-4 w-4 rounded-full border-2 border-primary-green/40 border-t-primary-green animate-spin" />
                                     Loading smart wallets
                                 </div>
                             )}
                             {!loadingWallets && smartWallets.length === 0 && (
-                                <div className="p-4 text-sm text-text-medium">
+                                <div className="rounded-[22px] border border-dashed border-border bg-main/40 p-4 text-sm text-text-medium">
                                     <div className="font-bold text-text-light">No qualified wallets yet</div>
                                     <div className="mt-1 text-xs">Track wallets from Wallet Tracker and strong performers will appear here automatically.</div>
                                 </div>
                             )}
-                            {smartWallets.map((wallet) => (
+                            {smartWallets.slice(0, 5).map((wallet) => (
+                                (() => {
+                                    const walletDisplayName = getWalletDisplayName(wallet);
+                                    return (
                                 <div
                                     key={wallet.addr}
                                     onClick={() => navigate(`/smart-money/${wallet.addr}`)}
-                                    className="p-3 hover:bg-card-hover/50 rounded-lg transition-colors cursor-pointer group relative border-b border-border/50 last:border-0"
+                                    className="group relative cursor-pointer overflow-hidden rounded-[24px] border border-border/80 bg-main/45 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-green/40 hover:bg-card-hover hover:shadow-[0_16px_34px_rgba(63,163,77,0.14)]"
                                 >
-                                    {/* Header: Avatar, Badge, Address, Button */}
-                                    <div className="flex items-center justify-between mb-0.5">
-                                        <div className="flex items-center gap-2.5">
-                                            {/* Avatar Gradient */}
-                                            <div className="w-7 h-7 rounded-full bg-card-hover border border-border flex items-center justify-center text-xs font-bold text-text-light">
-                                                {wallet.name.slice(0, 1).toUpperCase()}
+                                    <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-green/45 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex min-w-0 items-start gap-3">
+                                            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[18px] bg-card-hover text-sm font-black text-text-light ring-1 ring-border transition-all group-hover:ring-primary-green/35">
+                                                {getWalletInitial(wallet)}
                                             </div>
 
-                                            <div className="flex flex-col gap-0.5">
-                                                <span className="text-sm font-bold text-text-light tracking-tight group-hover:text-primary-green transition-colors">{wallet.name}</span>
-                                                <span className="text-xs text-text-medium font-mono">{wallet.addr}</span>
+                                            <div className="min-w-0">
+                                                <div className="flex min-w-0 items-center gap-2">
+                                                    <span className="truncate text-sm font-black text-text-light transition-colors group-hover:text-primary-green">{walletDisplayName}</span>
+                                                </div>
+                                                <div className="mt-1 flex min-w-0 items-center gap-2">
+                                                    <span className="truncate font-mono text-xs font-semibold text-text-medium">{shortAddress(wallet.addr)}</span>
+                                                    <span className="rounded-full bg-card px-2 py-0.5 text-[10px] font-black text-text-dark ring-1 ring-border/70">{getWalletChain(wallet.addr)}</span>
+                                                </div>
                                             </div>
                                         </div>
 
                                         <button
+                                            type="button"
                                             onClick={(event) => {
                                                 event.stopPropagation();
                                                 navigate(`/smart-money/${wallet.addr}`);
                                             }}
-                                            className="px-3 py-1 rounded-lg bg-main hover:bg-card-hover border border-border text-text-light text-xs font-bold transition-colors opacity-0 group-hover:opacity-100"
+                                            className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border bg-card text-text-medium opacity-80 transition-all hover:border-primary-green/40 hover:text-primary-green group-hover:opacity-100"
+                                            aria-label={`View ${walletDisplayName}`}
                                         >
-                                            View
+                                            <ArrowUpRight size={16} />
                                         </button>
                                     </div>
 
-                                    {/* Stats Grid */}
-                                    <div className="flex justify-between items-start pt-0 pl-10">
-                                        <div className="flex flex-col text-left">
-                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">Win rate</span>
-                                            <span className="text-xs font-bold text-text-light">{wallet.lastWinRate || 'No data'}</span>
+                                    <div className="atlaix-soft-divider mt-4 grid grid-cols-4 gap-x-4 gap-y-2 border-t pt-3">
+                                        <div className="min-w-0">
+                                            <span className="block text-[10px] font-black uppercase text-text-dark">Win</span>
+                                            <span className="mt-0.5 block text-sm font-black text-text-light">{wallet.lastWinRate || 'No data'}</span>
                                         </div>
-                                        <div className="flex flex-col text-center">
-                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">Score</span>
-                                            <span className="text-xs font-bold text-green-400">{wallet.qualification?.score || 0}/100</span>
+                                        <div className="min-w-0">
+                                            <span className="block text-[10px] font-black uppercase text-text-dark">Score</span>
+                                            <span className="mt-0.5 block text-sm font-black text-primary-green">{getWalletScore(wallet)}/100</span>
                                         </div>
-                                        <div className="flex flex-col text-center">
-                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">PnL</span>
-                                            <span className="text-xs font-bold text-green-400">{wallet.lastPnl || 'No data'}</span>
+                                        <div className="min-w-0">
+                                            <span className="block text-[10px] font-black uppercase text-text-dark">PnL</span>
+                                            <span className="mt-0.5 block truncate text-sm font-black text-primary-green">{wallet.lastPnl || 'No data'}</span>
                                         </div>
-                                        <div className="flex flex-col text-right">
-                                            <span className="text-xs text-text-medium font-medium mb-0.5 whitespace-nowrap">Balance</span>
-                                            <span className="text-xs font-bold text-text-light">{wallet.lastBalance || 'No data'}</span>
+                                        <div className="min-w-0 text-right">
+                                            <span className="block text-[10px] font-black uppercase text-text-dark">Capital</span>
+                                            <span className="mt-0.5 block truncate text-sm font-black text-text-light">{wallet.lastBalance || 'No data'}</span>
                                         </div>
                                     </div>
-                                    {wallet.qualification?.reasons?.[0] && (
-                                        <div className="pl-10 pt-2 text-xs text-text-medium">
-                                            {wallet.qualification.reasons[0]}
-                                        </div>
-                                    )}
+
                                 </div>
+                                    );
+                                })()
                             ))}
                         </div>
-                        <div className="p-3 border-t border-border bg-main/30">
-                            <button onClick={() => navigate('/wallet')} className="w-full py-2 text-xs font-bold text-text-medium hover:text-text-light transition-colors border border-dashed border-border hover:border-text-medium rounded-lg">
-                                View Wallet Tracker
+                        <div className="atlaix-soft-divider p-3 border-t bg-card/40">
+                            <button
+                                type="button"
+                                onClick={() => navigate('/wallet')}
+                                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[18px] border border-primary-green/25 bg-primary-green/10 px-4 py-3 text-sm font-black text-primary-green transition-all hover:border-primary-green/45 hover:bg-primary-green hover:text-white"
+                            >
+                                See more
+                                <ArrowUpRight size={16} />
                             </button>
                         </div>
                     </div>

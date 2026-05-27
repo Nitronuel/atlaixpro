@@ -14,7 +14,7 @@ export type AiAssistantNotification = {
 export type AiAssistantAction = {
     label: string;
     href: string;
-    kind?: 'navigate' | 'draft' | 'confirmable';
+    kind?: 'navigate' | 'draft' | 'confirmable' | 'handoff';
     confirmationRequired?: boolean;
     payload?: unknown;
 };
@@ -39,6 +39,37 @@ export type AiAssistantChatResponse = {
 export type AiAssistantConversationMessage = {
     role: 'user' | 'assistant';
     text: string;
+};
+
+export type AiAssistantPageModule =
+    | 'dashboard'
+    | 'detection'
+    | 'token'
+    | 'wallet'
+    | 'smart-money'
+    | 'smart-alerts'
+    | 'safe-scan'
+    | 'heatmap'
+    | 'narrative'
+    | 'assistant'
+    | 'settings'
+    | 'unknown';
+
+export type AiAssistantPageContext = {
+    route: string;
+    module: AiAssistantPageModule;
+    title: string;
+    systemContext: string;
+    subjectKind?: 'token' | 'wallet' | 'detection' | 'alert' | 'scan' | 'dashboard' | 'smart-money';
+    subjectAddress?: string;
+    subjectChain?: string;
+    pairAddress?: string;
+    preferredTools?: string[];
+    visibleSnapshot?: {
+        generatedAt?: number;
+        summary?: string;
+        tokens?: Array<Record<string, unknown>>;
+    };
 };
 
 const apiUrl = (path: string) => `${APP_CONFIG.apiBaseUrl || ''}${path}`;
@@ -81,11 +112,11 @@ export const AiAssistantService = {
         }>(apiUrl('/api/ai-assistant/notifications'));
     },
 
-    sendMessage: async (message: string, history: AiAssistantConversationMessage[] = []) => {
+    sendMessage: async (message: string, history: AiAssistantConversationMessage[] = [], pageContext?: AiAssistantPageContext | null) => {
         return fetchJson<AiAssistantChatResponse>(apiUrl('/api/ai-assistant/chat'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, history: history.slice(-12) })
+            body: JSON.stringify({ message, history: history.slice(-12), pageContext })
         }, CHAT_TIMEOUT_MS);
     }
 };

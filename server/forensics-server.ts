@@ -143,6 +143,37 @@ type AssistantConversationMessage = {
     text?: string;
 };
 
+type AssistantPageModule =
+    | 'dashboard'
+    | 'detection'
+    | 'token'
+    | 'wallet'
+    | 'smart-money'
+    | 'smart-alerts'
+    | 'safe-scan'
+    | 'heatmap'
+    | 'narrative'
+    | 'assistant'
+    | 'settings'
+    | 'unknown';
+
+type AssistantPageContext = {
+    route?: string;
+    module?: AssistantPageModule;
+    title?: string;
+    systemContext?: string;
+    subjectKind?: 'token' | 'wallet' | 'detection' | 'alert' | 'scan' | 'dashboard' | 'smart-money';
+    subjectAddress?: string;
+    subjectChain?: string;
+    pairAddress?: string;
+    preferredTools?: string[];
+    visibleSnapshot?: {
+        generatedAt?: number;
+        summary?: string;
+        tokens?: Array<Record<string, unknown>>;
+    };
+};
+
 type AssistantToolName =
     | 'conversation'
     | 'unsupported_capability'
@@ -182,6 +213,17 @@ type AssistantScoredTokenCandidate = {
     token: any;
     score: number;
 };
+
+type AssistantDataFreshness = {
+    source: string;
+    fetchedAt: string;
+    maxAgeMs: number;
+    stale: boolean;
+};
+
+const ASSISTANT_LIVE_MARKET_MAX_AGE_MS = 60_000;
+const ASSISTANT_DETECTION_CONTEXT_MAX_AGE_MS = 5 * 60_000;
+const ASSISTANT_PAGE_CONTEXT_MAX_AGE_MS = 2 * 60_000;
 
 const getAssistantProvider = (): AssistantProvider => {
     const model = readEnv('OPENROUTER_MODEL') || null;
@@ -262,6 +304,97 @@ const sanitizeAssistantTokenLookupQuery = (value: string) => {
 
     return cleanAssistantTokenQuery(raw);
 };
+
+const assistantFreshness = (
+    source: string,
+    fetchedAt: string | number | Date | undefined = Date.now(),
+    maxAgeMs = ASSISTANT_LIVE_MARKET_MAX_AGE_MS
+): AssistantDataFreshness => {
+    const timestamp = fetchedAt instanceof Date ? fetchedAt.getTime()
+        : typeof fetchedAt === 'number' ? fetchedAt
+            : fetchedAt ? new Date(fetchedAt).getTime()
+                : Date.now();
+    const safeTimestamp = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
+
+    return {
+        source,
+        fetchedAt: new Date(safeTimestamp).toISOString(),
+        maxAgeMs,
+        stale: Date.now() - safeTimestamp > maxAgeMs
+    };
+};
+
+const freshnessLine = (freshness?: AssistantDataFreshness) => {
+    if (!freshness || !freshness.stale) return '';
+    return 'I could not confirm this market snapshot is fresh enough for a live answer, so I would treat these figures cautiously.';
+};
+
+const cleanAssistantContextText = (value: unknown, maxLength = 500) =>
+    typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, maxLength) : '';
+
+const normalizeAssistantPageContext = (value: unknown): AssistantPageContext | null => {
+    if (!value || typeof value !== 'object') return null;
+    const raw = value as Record<string, any>;
+    const allowedModules = new Set<AssistantPageModule>([
+        'dashboard',
+        'detection',
+        'token',
+        'wallet',
+        'smart-money',
+        'smart-alerts',
+        'safe-scan',
+        'heatmap',
+        'narrative',
+        'assistant',
+        'settings',
+        'unknown'
+    ]);
+    const module = allowedModules.has(raw.module) ? raw.module as AssistantPageModule : 'unknown';
+    const visibleSnapshot = raw.visibleSnapshot && typeof raw.visibleSnapshot === 'object'
+        ? {
+            generatedAt: Number.isFinite(Number(raw.visibleSnapshot.generatedAt)) ? Number(raw.visibleSnapshot.generatedAt) : undefined,
+            summary: cleanAssistantContextText(raw.visibleSnapshot.summary, 900),
+            tokens: Array.isArray(raw.visibleSnapshot.tokens) ? raw.visibleSnapshot.tokens.slice(0, 10) : undefined
+        }
+        : undefined;
+
+    return {
+        route: cleanAssistantContextText(raw.route, 200),
+        module,
+        title: cleanAssistantContextText(raw.title, 120),
+        systemContext: cleanAssistantContextText(raw.systemContext, 700),
+        subjectKind: ['token', 'wallet', 'detection', 'alert', 'scan', 'dashboard', 'smart-money'].includes(raw.subjectKind) ? raw.subjectKind : undefined,
+        subjectAddress: cleanAssistantContextText(raw.subjectAddress, 140),
+        subjectChain: cleanAssistantContextText(raw.subjectChain, 40),
+        pairAddress: cleanAssistantContextText(raw.pairAddress, 140),
+        preferredTools: Array.isArray(raw.preferredTools) ? raw.preferredTools.map((item: unknown) => cleanAssistantContextText(item, 60)).filter(Boolean).slice(0, 8) : undefined,
+        visibleSnapshot
+    };
+};
+
+const assistantPageContextSubjectQuery = (pageContext?: AssistantPageContext | null) =>
+    sanitizeAssistantTokenLookupQuery(pageContext?.subjectAddress || pageContext?.pairAddress || '');
+
+const formatAssistantPageContextForPrompt = (pageContext?: AssistantPageContext | null) => {
+    if (!pageContext) return 'Page context: unavailable.';
+    const snapshotAge = pageContext.visibleSnapshot?.generatedAt
+        ? Date.now() - pageContext.visibleSnapshot.generatedAt
+        : null;
+    const snapshotFresh = typeof snapshotAge === 'number' && snapshotAge >= 0 && snapshotAge <= ASSISTANT_PAGE_CONTEXT_MAX_AGE_MS;
+
+    return [
+        `Page: ${pageContext.title || pageContext.module || 'unknown'} (${pageContext.route || 'unknown route'}).`,
+        `Module: ${pageContext.module || 'unknown'}. Subject: ${pageContext.subjectKind || 'none'}${pageContext.subjectAddress ? ` ${pageContext.subjectAddress}` : ''}${pageContext.subjectChain ? ` on ${pageContext.subjectChain}` : ''}.`,
+        pageContext.preferredTools?.length ? `Preferred tools: ${pageContext.preferredTools.join(', ')}.` : '',
+        pageContext.systemContext ? `Module guidance: ${pageContext.systemContext}` : '',
+        pageContext.visibleSnapshot?.summary && snapshotFresh ? `Visible fresh page snapshot: ${pageContext.visibleSnapshot.summary}` : '',
+        pageContext.visibleSnapshot?.tokens?.length && snapshotFresh ? `Visible page tokens: ${JSON.stringify(pageContext.visibleSnapshot.tokens).slice(0, 2500)}` : ''
+    ].filter(Boolean).join('\n');
+};
+
+const isAssistantPriceOnlyQuestion = (message: string) =>
+    /\b(price|market\s*cap|mcap|worth|valuation|fdv)\b/i.test(message)
+    && !/\b(detection|detected|score|qualified|admitted|risk|risky|safe|scan|why|explain|holder|activity|whale|alert)\b/i.test(message);
 
 const extractAssistantTokenQuery = (message: string, history: AssistantConversationMessage[] = []) => {
     const address = extractAssistantAddress(message);
@@ -382,6 +515,16 @@ const formatAssistantPrice = (value: string | number | undefined) => {
     }).format(numeric);
 };
 
+const hasAssistantMetricValue = (value: unknown) => {
+    if (typeof value === 'number') return Number.isFinite(value);
+    const text = String(value ?? '').trim();
+    if (!text || /^unavailable$/i.test(text)) return false;
+    return Number.isFinite(parseAssistantMarketNumber(text));
+};
+
+const safeAssistantMarketText = (value: unknown, fallback = 'unavailable') =>
+    hasAssistantMetricValue(value) ? String(value).trim() : fallback;
+
 const formatAssistantCurrencyThreshold = (value: number) => {
     if (!Number.isFinite(value) || value <= 0) return '';
     if (value < 0.000001) return `$${value.toExponential(2)}`;
@@ -462,7 +605,8 @@ const pairToAssistantToken = (pair: any) => {
         h24: `${Number(pair.priceChange?.h24 || 0).toFixed(2)}%`,
         volume24h: compactUsd(Number(pair.volume?.h24 || 0)),
         liquidity: compactUsd(Number(pair.liquidity?.usd || 0)),
-        cap: compactUsd(Number(pair.marketCap || pair.fdv || 0))
+        cap: compactUsd(Number(pair.marketCap || pair.fdv || 0)),
+        __assistantFreshness: assistantFreshness('DexScreener live token lookup')
     };
 };
 
@@ -505,7 +649,8 @@ const assistantTokenFromDetectionEvent = (event: any) => {
         h24: token.h24 || `${Number(event?.metrics?.priceChange24h || 0).toFixed(2)}%`,
         volume24h: token.volume24h || compactUsd(Number(event?.metrics?.volume24h || 0)),
         liquidity: token.liquidity || compactUsd(Number(event?.metrics?.liquidity || 0)),
-        cap: token.cap || compactUsd(Number(event?.metrics?.marketCap || 0))
+        cap: token.cap || compactUsd(Number(event?.metrics?.marketCap || 0)),
+        __assistantFreshness: assistantFreshness('Atlaix Detection snapshot', event?.detectedAt || event?.lastRefreshedAt || Date.now(), ASSISTANT_DETECTION_CONTEXT_MAX_AGE_MS)
     };
 };
 
@@ -514,7 +659,12 @@ const getAssistantTokenCandidates = async (query: string, chain?: string): Promi
     if (!trimmed) return [];
 
     const [searchResults, detectionFeed] = await Promise.all([
-        DatabaseService.searchGlobalPairs(trimmed).catch(() => []),
+        DatabaseService.searchGlobalPairs(trimmed)
+            .then((tokens: any[]) => tokens.map((token) => ({
+                ...token,
+                __assistantFreshness: assistantFreshness('DexScreener live search')
+            })))
+            .catch(() => []),
         DetectionSnapshotStore.getFeed().catch(async () => DatabaseService.fetchDetectionEvents().catch(() => []))
     ]);
     const normalizedChain = chain ? chain.toLowerCase() : '';
@@ -691,11 +841,11 @@ const assistantDetectionEventMatchesFilters = (event: any, filters: ReturnType<t
 
 const formatAssistantFreshnessLine = (events: any[]) => {
     const latest = Math.max(...events.map((event: any) => Number(event?.detectedAt || 0)).filter(Boolean), 0);
-    if (!latest) return 'Freshness: no detection timestamp is available for these results.';
+    if (!latest) return '';
     const minutes = Math.max(0, Math.round((Date.now() - latest) / 60_000));
-    if (minutes < 2) return 'Freshness: latest matching event is live from the last couple of minutes.';
-    if (minutes < 60) return `Freshness: latest matching event is about ${minutes} minutes old.`;
-    return `Freshness: latest matching event is about ${(minutes / 60).toFixed(1)} hours old.`;
+    if (minutes < 2) return 'The latest matching detection came in within the last couple of minutes.';
+    if (minutes < 60) return `The latest matching detection came in about ${minutes} minutes ago.`;
+    return `The latest matching detection came in about ${(minutes / 60).toFixed(1)} hours ago.`;
 };
 
 const extractAssistantCompareTargets = (message: string, history: AssistantConversationMessage[] = []) => {
@@ -988,7 +1138,12 @@ const withAssistantTimeout = async <T>(promise: Promise<T>, timeoutMs: number, f
 };
 
 const buildAssistantTimeoutResponse = (message: string) => ({
-    answer: buildLocalConversationResponse(message),
+    answer: isAssistantMarketDataQuestion(message)
+        ? [
+            'I could not reach fresh market data quickly enough, so I am not going to answer from stale figures.',
+            'Try again in a moment, or use the exact contract address so I can make a narrower live lookup.'
+        ].join('\n')
+        : buildLocalConversationResponse(message),
     tool: 'conversation'
 });
 
@@ -1174,7 +1329,7 @@ const summarizeAssistantLiquidity = (token: any, detectionEvents: any[]) => {
     else if (liquidityUsd > 0) quality = 'thin';
 
     const notes = [
-        `Liquidity is ${safeAssistantText(token?.liquidity, '$0')}, which looks ${quality} for this market context.`,
+        `Liquidity is ${safeAssistantMarketText(token?.liquidity)}, which looks ${quality} for this market context.`,
         marketCapUsd > 0 && liquidityUsd > 0 ? `Liquidity-to-market-cap is about ${(lpRatio * 100).toFixed(2)}%.` : '',
         volumeUsd > 0 && liquidityUsd > 0 ? `24h volume is ${(volumeUsd / liquidityUsd).toFixed(2)}x current liquidity.` : '',
         latestLiquidityDelta ? `Recent liquidity delta: ${pctLabel(latestLiquidityDelta.liquidityChangePct)} over ${latestLiquidityDelta.window}.` : ''
@@ -1185,6 +1340,9 @@ const summarizeAssistantLiquidity = (token: any, detectionEvents: any[]) => {
 
 const isAssistantStanceQuestion = (message: string) =>
     /\b(bullish|bearish|buy|sell|long|short|ape|entry|good idea|should i|worth it|conviction|thoughts?|take|opinion|risk|risky|safe|danger|dangerous)\b/i.test(message);
+
+const isAssistantMarketDataQuestion = (message: string) =>
+    /\b(price|market\s*cap|mcap|liquidity|volume|worth|valuation|fdv|moving|move|today|performing|performance|bullish|bearish|gainer|loser|inflow|outflow)\b/i.test(message);
 
 const buildAssistantTokenStance = (
     message: string,
@@ -1206,7 +1364,7 @@ const buildAssistantTokenStance = (
         if (hasHighRiskEvent || scanIsElevated || priceChange < -10) {
             return [
                 `Short take: yes, ${token?.ticker || token?.name || 'this token'} currently looks risk-elevated from the available Atlaix data.`,
-                `Why: ${recentEvents[0]?.eventType ? `the leading Detection signal is ${recentEvents[0].eventType} (${recentEvents[0].severity || 'Medium'})` : 'the token context is not clean'}${priceChange < -10 ? `, and it is down ${safeAssistantText(token?.h24)} over 24h` : ''}.`,
+                `Why: ${recentEvents[0]?.eventType ? `the leading Detection signal is ${recentEvents[0].eventType} (${recentEvents[0].severity || 'Medium'})` : 'the token context is not clean'}${priceChange < -10 ? `, and it is down ${safeAssistantMarketText(token?.h24)} over 24h` : ''}.`,
                 'Plain English: this is a caution setup. I would not treat it as clean until the chart, liquidity, and holder/supply context improve.'
             ];
         }
@@ -1221,7 +1379,7 @@ const buildAssistantTokenStance = (
     if (hasHighRiskEvent || scanIsElevated) {
         return [
             `Short take: I would not call ${token?.ticker || token?.name || 'this token'} cleanly bullish from the available Atlaix data.`,
-            `Why: ${priceChange > 0 ? `it is up ${safeAssistantText(token?.h24)} over 24h, but ` : ''}${recentEvents[0]?.eventType ? `the strongest current signal is ${recentEvents[0].eventType} (${recentEvents[0].severity || 'Medium'})` : 'the detection context is not clean'}, and liquidity/volume conditions need caution.`,
+            `Why: ${priceChange > 0 ? `it is up ${safeAssistantMarketText(token?.h24)} over 24h, but ` : ''}${recentEvents[0]?.eventType ? `the strongest current signal is ${recentEvents[0].eventType} (${recentEvents[0].severity || 'Medium'})` : 'the detection context is not clean'}, and liquidity/volume conditions need caution.`,
             'Plain English: it may still move, but this is not a comfortable green-light setup. I would want chart confirmation, holder risk, and liquidity stability before trusting the bullish case.'
         ];
     }
@@ -1229,7 +1387,7 @@ const buildAssistantTokenStance = (
     if (priceChange > 0 && hasConstructiveEvent && liquidity.liquidityUsd >= 250_000) {
         return [
             `Short take: ${token?.ticker || token?.name || 'this token'} has a constructive read, but I would still treat it as watchlist-bullish rather than blindly bullish.`,
-            `Why: price is up ${safeAssistantText(token?.h24)}, liquidity is ${safeAssistantText(token?.liquidity, '$0')}, and Detection has ${recentEvents[0]?.eventType || 'constructive'} context.`,
+            `Why: price is up ${safeAssistantMarketText(token?.h24)}, liquidity is ${safeAssistantMarketText(token?.liquidity)}, and Detection has ${recentEvents[0]?.eventType || 'constructive'} context.`,
             'Plain English: there is something to watch, but confirmation still matters.'
         ];
     }
@@ -1244,10 +1402,10 @@ const buildAssistantTokenStance = (
 const formatAssistantTokenCandidate = (token: any, index: number) => {
     const chain = normalizeAssistantChainLabel(token?.chain);
     const address = token?.address ? ` Address: ${token.address}.` : '';
-    return `${index + 1}. ${token?.name || 'Unknown Token'} (${token?.ticker || 'TOKEN'}) on ${chain}. Liquidity ${safeAssistantText(token?.liquidity, '$0')}, volume ${safeAssistantText(token?.volume24h, '$0')}, market cap ${safeAssistantText(token?.cap, '$0')}.${address}`;
+    return `${index + 1}. ${token?.name || 'Unknown Token'} (${token?.ticker || 'TOKEN'}) on ${chain}. Liquidity ${safeAssistantMarketText(token?.liquidity)}, volume ${safeAssistantMarketText(token?.volume24h)}, market cap ${safeAssistantMarketText(token?.cap)}.${address}`;
 };
 
-const buildTokenDeepBrief = async (query: string, chain: string, message: string, history: AssistantConversationMessage[] = []) => {
+const buildTokenDeepBrief = async (query: string, chain: string, message: string, history: AssistantConversationMessage[] = [], pageContext?: AssistantPageContext | null) => {
     const resolution = await resolveAssistantEntity(query, chain, 'token');
     if (resolution.kind !== 'token') {
         const candidates = Array.isArray(resolution.candidates) ? resolution.candidates.slice(0, 5) : [];
@@ -1300,6 +1458,21 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
     const safeError = (safeScan as any)?.error;
     const highSeverityEvent = recentEvents.find((event: any) => event?.severity === 'High');
     const riskLevel = (safeScan as any)?.riskLevel || token?.riskLevel || 'unknown';
+    const dataFreshness = (token as any)?.__assistantFreshness || assistantFreshness('Atlaix accessible market data');
+    if (dataFreshness.stale && isAssistantMarketDataQuestion(message)) {
+        return {
+            answer: [
+                `I found ${token?.name || token?.ticker || query}, but the market snapshot I can reach is stale, so I will not quote price, volume, liquidity, or market-cap figures as current.`,
+                freshnessLine(dataFreshness),
+                'Try again in a moment or send the exact contract address so I can make a narrower live lookup.'
+            ].join('\n'),
+            tool: 'get_token_deep_brief',
+            data: { resolution, dataFreshness },
+            actions: [
+                { label: 'Open Detection Engine', href: '/detection', kind: 'navigate' }
+            ] as AssistantChatAction[]
+        };
+    }
     const confidenceBits = [
         token ? 'market data' : '',
         recentEvents.length ? 'detection context' : '',
@@ -1326,7 +1499,8 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
         `Atlaix Brief: ${tokenLabel}`,
         '',
         'Here is what I am seeing',
-        `${tokenLabel} is on ${normalizeAssistantChainLabel(tokenChain)} at ${formatAssistantPrice(token?.price)}. 24h move: ${safeAssistantText(token?.h24)}. Volume: ${safeAssistantText(token?.volume24h, '$0')}. Liquidity: ${safeAssistantText(token?.liquidity, '$0')}. Market cap: ${safeAssistantText(token?.cap, '$0')}.`,
+        `${tokenLabel} is on ${normalizeAssistantChainLabel(tokenChain)} at ${formatAssistantPrice(token?.price)}. 24h move: ${safeAssistantMarketText(token?.h24)}. Volume: ${safeAssistantMarketText(token?.volume24h)}. Liquidity: ${safeAssistantMarketText(token?.liquidity)}. Market cap: ${safeAssistantMarketText(token?.cap)}.`,
+        freshnessLine(dataFreshness),
         '',
         'Liquidity and market quality',
         ...liquidity.notes,
@@ -1361,6 +1535,7 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
         token,
         detectionEvents: recentEvents,
         activities: recentActivities,
+        dataFreshness,
         safeScan: safeScan && !safeError ? {
                 riskLevel: (safeScan as any).riskLevel,
                 confidence: (safeScan as any).confidence,
@@ -1374,7 +1549,8 @@ const buildTokenDeepBrief = async (query: string, chain: string, message: string
         history,
         tool: 'get_token_deep_brief',
         data: responseData,
-        draftAnswer: answer
+        draftAnswer: answer,
+        pageContext
     }).catch((error) => {
         console.warn('[AiAssistant] grounded token brief unavailable; using fallback draft', error instanceof Error ? error.message : error);
         return null;
@@ -1547,9 +1723,11 @@ const summarizeSafeScanReport = (report: any) => {
     ].filter(Boolean).join('\n');
 };
 
-const buildAssistantSystemPrompt = () => [
+const buildAssistantSystemPrompt = (pageContext?: AssistantPageContext | null) => [
     'You are the Atlaix in-app AI assistant router. Be calm, friendly, and helpful while choosing the right tool.',
     'Choose exactly one approved tool for the user request. Do this quietly and do not expose routing logic to the user.',
+    'Use the current page context as a routing prior. If the user is on Detection, Safe Scan, Smart Alerts, Smart Money, Wallet, or a token page, prefer that module data unless the user clearly asks for another module.',
+    'When a page context includes a subject address or pair address and the user says this token, this wallet, it, here, or asks an underspecified question, use that subject.',
     'You cannot modify source code, change app architecture, access secrets, run shell commands, or invent app data.',
     'Write actions must be confirmation-first. For alerts, choose prepare_alert_setup, not a direct save.',
     'Return only valid JSON with keys: tool, address, chain, query, responseStyle, eventType, severity, scoreMin, timeWindow, alertMode.',
@@ -1580,20 +1758,23 @@ const buildAssistantSystemPrompt = () => [
     '{"tool":"get_token_overview","query":"kishu","responseStyle":"brief"} for "what is the market cap of kishu?"',
     '{"tool":"get_token_overview","query":"KISHU","responseStyle":"brief"} for "how much is KISHU worth?"',
     '{"tool":"run_safe_scan","address":"0x...","responseStyle":"detailed"} for "scan this token for risk 0x..."',
-    '{"tool":"get_detection_updates","responseStyle":"brief"} for "what should I pay attention to today?"'
+    '{"tool":"get_detection_updates","responseStyle":"brief"} for "what should I pay attention to today?"',
+    formatAssistantPageContextForPrompt(pageContext)
 ].join('\n');
 
-const buildAssistantChatPrompt = () => [
+const buildAssistantChatPrompt = (pageContext?: AssistantPageContext | null) => [
     'You are Atlaix AI, a friendly, sharp, conversational assistant inside the Atlaix crypto intelligence platform.',
     'Sound like a helpful teammate, not a compliance notice or command menu. Be relaxed, plain-spoken, and lightly conversational.',
     'Answer normal questions directly first. If the user is casual, be warm and easygoing. If they are operational, stay concise but still human.',
+    'Use the current Atlaix page as conversational context. Lead with that module when relevant, then bring in other Atlaix information only when it helps answer the user.',
     'When data is missing, say it gently and offer the most useful next step instead of sounding like a hard error.',
     'Use plain text with no emoji and no decorative formatting.',
     'When it is natural, connect the conversation back to useful Atlaix capabilities: Detection Engine updates, Safe Scan token risk summaries, token activity/whale movement review, and Smart Alert preparation.',
     'Do not force Atlaix features into every answer. Use a light touch: one helpful bridge is enough when relevant.',
     'You cannot modify source code, change system architecture, access secrets, run shell commands, or silently change saved app state.',
     'For anything that would change app state, explain the next confirmation step instead of claiming you completed it.',
-    `Current date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Lagos' })}.`
+    `Current date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Lagos' })}.`,
+    formatAssistantPageContextForPrompt(pageContext)
 ].join('\n');
 
 const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => {
@@ -1641,7 +1822,8 @@ const parseAssistantToolRequest = (raw: string): AssistantToolRequest | null => 
 
 const chooseAssistantToolWithModel = async (
     message: string,
-    history: AssistantConversationMessage[]
+    history: AssistantConversationMessage[],
+    pageContext?: AssistantPageContext | null
 ): Promise<AssistantToolRequest | null> => {
     const apiKey = readEnv('OPENROUTER_API_KEY');
     if (!apiKey) return null;
@@ -1665,8 +1847,8 @@ const chooseAssistantToolWithModel = async (
             temperature: 0,
             response_format: { type: 'json_object' },
             messages: [
-                { role: 'system', content: buildAssistantSystemPrompt() },
-                { role: 'user', content: `Recent conversation:\n${historyText || 'none'}\n\nCurrent request:\n${message}` }
+                { role: 'system', content: buildAssistantSystemPrompt(pageContext) },
+                { role: 'user', content: `Recent conversation:\n${historyText || 'none'}\n\n${formatAssistantPageContextForPrompt(pageContext)}\n\nCurrent request:\n${message}` }
             ]
         })
     }, 15_000);
@@ -1680,7 +1862,7 @@ const chooseAssistantToolWithModel = async (
     return typeof content === 'string' ? parseAssistantToolRequest(content) : null;
 };
 
-const chooseAssistantToolLocally = (message: string, history: AssistantConversationMessage[] = []): AssistantToolRequest => {
+const chooseAssistantToolLocally = (message: string, history: AssistantConversationMessage[] = [], pageContext?: AssistantPageContext | null): AssistantToolRequest => {
     if (isUnsupportedAssistantCapabilityRequest(message)) {
         return { tool: 'unsupported_capability' };
     }
@@ -1696,8 +1878,96 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
         || /\b(explain|mean|means|plain english|break it down|what about)\b/i.test(message) && /\b(it|its|this|that)\b/i.test(message)
         || (isAssistantStanceQuestion(message) && /\b(it|this|that)\b/i.test(message));
     const contextTokenQuery = refersToPriorToken ? extractRecentAssistantTokenFromContext(history) : '';
-    const effectiveTokenQuery = address || tokenQuery || contextTokenQuery;
+    const pageContextQuery = assistantPageContextSubjectQuery(pageContext);
+    const pageContextAddress = pageContextQuery && (isLikelyEvmAddress(pageContextQuery) || isLikelySolanaAddress(pageContextQuery)) ? pageContextQuery : '';
+    const contextSubjectRequested = Boolean(pageContextQuery) && (
+        /\b(this|that|it|its|here|current|current page|shown|open token|selected token|selected wallet)\b/i.test(message)
+        || !hasExplicitTokenQuery
+    );
+    const effectiveTokenQuery = address || tokenQuery || contextTokenQuery || (contextSubjectRequested ? pageContextQuery : '');
     const hasDetectionEventQuestion = /\b(detected|detection|detections?|events?|signals?|admitted|qualified|score|severity)\b/.test(lower);
+    const pageModule = pageContext?.module || 'unknown';
+    const pageChain = pageContext?.subjectChain;
+
+    if (pageModule === 'detection' && !isAssistantPriceOnlyQuestion(message)) {
+        const filters = extractAssistantDetectionFilters(message);
+        if (/\b(alert|notify|notification|watch|monitor)\b/.test(lower)) {
+            return {
+                tool: 'prepare_detection_alert',
+                address: address || pageContextAddress,
+                query: effectiveTokenQuery,
+                chain: address ? inferAssistantChain(message, address) : (pageChain || filters.chain),
+                eventType: filters.eventType,
+                severity: filters.severity,
+                scoreMin: filters.scoreMin
+            };
+        }
+        if (/\b(why|how|explain|qualified|admitted|score|scored|accepted|allowed into)\b/.test(lower) && effectiveTokenQuery) {
+            return {
+                tool: 'explain_detection_admission',
+                address: address || pageContextAddress,
+                query: effectiveTokenQuery,
+                chain: address ? inferAssistantChain(message, address) : pageChain,
+                responseStyle: 'detailed'
+            };
+        }
+        if (effectiveTokenQuery && !/\b(most recent|latest|updates?|whole platform|all tokens|all events|overall)\b/.test(lower)) {
+            return {
+                tool: 'get_detection_filtered',
+                address: address || pageContextAddress,
+                query: effectiveTokenQuery,
+                responseStyle: 'detailed',
+                eventType: filters.eventType,
+                severity: filters.severity,
+                scoreMin: filters.scoreMin,
+                chain: address ? inferAssistantChain(message, address) : (pageChain || filters.chain),
+                timeWindow: filters.hours ? `${filters.hours}h` : undefined
+            };
+        }
+        return {
+            tool: 'get_detection_updates',
+            responseStyle: /\b(explain|further|beginner|simple|plain|hidden|all|detailed)\b/.test(lower) ? 'detailed' : 'brief',
+            eventType: filters.eventType,
+            severity: filters.severity,
+            scoreMin: filters.scoreMin,
+            chain: filters.chain,
+            timeWindow: filters.hours ? `${filters.hours}h` : undefined
+        };
+    }
+
+    if (pageModule === 'safe-scan' && (effectiveTokenQuery || /\b(scan|safe|risk|security|forensic|scam|rug|honeypot|holder|ownership)\b/.test(lower))) {
+        if (/\b(holder|holders|ownership|concentration|supply)\b/.test(lower)) {
+            return { tool: 'get_token_holders', address: address || pageContextAddress, query: effectiveTokenQuery, chain: pageChain, responseStyle: 'detailed' };
+        }
+        return { tool: 'run_safe_scan', address: address || pageContextAddress, query: effectiveTokenQuery, chain: address ? inferAssistantChain(message, address) : pageChain, responseStyle: 'detailed' };
+    }
+
+    if (pageModule === 'smart-alerts') {
+        if (/\b(status|runner|enabled|disabled|working|last run|health)\b/.test(lower)) return { tool: 'get_smart_alert_status' };
+        if (/\b(detection|score|severity|accumulat\w*|distribut\w*|risk)\b/.test(lower)) {
+            const filters = extractAssistantDetectionFilters(message);
+            return { tool: 'prepare_detection_alert', address: address || pageContextAddress, query: effectiveTokenQuery, chain: pageChain || filters.chain, eventType: filters.eventType, severity: filters.severity, scoreMin: filters.scoreMin };
+        }
+        if (/\b(alert|notify|watch|monitor|threshold)\b/.test(lower)) return { tool: 'prepare_alert_setup', address: address || pageContextAddress, query: effectiveTokenQuery, chain: pageChain };
+    }
+
+    if ((pageModule === 'wallet' || pageModule === 'smart-money') && (address || pageContextAddress || /\b(wallet|holdings|portfolio|pnl|smart money|whale|flow|inflow|outflow|activity)\b/.test(lower))) {
+        if (address || pageContextAddress || /\b(wallet|holdings|portfolio|pnl|win rate|behavior)\b/.test(lower)) {
+            return { tool: 'get_wallet_deep_brief', address: address || pageContextAddress, chain: address ? inferAssistantChain(message, address) : pageChain, query: address || pageContextAddress || tokenQuery };
+        }
+        if (effectiveTokenQuery) return { tool: 'get_token_activity', address, query: effectiveTokenQuery, chain: pageChain, responseStyle: 'detailed' };
+        return { tool: 'get_platform_updates' };
+    }
+
+    if ((pageModule === 'token' || pageModule === 'narrative' || pageModule === 'heatmap') && effectiveTokenQuery && !hasExplicitTokenQuery && !isAssistantPriceOnlyQuestion(message)) {
+        return {
+            tool: pageModule === 'token' && /\b(activity|whale|buy|sell|movement)\b/.test(lower) ? 'get_token_activity' : 'get_token_deep_brief',
+            address: address || pageContextAddress,
+            query: effectiveTokenQuery,
+            chain: address ? inferAssistantChain(message, address) : pageChain,
+            responseStyle: 'detailed'
+        };
+    }
 
     if (/\b(compare|versus|vs\.?|against|which\s+(?:one|token|coin)\s+is\s+better)\b/.test(lower)) {
         return { tool: 'compare_tokens', query: message, responseStyle: 'detailed' };
@@ -1962,8 +2232,8 @@ const chooseAssistantToolLocally = (message: string, history: AssistantConversat
     return { tool: 'conversation' };
 };
 
-const chooseAssistantTool = async (message: string, history: AssistantConversationMessage[] = []) => {
-    const localChoice = chooseAssistantToolLocally(message, history);
+const chooseAssistantTool = async (message: string, history: AssistantConversationMessage[] = [], pageContext?: AssistantPageContext | null) => {
+    const localChoice = chooseAssistantToolLocally(message, history, pageContext);
     if (localChoice.tool === 'unsupported_capability') return localChoice;
 
     const explicitTokenQuery = extractAssistantAddress(message) || message.match(/\$([a-zA-Z][a-zA-Z0-9]{1,15})\b/)?.[1] || (hasExplicitAssistantTokenQuery(message) ? extractAssistantTokenQuery(message, []) : '');
@@ -1986,7 +2256,7 @@ const chooseAssistantTool = async (message: string, history: AssistantConversati
     ].includes(localChoice.tool)) return localChoice;
 
     try {
-        const modelChoice = await chooseAssistantToolWithModel(message, history);
+        const modelChoice = await chooseAssistantToolWithModel(message, history, pageContext);
         if (modelChoice) {
             const localExplicitQuery = String(localChoice.query || localChoice.address || explicitTokenQuery || '').toLowerCase();
             const modelExplicitQuery = String(modelChoice.query || modelChoice.address || '').replace(/^\$/, '').toLowerCase();
@@ -2050,7 +2320,7 @@ const chooseAssistantTool = async (message: string, history: AssistantConversati
     return localChoice;
 };
 
-const generateAssistantConversation = async (message: string, history: AssistantConversationMessage[] = []) => {
+const generateAssistantConversation = async (message: string, history: AssistantConversationMessage[] = [], pageContext?: AssistantPageContext | null) => {
     const apiKey = readEnv('OPENROUTER_API_KEY');
     const model = readEnv('OPENROUTER_MODEL');
     if (!apiKey || !model) return null;
@@ -2073,7 +2343,7 @@ const generateAssistantConversation = async (message: string, history: Assistant
             model,
             temperature: 0.55,
             messages: [
-                { role: 'system', content: buildAssistantChatPrompt() },
+                { role: 'system', content: buildAssistantChatPrompt(pageContext) },
                 ...recentMessages,
                 { role: 'user', content: message }
             ]
@@ -2094,13 +2364,15 @@ const generateAssistantGroundedAnswer = async ({
     history,
     tool,
     data,
-    draftAnswer
+    draftAnswer,
+    pageContext
 }: {
     message: string;
     history: AssistantConversationMessage[];
     tool: string;
     data: unknown;
     draftAnswer: string;
+    pageContext?: AssistantPageContext | null;
 }) => {
     const apiKey = readEnv('OPENROUTER_API_KEY');
     const model = readEnv('OPENROUTER_MODEL');
@@ -2129,11 +2401,16 @@ const generateAssistantGroundedAnswer = async ({
                     content: [
                         'You are Atlaix AI. Answer like a sharp crypto intelligence analyst using only the provided Atlaix data.',
                         'First understand the user question. If they ask for one metric, answer that metric directly in the first sentence.',
+                        'The current app page is a strong hint. Lead with evidence from that module when it is relevant, then add other Atlaix context only when it improves the answer.',
                         'If they ask for a take, give the take first, then the evidence.',
                         'Do not sound like a template. Do not list every field unless the user asked for a full brief.',
                         'Preserve exact numbers from the data. Do not invent facts, prices, safety claims, or trading advice.',
+                        'Respect dataFreshness when present. If dataFreshness.stale is true, say the data is stale instead of presenting it as current.',
+                        'Do not expose operational freshness fields such as provider source, fetchedAt timestamps, maxAgeMs, stale=true, or stale=false. Users only need the result, not system calculations.',
+                        'Never convert missing market data into $0. Use unavailable when a provider did not return the metric.',
                         'Keep answers concise by default: 2-5 short paragraphs or a compact list only when useful.',
-                        'Use plain text, no markdown tables, no emojis.'
+                        'Use plain text, no markdown tables, no emojis.',
+                        formatAssistantPageContextForPrompt(pageContext)
                     ].join('\n')
                 },
                 ...recentMessages,
@@ -2141,6 +2418,7 @@ const generateAssistantGroundedAnswer = async ({
                     role: 'user',
                     content: [
                         `Current user question: ${message}`,
+                        formatAssistantPageContextForPrompt(pageContext),
                         `Selected Atlaix tool: ${tool}`,
                         `Structured Atlaix data:\n${JSON.stringify(data, null, 2).slice(0, 9000)}`,
                         `Fallback draft answer:\n${draftAnswer.slice(0, 4000)}`,
@@ -2192,8 +2470,12 @@ const normalizeAssistantText = (text: string) => text
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2013\u2014]/g, '-')
     .replace(/[\u{1F300}-\u{1FAFF}]/gu, '')
+    .replace(/\s*\((?:data\s*fresh(?:ness)?|dataFreshness)[^)]*(?:fetchedAt?|stale|DexScreener)[^)]*\)/gi, '')
+    .replace(/^\s*(?:Data\s+freshness|Freshness):[^\n]*(?:DexScreener|fetchedAt?|stale|source|refreshed)[^\n]*\n?/gim, '')
+    .replace(/\b(?:fetchedAt?|stale)=(?:true|false|[^),\s]+)/gi, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 
 const getAssistantRequestTokenQuery = (
@@ -2203,11 +2485,13 @@ const getAssistantRequestTokenQuery = (
     fallbackAddress = ''
 ) => sanitizeAssistantTokenLookupQuery(request.query || fallbackAddress || extractAssistantTokenQuery(message, history));
 
-const buildAssistantResponse = async (message: string, history: AssistantConversationMessage[] = []) => {
-    const request = await chooseAssistantTool(message, history);
+const buildAssistantResponse = async (message: string, history: AssistantConversationMessage[] = [], pageContext?: AssistantPageContext | null) => {
+    const request = await chooseAssistantTool(message, history, pageContext);
+    const pageContextQuery = assistantPageContextSubjectQuery(pageContext);
+    const pageContextAddress = pageContextQuery && (isLikelyEvmAddress(pageContextQuery) || isLikelySolanaAddress(pageContextQuery)) ? pageContextQuery : '';
     const explicitAddress = request.address || extractAssistantAddress(message);
-    const address = explicitAddress || getRecentAssistantAddress(history);
-    const chain = request.chain || (explicitAddress ? inferAssistantChain(message, explicitAddress) : '');
+    const address = explicitAddress || pageContextAddress || getRecentAssistantAddress(history);
+    const chain = request.chain || pageContext?.subjectChain || (explicitAddress ? inferAssistantChain(message, explicitAddress) : '');
     const actions: AssistantChatAction[] = [];
 
     if (request.tool === 'unsupported_capability') {
@@ -2227,7 +2511,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             };
         }
 
-        return buildTokenDeepBrief(tokenQuery, chain, message, history);
+        return buildTokenDeepBrief(tokenQuery, chain, message, history, pageContext);
     }
 
     if (request.tool === 'get_wallet_deep_brief') {
@@ -2314,7 +2598,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             const volume = parseAssistantMarketNumber(token?.volume24h);
             const cap = parseAssistantMarketNumber(token?.cap);
             const volumeToLiquidity = liquidity > 0 ? `${(volume / liquidity).toFixed(2)}x liquidity` : 'volume/liquidity unavailable';
-            return `${index + 1}. ${token?.ticker || token?.name}: 24h ${safeAssistantText(token?.h24)}, volume ${safeAssistantText(token?.volume24h, '$0')}, liquidity ${safeAssistantText(token?.liquidity, '$0')}, market cap ${safeAssistantText(token?.cap, '$0')}, ${volumeToLiquidity}${cap > 0 && liquidity > 0 ? `, liquidity/cap ${(liquidity / cap * 100).toFixed(2)}%` : ''}.`;
+            return `${index + 1}. ${token?.ticker || token?.name}: 24h ${safeAssistantMarketText(token?.h24)}, volume ${safeAssistantMarketText(token?.volume24h)}, liquidity ${safeAssistantMarketText(token?.liquidity)}, market cap ${safeAssistantMarketText(token?.cap)}, ${volumeToLiquidity}${cap > 0 && liquidity > 0 ? `, liquidity/cap ${(liquidity / cap * 100).toFixed(2)}%` : ''}.`;
         });
 
         return {
@@ -2703,28 +2987,47 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
             change24h: token.h24,
             volume24h: token.volume24h,
             liquidity: token.liquidity,
-            marketCap: token.cap
+            marketCap: token.cap,
+            dataFreshness: token.__assistantFreshness || assistantFreshness('Atlaix accessible market data')
         };
         const tokenLabel = `${token.name || token.ticker} (${token.ticker})`;
         const chainLabel = normalizeAssistantChainLabel(token.chain);
+        const dataFreshness = responseData.dataFreshness;
+        if (dataFreshness.stale) {
+            return {
+                answer: [
+                    `I found ${tokenLabel}, but the market snapshot I can reach is stale, so I will not quote price, volume, liquidity, or market-cap figures as current.`,
+                    freshnessLine(dataFreshness),
+                    'Try again in a moment or send the exact contract address so I can make a narrower live lookup.'
+                ].join('\n'),
+                tool: 'get_token_overview',
+                data: responseData,
+                actions: [
+                    { label: 'Open Overview', href: '/dashboard' },
+                    { label: 'Open Detection Engine', href: '/detection' }
+                ]
+            };
+        }
         let draftAnswer = [
             `${tokenLabel} is currently priced at ${formatAssistantPrice(token.price)} on ${chainLabel}.`,
-            `24h change: ${token.h24 || 'unavailable'}. 24h volume: ${token.volume24h || '$0'}. Liquidity: ${token.liquidity || '$0'}. Market cap: ${token.cap || '$0'}.`
+            `24h change: ${safeAssistantMarketText(token.h24)}. 24h volume: ${safeAssistantMarketText(token.volume24h)}. Liquidity: ${safeAssistantMarketText(token.liquidity)}. Market cap: ${safeAssistantMarketText(token.cap)}.`,
+            freshnessLine(dataFreshness)
         ].join('\n');
 
         if (/\bmarket\s*cap\b|\bmcap\b/i.test(message)) {
-            draftAnswer = `${tokenLabel}'s market cap is ${token.cap || '$0'}. For context, it is trading at ${formatAssistantPrice(token.price)} on ${chainLabel}, with ${token.volume24h || '$0'} in 24h volume and ${token.liquidity || '$0'} liquidity.`;
+            draftAnswer = `${tokenLabel}'s market cap is ${safeAssistantMarketText(token.cap)}. For context, it is trading at ${formatAssistantPrice(token.price)} on ${chainLabel}, with ${safeAssistantMarketText(token.volume24h)} in 24h volume and ${safeAssistantMarketText(token.liquidity)} liquidity.\n${freshnessLine(dataFreshness)}`;
         } else if (/\bprice\b/i.test(message)) {
-            draftAnswer = `${tokenLabel} is trading at ${formatAssistantPrice(token.price)} on ${chainLabel}. Its 24h move is ${token.h24 || 'unavailable'}, with ${token.volume24h || '$0'} volume and ${token.liquidity || '$0'} liquidity.`;
+            draftAnswer = `${tokenLabel} is trading at ${formatAssistantPrice(token.price)} on ${chainLabel}. Its 24h move is ${safeAssistantMarketText(token.h24)}, with ${safeAssistantMarketText(token.volume24h)} volume and ${safeAssistantMarketText(token.liquidity)} liquidity.\n${freshnessLine(dataFreshness)}`;
         } else if (/\boverview\b|\bdetails?\b/i.test(message)) {
-            draftAnswer = `${tokenLabel} is on ${chainLabel} at ${formatAssistantPrice(token.price)}. Market cap is ${token.cap || '$0'}, liquidity is ${token.liquidity || '$0'}, 24h volume is ${token.volume24h || '$0'}, and the 24h move is ${token.h24 || 'unavailable'}.`;
+            draftAnswer = `${tokenLabel} is on ${chainLabel} at ${formatAssistantPrice(token.price)}. Market cap is ${safeAssistantMarketText(token.cap)}, liquidity is ${safeAssistantMarketText(token.liquidity)}, 24h volume is ${safeAssistantMarketText(token.volume24h)}, and the 24h move is ${safeAssistantMarketText(token.h24)}.\n${freshnessLine(dataFreshness)}`;
         }
         const groundedAnswer = await generateAssistantGroundedAnswer({
             message,
             history,
             tool: 'get_token_overview',
             data: responseData,
-            draftAnswer
+            draftAnswer,
+            pageContext
         }).catch((error) => {
             console.warn('[AiAssistant] grounded token overview unavailable; using fallback draft', error instanceof Error ? error.message : error);
             return null;
@@ -2847,7 +3150,7 @@ const buildAssistantResponse = async (message: string, history: AssistantConvers
 
     if (request.tool === 'conversation') {
         try {
-            const modelAnswer = await generateAssistantConversation(message, history);
+            const modelAnswer = await generateAssistantConversation(message, history, pageContext);
             if (modelAnswer) {
                 return {
                     answer: normalizeAssistantText(modelAnswer),
@@ -2904,6 +3207,260 @@ async function fetchChainDexVolume(chain: string) {
         source: 'defillama'
     };
 }
+
+type SectorEnrichmentToken = {
+    chain?: string;
+    address?: string;
+    ticker?: string;
+    name?: string;
+};
+
+type SectorEnrichmentResult = {
+    key: string;
+    chain: string;
+    address: string;
+    sectorLabels: string[];
+    providerCategories: string[];
+    providerTags: string[];
+    providerLabels: string[];
+    sectorSource?: string;
+    fetchedAt: string;
+};
+
+const SECTOR_ENRICHMENT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SECTOR_ENRICHMENT_NEGATIVE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const SECTOR_ENRICHMENT_BATCH_LIMIT = 80;
+const sectorEnrichmentCache = new Map<string, { expiresAt: number; result: SectorEnrichmentResult }>();
+
+const normalizeSectorEnrichmentChain = (value: unknown) =>
+    String(value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+
+const sectorEnrichmentKey = (chain: string, address: string) =>
+    `${normalizeSectorEnrichmentChain(chain)}:${String(address || '').trim().toLowerCase()}`;
+
+const coingeckoAssetPlatformForChain = (chain: string) => {
+    const normalized = normalizeSectorEnrichmentChain(chain);
+    const map: Record<string, string> = {
+        ethereum: 'ethereum',
+        eth: 'ethereum',
+        bsc: 'binance-smart-chain',
+        binance: 'binance-smart-chain',
+        base: 'base',
+        polygon: 'polygon-pos',
+        arbitrum: 'arbitrum-one',
+        optimism: 'optimistic-ethereum',
+        avalanche: 'avalanche',
+        avax: 'avalanche'
+    };
+    return map[normalized] || '';
+};
+
+const coingeckoOnchainNetworkForChain = (chain: string) => {
+    const normalized = normalizeSectorEnrichmentChain(chain);
+    const map: Record<string, string> = {
+        ethereum: 'eth',
+        eth: 'eth',
+        bsc: 'bsc',
+        base: 'base',
+        polygon: 'polygon_pos',
+        arbitrum: 'arbitrum',
+        optimism: 'optimism',
+        avalanche: 'avax',
+        avax: 'avax',
+        solana: 'solana'
+    };
+    return map[normalized] || '';
+};
+
+const cleanProviderSectorLabel = (value: unknown) =>
+    String(value || '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+const readProviderSectorLabels = (value: unknown): string[] => {
+    if (typeof value === 'string') return [cleanProviderSectorLabel(value)].filter(Boolean);
+    if (!Array.isArray(value)) return [];
+    return value.map(cleanProviderSectorLabel).filter(Boolean);
+};
+
+const uniqueProviderLabels = (...groups: string[][]) =>
+    [...new Set(groups.flat().map(cleanProviderSectorLabel).filter(Boolean))];
+
+const emptySectorEnrichment = (token: Required<Pick<SectorEnrichmentToken, 'chain' | 'address'>>): SectorEnrichmentResult => ({
+    key: sectorEnrichmentKey(token.chain, token.address),
+    chain: normalizeSectorEnrichmentChain(token.chain),
+    address: token.address,
+    sectorLabels: [],
+    providerCategories: [],
+    providerTags: [],
+    providerLabels: [],
+    fetchedAt: new Date().toISOString()
+});
+
+const headersForCoinGecko = () => {
+    const key = readEnv('COINGECKO_API_KEY', 'VITE_COINGECKO_API_KEY');
+    return {
+        accept: 'application/json',
+        'user-agent': 'Atlaix/1.0',
+        ...(key ? { 'x-cg-demo-api-key': key } : {})
+    };
+};
+
+const fetchCoinGeckoSectorEnrichment = async (token: Required<Pick<SectorEnrichmentToken, 'chain' | 'address'>>) => {
+    const assetPlatform = coingeckoAssetPlatformForChain(token.chain);
+    const categories: string[] = [];
+    const tags: string[] = [];
+    const labels: string[] = [];
+    let source = '';
+
+    if (assetPlatform) {
+        const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(assetPlatform)}/contract/${encodeURIComponent(token.address)}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false`;
+        const response = await fetchWithTimeout(url, { headers: headersForCoinGecko() }, 10_000).catch(() => null);
+        if (response?.ok) {
+            const payload = await response.json().catch(() => null) as any;
+            categories.push(...readProviderSectorLabels(payload?.categories));
+            tags.push(...readProviderSectorLabels(payload?.asset_platform_id));
+            if (payload?.id) labels.push(String(payload.id));
+            source = 'coingecko';
+        }
+    }
+
+    const onchainNetwork = coingeckoOnchainNetworkForChain(token.chain);
+    if (onchainNetwork && !categories.length) {
+        const url = `https://api.coingecko.com/api/v3/onchain/networks/${encodeURIComponent(onchainNetwork)}/tokens/${encodeURIComponent(token.address)}`;
+        const response = await fetchWithTimeout(url, { headers: headersForCoinGecko() }, 10_000).catch(() => null);
+        if (response?.ok) {
+            const payload = await response.json().catch(() => null) as any;
+            const attributes = payload?.data?.attributes || {};
+            categories.push(...readProviderSectorLabels(attributes.categories || attributes.category));
+            tags.push(...readProviderSectorLabels(attributes.tags || attributes.token_lists));
+            if (attributes.launchpad_details && typeof attributes.launchpad_details === 'object') {
+                tags.push('solana meme launchpad');
+            }
+            if (attributes.coingecko_coin_id) {
+                labels.push(String(attributes.coingecko_coin_id));
+            }
+            labels.push(...readProviderSectorLabels(attributes.labels));
+            source = source || 'coingecko-onchain';
+        }
+    }
+
+    if (!categories.length && !tags.length && !labels.length) return null;
+
+    return {
+        source,
+        providerCategories: uniqueProviderLabels(categories),
+        providerTags: uniqueProviderLabels(tags),
+        providerLabels: uniqueProviderLabels(labels)
+    };
+};
+
+const fetchGeckoTerminalSectorEnrichment = async (token: Required<Pick<SectorEnrichmentToken, 'chain' | 'address'>>) => {
+    const network = coingeckoOnchainNetworkForChain(token.chain);
+    if (!network) return null;
+
+    const url = `https://api.geckoterminal.com/api/v2/networks/${encodeURIComponent(network)}/tokens/${encodeURIComponent(token.address)}`;
+    const response = await fetchWithTimeout(url, {
+        headers: {
+            accept: 'application/json',
+            'user-agent': 'Atlaix/1.0'
+        }
+    }, 10_000).catch(() => null);
+    if (!response?.ok) return null;
+
+    const payload = await response.json().catch(() => null) as any;
+    const attributes = payload?.data?.attributes || {};
+    const categories = readProviderSectorLabels(attributes.categories || attributes.category);
+    const tags = readProviderSectorLabels(attributes.tags || attributes.token_lists);
+    const labels = readProviderSectorLabels(attributes.labels);
+
+    if (attributes.launchpad_details && typeof attributes.launchpad_details === 'object') {
+        tags.push('solana meme launchpad');
+    }
+    if (attributes.coingecko_coin_id) {
+        labels.push(String(attributes.coingecko_coin_id));
+    }
+
+    if (!categories.length && !tags.length && !labels.length) return null;
+
+    return {
+        source: 'geckoterminal',
+        providerCategories: uniqueProviderLabels(categories),
+        providerTags: uniqueProviderLabels(tags),
+        providerLabels: uniqueProviderLabels(labels)
+    };
+};
+
+const fetchMobulaSectorEnrichment = async (token: Required<Pick<SectorEnrichmentToken, 'chain' | 'address'>>) => {
+    const apiKey = readEnv('MOBULA_API_KEY', 'VITE_MOBULA_API_KEY');
+    const urls = [
+        `https://api.mobula.io/api/1/metadata?asset=${encodeURIComponent(token.address)}`,
+        `https://api.mobula.io/api/1/market/data?asset=${encodeURIComponent(token.address)}`
+    ];
+    const headers = {
+        accept: 'application/json',
+        'user-agent': 'Atlaix/1.0',
+        ...(apiKey ? { Authorization: apiKey } : {})
+    };
+
+    for (const url of urls) {
+        const response = await fetchWithTimeout(url, { headers }, 10_000).catch(() => null);
+        if (!response?.ok) continue;
+        const payload = await response.json().catch(() => null) as any;
+        const data = payload?.data || payload;
+        const categories = readProviderSectorLabels(data?.categories || data?.category);
+        const tags = readProviderSectorLabels(data?.tags || data?.sectors || data?.sector);
+        const labels = readProviderSectorLabels(data?.labels);
+        if (!categories.length && !tags.length && !labels.length) continue;
+
+        return {
+            source: 'mobula',
+            providerCategories: uniqueProviderLabels(categories),
+            providerTags: uniqueProviderLabels(tags),
+            providerLabels: uniqueProviderLabels(labels)
+        };
+    }
+
+    return null;
+};
+
+const enrichTokenSector = async (token: SectorEnrichmentToken): Promise<SectorEnrichmentResult | null> => {
+    const chain = normalizeSectorEnrichmentChain(token.chain);
+    const address = String(token.address || '').trim();
+    if (!chain || !address) return null;
+
+    const key = sectorEnrichmentKey(chain, address);
+    const cached = sectorEnrichmentCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
+
+    const base = { chain, address };
+    const providerResult =
+        await fetchCoinGeckoSectorEnrichment(base).catch(() => null)
+        || await fetchGeckoTerminalSectorEnrichment(base).catch(() => null)
+        || await fetchMobulaSectorEnrichment(base).catch(() => null);
+
+    const result: SectorEnrichmentResult = providerResult
+        ? {
+            key,
+            chain,
+            address,
+            sectorLabels: uniqueProviderLabels(providerResult.providerCategories, providerResult.providerTags, providerResult.providerLabels),
+            providerCategories: providerResult.providerCategories,
+            providerTags: providerResult.providerTags,
+            providerLabels: providerResult.providerLabels,
+            sectorSource: providerResult.source,
+            fetchedAt: new Date().toISOString()
+        }
+        : emptySectorEnrichment(base);
+
+    sectorEnrichmentCache.set(key, {
+        result,
+        expiresAt: Date.now() + (result.sectorLabels.length ? SECTOR_ENRICHMENT_CACHE_TTL_MS : SECTOR_ENRICHMENT_NEGATIVE_CACHE_TTL_MS)
+    });
+
+    return result;
+};
 
 function json(response: import('node:http').ServerResponse, status: number, body: unknown) {
     response.writeHead(status, {
@@ -3339,6 +3896,24 @@ const server = createServer(async (request, response) => {
         }
     }
 
+    if (method === 'POST' && requestUrl.pathname === '/api/token-sector/enrich') {
+        try {
+            const body = await readJsonBody(request) as { tokens?: SectorEnrichmentToken[] };
+            const tokens = Array.isArray(body.tokens) ? body.tokens.slice(0, SECTOR_ENRICHMENT_BATCH_LIMIT) : [];
+            const sectors = (await Promise.all(tokens.map((token) => enrichTokenSector(token)))).filter(Boolean);
+            json(response, 200, {
+                sectors,
+                generatedAt: new Date().toISOString()
+            });
+            return;
+        } catch (error) {
+            json(response, 500, {
+                error: error instanceof Error ? error.message : 'Could not enrich token sectors.'
+            });
+            return;
+        }
+    }
+
     const publicProxyRoute = PUBLIC_PROXY_ROUTES.find((route) => requestUrl.pathname.startsWith(route.prefix));
     if (publicProxyRoute) {
         try {
@@ -3609,7 +4184,7 @@ const server = createServer(async (request, response) => {
 
     if (method === 'POST' && requestUrl.pathname === '/api/ai-assistant/chat') {
         try {
-            const body = await readJsonBody(request) as { message?: string; history?: AssistantConversationMessage[] };
+            const body = await readJsonBody(request) as { message?: string; history?: AssistantConversationMessage[]; pageContext?: unknown };
             const message = String(body.message || '').trim();
             if (!message) {
                 json(response, 400, { error: 'message is required.' });
@@ -3617,8 +4192,9 @@ const server = createServer(async (request, response) => {
             }
 
             const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
+            const pageContext = normalizeAssistantPageContext(body.pageContext);
             const result = await withAssistantTimeout(
-                buildAssistantResponse(message, history),
+                buildAssistantResponse(message, history, pageContext),
                 22_000,
                 buildAssistantTimeoutResponse(message)
             );

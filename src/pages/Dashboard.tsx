@@ -1,15 +1,24 @@
 // Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Activity, Zap, TrendingUp, ShieldCheck, Search, ChevronRight, ChevronLeft, Info, RefreshCw, SlidersHorizontal, X, RotateCcw, BarChart3 } from 'lucide-react';
+import { Activity, Zap, TrendingUp, Search, ChevronRight, ChevronLeft, Info, RefreshCw, SlidersHorizontal, X, RotateCcw, BarChart3 } from 'lucide-react';
 import type { AlphaGauntletEventType, MarketCoin } from '../types';
 import { DatabaseService } from '../services/DatabaseService';
 import type { ChainDexVolume } from '../services/DatabaseService';
 import { AlphaGauntletService } from '../services/AlphaGauntletService';
 import { useNavigate } from 'react-router-dom';
 import { isExcludedAlphaToken } from '../utils/tokenFilters';
+import { SECTOR_FILTER_OPTIONS, classifyTokenSector } from '../utils/sectorClassification';
 
 interface DashboardProps {
     // onTokenSelect prop removed as we use routing
+}
+
+interface FeedScrollRailFrame {
+    active: boolean;
+    headerActive: boolean;
+    left: number;
+    width: number;
+    scrollWidth: number;
 }
 
 // Helper to parse currency strings into numbers for sorting
@@ -263,52 +272,12 @@ const EVENT_FILTER_OPTIONS: Array<{ value: 'all' | AlphaGauntletEventType; label
 
 const EVENT_BADGE_STYLE = 'border-border bg-card-hover text-text-medium';
 
-const SECTOR_FILTER_OPTIONS = [
-    { value: 'all', label: 'All Sectors' },
-    { value: 'ai', label: 'AI' },
-    { value: 'meme', label: 'Meme' },
-    { value: 'rwa', label: 'RWA' },
-    { value: 'layer-1', label: 'Layer 1' },
-    { value: 'defi', label: 'DeFi' },
-    { value: 'gaming', label: 'Gaming' },
-    { value: 'depin', label: 'DePIN' },
-    { value: 'infra', label: 'Infrastructure' }
-];
-
-const SECTOR_KEYWORDS: Record<string, string[]> = {
-    ai: ['AI', 'AGENT', 'AGENTS', 'AIXBT', 'BOT', 'BOTS', 'COMPUTE', 'GPU', 'ROBOT', 'VIRTUAL', 'ML', 'LLM', 'DATA'],
-    meme: ['MEME', 'DOGE', 'SHIB', 'PEPE', 'WIF', 'BONK', 'FLOKI', 'MOG', 'POPCAT', 'MEW', 'BRETT', 'WOJAK', 'CHAD', 'CAT', 'DOG', 'FROG', 'APE', 'TRUMP', 'MAGA', 'MOODENG', 'NEIRO', 'FART', 'FWOG'],
-    rwa: ['RWA', 'REAL WORLD', 'ONDO', 'PENDLE', 'TOKENIZED', 'CREDIT', 'TREASURY', 'BOND', 'REAL ESTATE', 'ESTATE'],
-    'layer-1': ['LAYER 1', 'L1', 'SOL', 'ETH', 'BTC', 'BNB', 'AVAX', 'SUI', 'APT', 'SEI', 'TRX', 'TON', 'NEAR', 'ATOM', 'INJ'],
-    defi: ['DEFI', 'DEX', 'SWAP', 'YIELD', 'FARM', 'LEND', 'LENDING', 'STAKE', 'STAKING', 'DAO', 'AAVE', 'UNI', 'CAKE', 'JUP', 'RAY', 'AERO', 'ORCA'],
-    gaming: ['GAME', 'GAMING', 'PLAY', 'METAVERSE', 'NFT', 'CASINO', 'BET', 'SPORT'],
-    depin: ['DEPIN', 'NODE', 'CLOUD', 'STORAGE', 'WIRELESS', 'SENSOR', 'RENDER', 'HNT', 'AKT'],
-    infra: ['INFRA', 'PROTOCOL', 'CHAIN', 'BRIDGE', 'ORACLE', 'INDEX', 'RPC', 'NETWORK', 'PAY', 'WALLET', 'SECURITY']
-};
-
-const normalizeSectorText = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
-
-const tokenMatchesSectorKeyword = (terms: string[], normalizedText: string, keyword: string) => {
-    const normalizedKeyword = normalizeSectorText(keyword);
-    if (!normalizedKeyword) return false;
-
-    if (normalizedKeyword.includes(' ')) {
-        return ` ${normalizedText} `.includes(` ${normalizedKeyword} `);
-    }
-
-    if (normalizedKeyword.length <= 3) {
-        return terms.some((term) => term === normalizedKeyword || term.startsWith(normalizedKeyword));
-    }
-
-    return terms.some((term) => term === normalizedKeyword || term.includes(normalizedKeyword));
-};
-
 const classifyFeedSector = (coin: MarketCoin) => {
-    const normalizedText = normalizeSectorText(`${coin.ticker || ''} ${coin.name || ''}`);
-    const terms = normalizedText.split(/\s+/).filter(Boolean);
-    return SECTOR_FILTER_OPTIONS
-        .filter((option) => option.value !== 'all')
-        .find((option) => SECTOR_KEYWORDS[option.value]?.some((keyword) => tokenMatchesSectorKeyword(terms, normalizedText, keyword)))?.value || 'other';
+    return classifyTokenSector(coin).primarySector;
+};
+
+const getFeedSectorLabel = (coin: MarketCoin) => {
+    return classifyTokenSector(coin).label;
 };
 
 const getFeedEventLabel = (coin: MarketCoin, eventType?: AlphaGauntletEventType) => {
@@ -378,7 +347,18 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     const [chainVolumeSlide, setChainVolumeSlide] = useState(0);
     const [chainDexVolumes, setChainDexVolumes] = useState<ChainDexVolume[]>([]);
     const [feedOrderState, setFeedOrderState] = useState<FeedOrderState>(() => loadFeedOrderState());
+    const [feedScrollRailFrame, setFeedScrollRailFrame] = useState<FeedScrollRailFrame>({
+        active: false,
+        headerActive: false,
+        left: 0,
+        width: 0,
+        scrollWidth: 0
+    });
     const marketDataRef = useRef<MarketCoin[]>([]);
+    const feedTableSectionRef = useRef<HTMLDivElement | null>(null);
+    const feedTableScrollerRef = useRef<HTMLDivElement | null>(null);
+    const feedFixedHeaderRef = useRef<HTMLDivElement | null>(null);
+    const syncingFeedScrollRef = useRef(false);
     const startupRefreshTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -592,23 +572,6 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         }
     };
 
-    const handleFeedTableWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-        if (event.deltaY === 0) return;
-
-        const tableScroller = event.currentTarget;
-        const atTop = tableScroller.scrollTop <= 0;
-        const atBottom = tableScroller.scrollTop + tableScroller.clientHeight >= tableScroller.scrollHeight - 1;
-        const shouldHandoffToPage = (event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom);
-
-        if (!shouldHandoffToPage) return;
-
-        const pageScroller = tableScroller.closest('main');
-        if (!pageScroller) return;
-
-        pageScroller.scrollBy({ top: event.deltaY, behavior: 'auto' });
-        event.preventDefault();
-    };
-
     const handleSearchSubmit = () => {
         if (!searchQuery.trim()) return;
 
@@ -722,6 +685,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 if (key === 'dexBuys') return parseCurrency(item.dexBuys);
                 if (key === 'dexSells') return parseCurrency(item.dexSells);
                 if (key === 'netFlow') return parseCurrency(item.netFlow);
+                if (key === 'sector') return getFeedSectorLabel(item);
                 return 0;
             };
 
@@ -737,6 +701,51 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         const limit = feedFilters.visibleCount === 'all' ? data.length : Number(feedFilters.visibleCount);
         return data.slice(0, Number.isFinite(limit) ? limit : data.length);
     }, [feedFilters.visibleCount, feedOrderState.orderByKey, filteredData, sortConfig]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const snapshot = {
+            generatedAt: Date.now(),
+            total: sortedData.length,
+            filters: feedFilters,
+            sort: sortConfig,
+            tokens: sortedData.slice(0, 500).map((coin) => ({
+                ...(() => {
+                    const sector = classifyTokenSector(coin);
+                    return {
+                        name: coin.name,
+                        ticker: coin.ticker,
+                        chain: coin.chain,
+                        address: coin.address || '',
+                        pairAddress: coin.pairAddress || '',
+                        price: coin.price,
+                        change24h: coin.h24,
+                        marketCap: coin.cap,
+                        dexVolume: coin.volume24h,
+                        liquidity: coin.liquidity,
+                        dexBuys: coin.dexBuys,
+                        dexSells: coin.dexSells,
+                        netFlow: coin.netFlow,
+                        sector: sector.label,
+                        sectorId: sector.primarySector,
+                        sectorConfidence: sector.confidence,
+                        secondarySectors: sector.secondarySectors,
+                        sectorReasons: sector.reasons,
+                        sectorSource: sector.source,
+                        eventType: AlphaGauntletService.qualifyToken(coin)?.eventType || coin.signal || 'Unusual Activity'
+                    };
+                })()
+            }))
+        };
+
+        (window as any).__ATLAIX_LIVE_ALPHA_FEED__ = snapshot;
+        try {
+            window.localStorage.setItem('atlaix-live-alpha-feed-snapshot-v1', JSON.stringify(snapshot));
+        } catch {
+            // This cache only helps the assistant answer current dashboard questions.
+        }
+    }, [feedFilters, sortConfig, sortedData]);
 
     useEffect(() => {
         const total = Math.max(1, Math.ceil(sortedData.length / itemsPerPage));
@@ -892,6 +901,91 @@ export const Dashboard: React.FC<DashboardProps> = () => {
         return Math.max(...paginatedData.map(c => Math.abs(parseCurrency(c.netFlow))));
     }, [paginatedData]);
 
+    const syncFeedHorizontalScroll = (source: HTMLDivElement | null) => {
+        if (!source || syncingFeedScrollRef.current) return;
+
+        syncingFeedScrollRef.current = true;
+        const nextScrollLeft = source.scrollLeft;
+        [feedTableScrollerRef.current, feedFixedHeaderRef.current].forEach((target) => {
+            if (target && target !== source) {
+                target.scrollLeft = nextScrollLeft;
+            }
+        });
+        window.requestAnimationFrame(() => {
+            syncingFeedScrollRef.current = false;
+        });
+    };
+
+    const updateFeedScrollRailFrame = () => {
+        const section = feedTableSectionRef.current;
+        const tableScroller = feedTableScrollerRef.current;
+
+        if (!section || !tableScroller) {
+            setFeedScrollRailFrame((current) => current.active
+                ? { active: false, headerActive: false, left: 0, width: 0, scrollWidth: 0 }
+                : current
+            );
+            return;
+        }
+
+        const sectionRect = section.getBoundingClientRect();
+        const scrollerRect = tableScroller.getBoundingClientRect();
+        const canScrollX = tableScroller.scrollWidth > tableScroller.clientWidth;
+        const nextFrame: FeedScrollRailFrame = {
+            active: canScrollX && sectionRect.top < window.innerHeight - 56 && sectionRect.bottom > 88,
+            headerActive: sectionRect.top < 0 && sectionRect.bottom > 120,
+            left: Math.round(scrollerRect.left),
+            width: Math.round(scrollerRect.width),
+            scrollWidth: tableScroller.scrollWidth
+        };
+
+        setFeedScrollRailFrame((current) => (
+            current.active === nextFrame.active &&
+            current.headerActive === nextFrame.headerActive &&
+            current.left === nextFrame.left &&
+            current.width === nextFrame.width &&
+            current.scrollWidth === nextFrame.scrollWidth
+                ? current
+                : nextFrame
+        ));
+
+        if (feedFixedHeaderRef.current) {
+            feedFixedHeaderRef.current.scrollLeft = tableScroller.scrollLeft;
+        }
+    };
+
+    const handleFeedTableHorizontalScroll = () => {
+        syncFeedHorizontalScroll(feedTableScrollerRef.current);
+    };
+
+    const handleFeedFixedHeaderScroll = () => {
+        syncFeedHorizontalScroll(feedFixedHeaderRef.current);
+    };
+
+    useEffect(() => {
+        updateFeedScrollRailFrame();
+
+        const tableScroller = feedTableScrollerRef.current;
+        const pageScroller = tableScroller?.closest('main');
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(updateFeedScrollRailFrame)
+            : null;
+
+        if (resizeObserver && feedTableSectionRef.current) resizeObserver.observe(feedTableSectionRef.current);
+        if (resizeObserver && tableScroller) resizeObserver.observe(tableScroller);
+
+        window.addEventListener('resize', updateFeedScrollRailFrame);
+        window.addEventListener('scroll', updateFeedScrollRailFrame, { passive: true });
+        pageScroller?.addEventListener('scroll', updateFeedScrollRailFrame, { passive: true });
+
+        return () => {
+            resizeObserver?.disconnect();
+            window.removeEventListener('resize', updateFeedScrollRailFrame);
+            window.removeEventListener('scroll', updateFeedScrollRailFrame);
+            pageScroller?.removeEventListener('scroll', updateFeedScrollRailFrame);
+        };
+    }, [currentPage, paginatedData.length, sortedData.length]);
+
     // Color logic for change percentage
     const getPercentColor = (val: string) => {
         const num = parseFloat(val.replace(/[%+,]/g, ''));
@@ -1034,12 +1128,12 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
     const aiMarketPulseSection = (
         <section className="min-w-0 relative z-20">
-            <div className="mb-2 flex items-center gap-2">
+            <div className="mb-1.5 flex items-center gap-2 md:mb-2">
                 <h3 className="text-sm font-black text-text-light">AI Market Pulse</h3>
                 <span className="h-1.5 w-1.5 rounded-full bg-primary-green" />
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="min-h-[64px] rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm">
+            <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 md:gap-2">
+                <div className="green-corner-card min-h-[68px] rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm md:min-h-[64px] md:px-3 md:py-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                             <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium">
@@ -1059,16 +1153,16 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     </div>
                 </div>
 
-                <div className="min-h-[64px] rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm">
+                <div className="green-corner-card min-h-[68px] rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm md:min-h-[64px] md:px-3 md:py-2.5">
                     <div className="flex min-w-0 items-start justify-between gap-3">
                         <div className="min-w-0">
                             <div className="flex items-center gap-1.5 text-xs font-medium text-text-medium">
                                 <Zap size={14} className="text-text-medium" />
                                 <span className="truncate">Smart Rotation</span>
                             </div>
-                            <div className="mt-1.5 flex min-w-0 items-center gap-2">
-                                <span className="truncate text-base font-black text-text-light">{marketPulse.bestChain}</span>
-                                <span className="shrink-0 rounded bg-primary-green/10 px-2 py-1 text-[10px] font-black text-primary-green">
+                            <div className="mt-1.5 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 md:flex md:flex-row md:items-center md:gap-2">
+                                <span className="max-w-full truncate text-sm font-black text-text-light md:text-base">{marketPulse.bestChain}</span>
+                                <span className="shrink-0 rounded bg-primary-green/10 px-1.5 py-0.5 text-[10px] font-black text-primary-green md:px-2 md:py-1">
                                     ${formatCompactCurrency(marketPulse.bestChainFlow)} Vol
                                 </span>
                             </div>
@@ -1077,7 +1171,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 </div>
 
                 <div
-                    className="min-h-[64px] cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm transition-colors hover:border-text-medium"
+                    className="green-corner-card min-h-[68px] cursor-pointer rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm transition-colors hover:border-text-medium md:min-h-[64px] md:px-3 md:py-2.5"
                     onClick={() => marketPulse.topInflowToken && handleTokenNavigation(marketPulse.topInflowToken)}
                 >
                     <div className="flex min-w-0 items-start justify-between gap-3">
@@ -1086,9 +1180,9 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                 <TrendingUp size={14} className="text-text-medium" />
                                 <span className="truncate">Top Inflow</span>
                             </div>
-                            <div className="mt-1.5 flex min-w-0 items-center justify-between gap-3">
-                                <span className="truncate text-base font-black text-text-light">{marketPulse.topInflowToken?.ticker || "Scanning..."}</span>
-                                <span className="shrink-0 text-sm font-black text-primary-green">
+                            <div className="mt-1.5 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 md:flex md:flex-row md:items-center md:justify-between md:gap-3">
+                                <span className="max-w-full truncate text-sm font-black text-text-light md:text-base">{marketPulse.topInflowToken?.ticker || "Scanning..."}</span>
+                                <span className="shrink-0 text-xs font-black text-primary-green md:text-sm">
                                     {marketPulse.topInflowToken?.netFlow || "$0"}
                                 </span>
                             </div>
@@ -1096,27 +1190,27 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     </div>
                 </div>
 
-                <div className="min-h-[64px] overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm">
+                <div className="green-corner-card min-h-[68px] overflow-hidden rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm md:min-h-[64px] md:px-3 md:py-2.5">
                     <div className="flex h-full min-w-0 flex-col justify-center">
                         <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-text-medium">
                             <BarChart3 size={14} className="text-text-medium" />
                             <span className="truncate">24h DEX Volume</span>
                         </div>
-                        <div key={chainVolumeSlide} className="mt-1.5 flex min-w-0 items-baseline gap-3 animate-fade-in">
-                            <div className="flex min-w-0 items-baseline gap-2">
-                                <span className="truncate text-base font-black text-text-light">
+                        <div key={chainVolumeSlide} className="mt-1 grid min-w-0 gap-0.5 animate-fade-in md:mt-1.5 md:flex md:items-baseline md:gap-3">
+                            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-1 md:flex md:justify-start md:gap-2">
+                                <span className="min-w-0 truncate text-sm font-black text-text-light md:text-base">
                                     {visibleChainVolumePair[0]?.chain || 'Scanning'}
                                 </span>
-                                <span className="shrink-0 text-sm font-black text-primary-green">
+                                <span className="shrink-0 text-xs font-black text-primary-green md:text-sm">
                                     ${formatCompactCurrency(visibleChainVolumePair[0]?.volume || 0)}
                                 </span>
                             </div>
                             {visibleChainVolumePair[1] && (
-                                <div className="flex min-w-0 items-baseline gap-1.5 opacity-45">
-                                    <span className="truncate text-xs font-black text-text-light">
+                                <div className="hidden min-w-0 items-baseline gap-1.5 opacity-45 md:flex md:justify-start">
+                                    <span className="min-w-0 truncate text-xs font-black text-text-light">
                                         {visibleChainVolumePair[1].chain}
                                     </span>
-                                    <span className="shrink-0 font-mono text-[10px] font-bold text-primary-green">
+                                    <span className="shrink-0 font-mono text-[10px] font-bold text-primary-green md:text-[10px]">
                                         ${formatCompactCurrency(visibleChainVolumePair[1].volume)}
                                     </span>
                                 </div>
@@ -1221,8 +1315,8 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                 </div>
             </div>
 
-            <div className="bg-card border border-border rounded-xl p-3 md:p-5 overflow-visible shadow-sm relative z-30">
-                <div className="flex flex-col gap-3 mb-4">
+            <div ref={feedTableSectionRef} className="relative z-30 -mx-4 overflow-visible border-y border-border bg-card/80 shadow-sm xl:-mx-6">
+                <div className="flex flex-col gap-3 px-4 py-4 md:px-6">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div className="flex items-center justify-between gap-3">
                             <h3 className="font-bold text-lg flex items-center gap-2">
@@ -1265,106 +1359,119 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     </div>
                 </div>
 
-                <div
-                    onWheel={handleFeedTableWheel}
-                    className="overflow-x-auto overflow-y-auto max-h-[65vh] min-h-[400px] custom-scrollbar"
-                >
+                <div className="live-alpha-table-shell custom-scrollbar min-h-[400px]">
                     {isLoading && marketData.length === 0 ? (
                         <div className="w-full h-[400px] flex items-center justify-center flex-col gap-3">
                             <div className="w-8 h-8 border-2 border-primary-green border-t-transparent rounded-full animate-spin"></div>
                             <div className="text-sm font-bold text-text-medium">Loading detected tokens...</div>
                         </div>
                     ) : (
-                        <table className="data-table min-w-[1120px]">
-                            <thead>
-                                <tr>
-                                    <SortHeader label="Chain Token" sortKey="ticker" minWidth="150px" />
-                                    <th style={{ minWidth: '150px' }}>
-                                        <div className="flex items-center gap-1.5 whitespace-nowrap text-left">
-                                            <Info size={12} className="text-text-dark" />
-                                            Event
-                                        </div>
-                                    </th>
-                                    <SortHeader label="Price" sortKey="price" minWidth="100px" className="mobile-feed-secondary" />
-                                    <SortHeader label="Chg 24h" sortKey="change" minWidth="90px" />
-                                    <SortHeader label="MCap" sortKey="cap" minWidth="100px" className="mobile-feed-secondary" />
-                                    <SortHeader label="DEX Volume" sortKey="volume" minWidth="110px" className="mobile-feed-secondary" />
-                                    <SortHeader label="Liquidity" sortKey="liquidity" minWidth="100px" className="mobile-feed-secondary" />
-                                    <SortHeader label="DEX Buys" sortKey="dexBuys" minWidth="90px" className="mobile-feed-secondary" />
-                                    <SortHeader label="DEX Sells" sortKey="dexSells" minWidth="90px" className="mobile-feed-secondary" />
-                                    <SortHeader label="DEX Flow" sortKey="netFlow" minWidth="140px" />
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {paginatedData.map((coin) => {
-                                    const changeVal = getChange(coin);
-                                    const flowVal = parseCurrency(coin.netFlow);
-                                    const absFlow = Math.abs(flowVal);
-                                    const flowPercent = maxAbsFlow > 0 ? (absFlow / maxAbsFlow) * 100 : 0;
-                                    const isPositiveFlow = !coin.netFlow.includes('-');
-                                    const flowColor = isPositiveFlow ? 'bg-primary-green' : 'bg-primary-red';
-                                    const flowTextColor = isPositiveFlow ? 'text-primary-green' : 'text-primary-red';
-                                    const event = AlphaGauntletService.qualifyToken(coin);
-                                    const eventLabel = getFeedEventLabel(coin, event?.eventType);
+                        <div
+                            ref={feedTableScrollerRef}
+                            onScroll={handleFeedTableHorizontalScroll}
+                            className="live-alpha-table-viewport custom-scrollbar"
+                        >
+                            <table className="data-table live-alpha-table">
+                                <thead>
+                                    <tr>
+                                        <SortHeader label="Chain Token" sortKey="ticker" minWidth="190px" />
+                                        <th style={{ minWidth: '170px' }}>
+                                            <div className="flex items-center gap-1.5 whitespace-nowrap text-left">
+                                                <Info size={12} className="text-text-dark" />
+                                                Event
+                                            </div>
+                                        </th>
+                                        <SortHeader label="Price" sortKey="price" minWidth="110px" className="mobile-feed-secondary" />
+                                        <SortHeader label="Chg 24h" sortKey="change" minWidth="100px" />
+                                        <SortHeader label="MCap" sortKey="cap" minWidth="120px" className="mobile-feed-secondary" />
+                                        <SortHeader label="DEX Volume" sortKey="volume" minWidth="130px" className="mobile-feed-secondary" />
+                                        <SortHeader label="Liquidity" sortKey="liquidity" minWidth="120px" className="mobile-feed-secondary" />
+                                        <SortHeader label="DEX Buys" sortKey="dexBuys" minWidth="105px" className="mobile-feed-secondary" />
+                                        <SortHeader label="DEX Sells" sortKey="dexSells" minWidth="105px" className="mobile-feed-secondary" />
+                                        <SortHeader label="DEX Flow" sortKey="netFlow" minWidth="150px" />
+                                        <SortHeader label="Sector" sortKey="sector" minWidth="120px" />
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {paginatedData.map((coin) => {
+                                        const changeVal = getChange(coin);
+                                        const flowVal = parseCurrency(coin.netFlow);
+                                        const absFlow = Math.abs(flowVal);
+                                        const flowPercent = maxAbsFlow > 0 ? (absFlow / maxAbsFlow) * 100 : 0;
+                                        const isPositiveFlow = !coin.netFlow.includes('-');
+                                        const flowColor = isPositiveFlow ? 'bg-primary-green' : 'bg-primary-red';
+                                        const flowTextColor = isPositiveFlow ? 'text-primary-green' : 'text-primary-red';
+                                        const event = AlphaGauntletService.qualifyToken(coin);
+                                        const eventLabel = getFeedEventLabel(coin, event?.eventType);
+                                        const sector = classifyTokenSector(coin);
+                                        const sectorLabel = sector.label;
+                                        const sectorTitle = `${sectorLabel}${sector.confidence === 'provider' ? ' (from provider metadata)' : ''}${sector.reasons.length ? ` - ${sector.reasons.join('; ')}` : ''}`;
 
-                                    return (
-                                        <tr
-                                            key={getRenderTokenKey(coin, 'feed')}
-                                            onClick={() => handleTokenNavigation(coin)}
-                                            className="cursor-pointer hover:bg-card-hover/50 transition-colors"
-                                        >
-                                            <td className="sticky-col">
-                                                <div className="flex items-center gap-2 w-[150px] max-w-[150px] overflow-hidden">
-                                                    <div className="w-5 h-5 flex items-center justify-center bg-card-hover rounded-full border border-border/50 shrink-0">
-                                                        <img src={getChainIcon(coin.chain)} alt={coin.chain} loading="lazy" decoding="async" className="w-3.5 h-3.5 opacity-80" />
+                                        return (
+                                            <tr
+                                                key={getRenderTokenKey(coin, 'feed')}
+                                                onClick={() => handleTokenNavigation(coin)}
+                                                className="cursor-pointer hover:bg-card-hover/50 transition-colors"
+                                            >
+                                                <td className="sticky-col">
+                                                    <div className="flex items-center gap-2 w-[170px] max-w-[170px] overflow-hidden">
+                                                        <div className="w-5 h-5 flex items-center justify-center bg-card-hover rounded-full border border-border/50 shrink-0">
+                                                            <img src={getChainIcon(coin.chain)} alt={coin.chain} loading="lazy" decoding="async" className="w-3.5 h-3.5 opacity-80" />
+                                                        </div>
+                                                        <img src={coin.img} alt={coin.name} width="24" height="24" loading="lazy" decoding="async" className="rounded-full shrink-0 object-cover bg-card" onError={handleImageError} />
+                                                        <div className="flex flex-col min-w-0 flex-1">
+                                                            <div className="font-bold text-xs leading-none text-text-light truncate" title={coin.ticker}>{coin.ticker}</div>
+                                                            <div className="text-[9px] text-text-dark font-medium leading-tight mt-0.5 truncate" title={coin.name}>{coin.name}</div>
+                                                        </div>
                                                     </div>
-                                                    <img src={coin.img} alt={coin.name} width="24" height="24" loading="lazy" decoding="async" className="rounded-full shrink-0 object-cover bg-card" onError={handleImageError} />
-                                                    <div className="flex flex-col min-w-0 flex-1">
-                                                        <div className="font-bold text-xs leading-none text-text-light truncate" title={coin.ticker}>{coin.ticker}</div>
-                                                        <div className="text-[9px] text-text-dark font-medium leading-tight mt-0.5 truncate" title={coin.name}>{coin.name}</div>
-                                                    </div>
-                                                </div>
-                                            </td>
+                                                </td>
 
-                                            <td className="text-left">
-                                                <div className="flex w-[150px] max-w-[150px] items-start">
-                                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${EVENT_BADGE_STYLE}`}>
-                                                        <span className="truncate" title={eventLabel}>{eventLabel}</span>
+                                                <td className="text-left">
+                                                    <div className="flex w-[160px] max-w-[160px] items-start">
+                                                        <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-tight ${EVENT_BADGE_STYLE}`}>
+                                                            <span className="truncate" title={eventLabel}>{eventLabel}</span>
+                                                        </span>
+                                                    </div>
+                                                </td>
+
+                                                <td className="mobile-feed-secondary font-mono text-xs text-text-light font-medium text-left">{coin.price}</td>
+                                                <td className={`font-bold text-xs text-left ${getPercentColor(changeVal)}`}>{changeVal}</td>
+                                                <td className="mobile-feed-secondary font-medium text-xs text-text-light text-left">{coin.cap}</td>
+                                                <td className="mobile-feed-secondary text-xs font-medium text-text-light text-left">{coin.volume24h}</td>
+                                                <td className="mobile-feed-secondary font-medium text-xs text-text-medium text-left">{coin.liquidity}</td>
+
+                                                <td className="mobile-feed-secondary font-mono text-xs text-primary-green text-left">{coin.dexBuys}</td>
+                                                <td className="mobile-feed-secondary font-mono text-xs text-primary-red text-left">{coin.dexSells}</td>
+
+                                                <td className="text-left">
+                                                    <div className="flex items-center justify-start gap-2 w-full">
+                                                        <span className={`font-bold text-xs font-mono w-[60px] text-left ${flowTextColor}`}>
+                                                            {coin.netFlow}
+                                                        </span>
+                                                        <div className="w-16 h-1.5 bg-card-hover rounded-full overflow-hidden shrink-0">
+                                                            <div
+                                                                className={`h-full rounded-full ${flowColor}`}
+                                                                style={{ width: `${flowPercent}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <td className="text-left">
+                                                    <span className="inline-flex max-w-[104px] items-center rounded-full border border-border bg-card-hover px-2 py-0.5 text-[10px] font-black uppercase leading-tight text-text-medium">
+                                                        <span className="truncate" title={sectorTitle}>{sectorLabel}</span>
                                                     </span>
-                                                </div>
-                                            </td>
-
-                                            <td className="mobile-feed-secondary font-mono text-xs text-text-light font-medium text-left">{coin.price}</td>
-                                            <td className={`font-bold text-xs text-left ${getPercentColor(changeVal)}`}>{changeVal}</td>
-                                            <td className="mobile-feed-secondary font-medium text-xs text-text-light text-left">{coin.cap}</td>
-                                            <td className="mobile-feed-secondary text-xs font-medium text-text-light text-left">{coin.volume24h}</td>
-                                            <td className="mobile-feed-secondary font-medium text-xs text-text-medium text-left">{coin.liquidity}</td>
-
-                                            <td className="mobile-feed-secondary font-mono text-xs text-primary-green text-left">{coin.dexBuys}</td>
-                                            <td className="mobile-feed-secondary font-mono text-xs text-primary-red text-left">{coin.dexSells}</td>
-
-                                            <td className="text-left">
-                                                <div className="flex items-center justify-start gap-2 w-full">
-                                                    <span className={`font-bold text-xs font-mono w-[60px] text-left ${flowTextColor}`}>
-                                                        {coin.netFlow}
-                                                    </span>
-                                                    <div className="w-16 h-1.5 bg-card-hover rounded-full overflow-hidden shrink-0">
-                                                        <div
-                                                            className={`h-full rounded-full ${flowColor}`}
-                                                            style={{ width: `${flowPercent}%` }}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
 
-                <div className="mt-6 flex justify-between items-center border-t border-border pt-4">
+                <div className="flex items-center justify-between border-t border-border px-4 py-4 md:px-6">
                     <button
                         onClick={handlePrevPage}
                         disabled={currentPage === 1}
@@ -1390,6 +1497,39 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                     >
                         Next Page <ChevronRight size={16} />
                     </button>
+                </div>
+                <div
+                    ref={feedFixedHeaderRef}
+                    onScroll={handleFeedFixedHeaderScroll}
+                    className={`live-alpha-fixed-header custom-scrollbar ${feedScrollRailFrame.headerActive ? 'is-active' : ''}`}
+                    style={{
+                        left: `${feedScrollRailFrame.left}px`,
+                        width: `${feedScrollRailFrame.width}px`
+                    }}
+                    aria-hidden={!feedScrollRailFrame.headerActive}
+                >
+                    <table className="data-table live-alpha-table">
+                        <thead>
+                            <tr>
+                                <SortHeader label="Chain Token" sortKey="ticker" minWidth="190px" />
+                                <th style={{ minWidth: '170px' }}>
+                                    <div className="flex items-center gap-1.5 whitespace-nowrap text-left">
+                                        <Info size={12} className="text-text-dark" />
+                                        Event
+                                    </div>
+                                </th>
+                                <SortHeader label="Price" sortKey="price" minWidth="110px" className="mobile-feed-secondary" />
+                                <SortHeader label="Chg 24h" sortKey="change" minWidth="100px" />
+                                <SortHeader label="MCap" sortKey="cap" minWidth="120px" className="mobile-feed-secondary" />
+                                <SortHeader label="DEX Volume" sortKey="volume" minWidth="130px" className="mobile-feed-secondary" />
+                                <SortHeader label="Liquidity" sortKey="liquidity" minWidth="120px" className="mobile-feed-secondary" />
+                                <SortHeader label="DEX Buys" sortKey="dexBuys" minWidth="105px" className="mobile-feed-secondary" />
+                                <SortHeader label="DEX Sells" sortKey="dexSells" minWidth="105px" className="mobile-feed-secondary" />
+                                <SortHeader label="DEX Flow" sortKey="netFlow" minWidth="150px" />
+                                <SortHeader label="Sector" sortKey="sector" minWidth="120px" />
+                            </tr>
+                        </thead>
+                    </table>
                 </div>
             </div>
 

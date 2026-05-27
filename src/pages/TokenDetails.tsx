@@ -113,15 +113,21 @@ const describeDonutSlice = (
     ].join(' ');
 };
 
-const getDexscreenerChartUrl = (chainId?: string, pairAddress?: string, compact = true) => {
+const getDexscreenerChartUrl = (chainId?: string, pairAddress?: string, compact = true, theme: 'light' | 'dark' = 'dark') => {
     if (!chainId || !pairAddress) return '';
     const params = new URLSearchParams({
         embed: '1',
-        theme: 'dark',
+        theme,
+        chartTheme: theme,
         trades: compact ? '0' : '1',
-        info: compact ? '0' : '1'
+        info: compact ? '0' : '1',
+        loadChartSettings: '0'
     });
     return `https://dexscreener.com/${chainId}/${pairAddress}?${params.toString()}`;
+};
+
+const setCredentiallessFrame = (node: HTMLIFrameElement | null) => {
+    node?.setAttribute('credentialless', '');
 };
 
 const getSafeScanChain = (chainId?: string) => {
@@ -147,7 +153,26 @@ export const TokenDetails: React.FC = () => {
     const [marketPanelTab, setMarketPanelTab] = useState<'activity' | 'holders'>('holders');
     const [compactChartLoaded, setCompactChartLoaded] = useState(false);
     const [activityRefreshing, setActivityRefreshing] = useState(false);
+    const [chartTheme, setChartTheme] = useState<'light' | 'dark'>(() => {
+        if (typeof document === 'undefined') return 'light';
+        return document.documentElement.dataset.atlaixTheme === 'dark' || document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'light';
+    });
     const lastActivityLoadKeyRef = useRef('');
+
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        const updateChartTheme = () => {
+            setChartTheme(document.documentElement.dataset.atlaixTheme === 'dark' || document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'light');
+        };
+        updateChartTheme();
+        const observer = new MutationObserver(updateChartTheme);
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-atlaix-theme'] });
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        setCompactChartLoaded(false);
+    }, [chartTheme, enrichedData?.pairAddress]);
 
     const onBack = () => {
         navigate(-1);
@@ -375,8 +400,8 @@ export const TokenDetails: React.FC = () => {
         });
     })();
     const tokenAddress = enrichedData?.baseToken.address || address || '';
-    const tokenChain = enrichedData?.chainId || preferredChain || 'solana';
-    const tokenPair = enrichedData?.pairAddress || preferredPairAddress || '';
+    const tokenChain = preferredChain || enrichedData?.chainId || 'solana';
+    const tokenPair = preferredPairAddress || enrichedData?.pairAddress || '';
     const quickActions = [
         {
             icon: Scan,
@@ -407,9 +432,9 @@ export const TokenDetails: React.FC = () => {
         }
     ];
     const tokenIntelligencePanel = (
-        <div className="rounded-lg border border-border bg-card p-5">
+        <div className="token-intelligence-panel rounded-lg border border-border bg-card p-5">
             <h3 className="mb-4 text-base font-bold text-text-light">Token Intelligence</h3>
-            <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/50">
+            <div className="token-intelligence-list divide-y divide-border/60 overflow-hidden rounded-lg border border-border/50">
                 {[
                     { icon: Droplets, label: 'LP Pools', value: enrichedData?.poolCount ? `${enrichedData.poolCount} Active` : '1 Active', valueClass: 'text-text-light' },
                     { icon: Users, label: 'Active Wallets', value: enrichedData?.activeWallets24h ? enrichedData.activeWallets24h.toLocaleString() : 'N/A', valueClass: 'text-text-light' },
@@ -420,9 +445,9 @@ export const TokenDetails: React.FC = () => {
                     { icon: Users, label: 'Holder Distribution', value: enrichedData?.holders ? enrichedData.holders.toLocaleString() : 'N/A', valueClass: 'text-text-light' },
                     { icon: Activity, label: 'Age', value: getAgeLabel(enrichedData?.pairCreatedAt), valueClass: 'text-text-light' }
                 ].map((item) => (
-                    <div key={item.label} className="flex items-center justify-between gap-4 bg-main/20 px-3 py-3">
+                    <div key={item.label} className="token-intelligence-row flex items-center justify-between gap-4 bg-main/20 px-3 py-3">
                         <div className="flex min-w-0 items-center gap-3">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-card text-primary-green">
+                            <span className="token-intelligence-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-card text-primary-green">
                                 <item.icon size={16} />
                             </span>
                             <span className="truncate text-sm font-medium text-text-light">{item.label}</span>
@@ -526,7 +551,7 @@ export const TokenDetails: React.FC = () => {
                                 <span className="h-1 w-1 rounded-full bg-text-dark" />
                                 <span className="capitalize">{enrichedData?.dexId || 'DEX'}</span>
                             </div>
-                            <button onClick={copyAddress} className="mt-3 flex max-w-full items-center gap-2 rounded-md border border-border bg-main/60 px-3 py-1.5 font-mono text-xs text-text-medium transition-colors hover:border-primary-green/40 hover:text-text-light">
+                            <button onClick={copyAddress} className="token-contract-address-pill mt-3 flex max-w-full items-center gap-2 rounded-md border border-border bg-main/60 px-3 py-1.5 font-mono text-xs text-text-medium transition-colors hover:border-primary-green/40 hover:text-text-light">
                                 <span className="truncate">{shortAddress(enrichedData?.baseToken.address, 12, 10)}</span>
                                 <Copy size={13} />
                                 {copied && <span className="font-sans text-[10px] font-bold text-primary-green">Copied</span>}
@@ -534,7 +559,7 @@ export const TokenDetails: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:w-[780px]">
+                    <div className="token-details-top-metrics grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:w-[780px]">
                         {[
                             { label: 'Price (USD)', value: currentPrice, large: true, change: h24Change },
                             { label: 'Market Cap', value: formatCompactNumber(marketCap, '$') },
@@ -542,10 +567,10 @@ export const TokenDetails: React.FC = () => {
                             { label: '24H Low', value: formatPrice(low24) },
                             { label: '24H Volume', value: formatCompactNumber(volume24h, '$') }
                         ].map((metric, index) => (
-                            <div key={metric.label} className={`min-w-0 border-border/70 ${index > 0 ? 'lg:border-l lg:pl-5' : ''}`}>
+                            <div key={metric.label} className={`token-details-top-metric min-w-0 border-border/70 ${index > 0 ? 'lg:border-l lg:pl-5' : ''}`}>
                                 <div className="text-[10px] font-bold uppercase tracking-wide text-text-medium">{metric.label}</div>
                                 <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                                    <span className={`${metric.large ? 'text-2xl lg:text-[26px]' : 'text-base lg:text-lg'} min-w-0 break-words font-bold leading-tight text-text-light`}>{metric.value}</span>
+                                    <span className={`${metric.large ? 'text-xl lg:text-[22px]' : 'text-base lg:text-lg'} min-w-0 break-words font-bold leading-tight text-text-light`}>{metric.value}</span>
                                     {typeof metric.change === 'number' && (
                                         <span className={`text-xs font-black ${metric.change >= 0 ? 'text-primary-green' : 'text-primary-red'}`}>
                                             {metric.change >= 0 ? '+' : ''}{metric.change.toFixed(2)}%
@@ -567,13 +592,14 @@ export const TokenDetails: React.FC = () => {
                                 <div className="text-sm font-bold text-text-light">Loading chart...</div>
                             </div>
                         )}
-                        {getDexscreenerChartUrl(enrichedData?.chainId, enrichedData?.pairAddress, true) ? (
+                        {getDexscreenerChartUrl(tokenChain, tokenPair, true, chartTheme) ? (
                             <iframe
-                                key={enrichedData?.pairAddress}
-                                src={getDexscreenerChartUrl(enrichedData?.chainId, enrichedData?.pairAddress, true)}
-                                className={`h-full w-full transition-opacity duration-300 ${compactChartLoaded ? 'opacity-100' : 'opacity-0'}`}
+                                key={`${tokenChain}-${tokenPair}-${chartTheme}`}
+                                src={getDexscreenerChartUrl(tokenChain, tokenPair, true, chartTheme)}
+                                className={`token-dex-chart-frame h-full w-full transition-opacity duration-300 ${chartTheme === 'light' ? 'is-light-mode' : ''} ${compactChartLoaded ? 'opacity-100' : 'opacity-0'}`}
                                 title={`${tokenSymbol} token chart`}
                                 allow="clipboard-write"
+                                ref={setCredentiallessFrame}
                                 onLoad={() => setCompactChartLoaded(true)}
                             />
                         ) : (
@@ -593,7 +619,7 @@ export const TokenDetails: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="rounded-lg border border-border bg-card p-5">
+                <div className="token-quick-actions-panel rounded-lg border border-border bg-card p-5">
                     <h3 className="mb-4 text-base font-bold text-text-light">Quick Actions</h3>
                     <div className="grid gap-3">
                         {quickActions.map((action) => (
@@ -601,12 +627,12 @@ export const TokenDetails: React.FC = () => {
                                 key={action.title}
                                 onClick={() => navigate(action.path)}
                                 disabled={!tokenAddress}
-                                className="flex items-center gap-3 rounded-lg border border-border bg-main/50 p-3 text-left text-primary-green transition-colors hover:border-primary-green/40 hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-60"
+                                className="token-quick-action-button flex items-center gap-3 rounded-lg border border-border bg-main/50 p-3 text-left text-primary-green transition-colors hover:border-primary-green/40 hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-green/10">
+                                <span className="token-quick-action-icon flex h-10 w-10 items-center justify-center rounded-lg bg-primary-green/10">
                                     <action.icon size={18} />
                                 </span>
-                                <span>
+                                <span className="min-w-0">
                                     <span className="block text-sm font-bold text-text-light">{action.title}</span>
                                     <span className="block text-xs text-text-medium">{action.subtitle}</span>
                                 </span>
@@ -622,7 +648,7 @@ export const TokenDetails: React.FC = () => {
                     {holderDistributionPanel}
                 </div>
 
-                <div className="atlaix-folder-shell">
+                <div className="atlaix-folder-shell token-market-panel-shell">
                         <div className="mb-0 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                             <div className="min-w-0">
                                 <div className="atlaix-folder-strip">
@@ -788,7 +814,7 @@ export const TokenDetails: React.FC = () => {
             </section>
 
             {chartExpanded && (
-                <div className="fixed inset-0 z-[9999] bg-[#050B10]">
+                <div className="fixed inset-0 z-[9999] bg-main">
                     <div className="flex h-screen w-screen flex-col">
                         <div className="flex items-center justify-between border-b border-border bg-card px-5 py-4">
                             <div>
@@ -805,13 +831,15 @@ export const TokenDetails: React.FC = () => {
                         {enrichedData?.pairAddress ? (
                             <div className="relative min-h-0 flex-1">
                                 <iframe
-                                    src={getDexscreenerChartUrl(enrichedData.chainId || 'ethereum', enrichedData.pairAddress, true)}
-                                    className="h-full w-full"
+                                    key={`${tokenChain}-${tokenPair}-${chartTheme}-expanded`}
+                                    src={getDexscreenerChartUrl(tokenChain, tokenPair, true, chartTheme)}
+                                    className={`token-dex-chart-frame h-full w-full ${chartTheme === 'light' ? 'is-light-mode' : ''}`}
                                     title={`${tokenSymbol} full chart`}
                                     allow="clipboard-write"
                                     allowFullScreen
+                                    ref={setCredentiallessFrame}
                                 />
-                                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex h-11 items-center justify-center border-t border-border bg-[#050B10]" />
+                                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex h-11 items-center justify-center border-t border-border bg-main" />
                             </div>
                         ) : (
                             <div className="flex flex-1 items-center justify-center text-text-medium">Full chart is not available for this token yet.</div>

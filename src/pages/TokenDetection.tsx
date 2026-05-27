@@ -1,7 +1,7 @@
 // Route-level token scan screen for the Atlaix application.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Activity, AlertTriangle, ArrowLeft, Bell, Copy, ExternalLink, RefreshCw, Search, Shield } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, Bell, Copy, ExternalLink, RefreshCw, Search, Shield, ShieldAlert } from 'lucide-react';
 import { ChainActivityService } from '../services/ChainActivityService';
 import { DatabaseService } from '../services/DatabaseService';
 import { enrichDetectionEvent } from '../services/detection/DetectionEventPresenter';
@@ -582,7 +582,7 @@ export const TokenDetection: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-3 text-text-medium text-sm ml-1 mt-1">
                             <button
                                 type="button"
-                                className="flex items-center gap-1.5 bg-card/50 px-2.5 py-1 rounded-lg border border-border/50 transition-colors hover:border-border disabled:cursor-not-allowed disabled:opacity-60 group/copy"
+                                className="token-contract-address-pill flex items-center gap-1.5 bg-card/50 px-2.5 py-1 rounded-lg border border-border/50 transition-colors hover:border-border disabled:cursor-not-allowed disabled:opacity-60 group/copy"
                                 disabled={!(token?.address || tokenQuery)}
                                 onClick={handleCopyAddress}
                                 title={copyState === 'copied' ? 'Copied contract address' : copyState === 'error' ? 'Copy failed' : 'Copy contract address'}
@@ -609,7 +609,7 @@ export const TokenDetection: React.FC = () => {
                             {isDetectionToken && detectionEventType && (
                                 <>
                                     <div className="h-1 w-1 rounded-full bg-border"></div>
-                                    <span className="rounded border border-border bg-card/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-text-medium">
+                                    <span className="token-detection-event-pill rounded border border-border bg-card/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-text-medium">
                                         Admitted as {detectionEvent?.lane || detectionEventType}
                                     </span>
                                 </>
@@ -635,7 +635,7 @@ export const TokenDetection: React.FC = () => {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
                 {metrics.map((item, index) => (
-                    <div key={index} className="bg-card border border-border/50 rounded-xl p-3 flex flex-col justify-center gap-0.5 shadow-sm hover:border-border transition-colors min-h-[90px]">
+                    <div key={index} className="green-corner-card bg-card border border-border/50 rounded-xl p-3 flex flex-col justify-center gap-0.5 shadow-sm hover:border-border transition-colors min-h-[90px]">
                         <span className="text-text-medium text-[9px] md:text-[10px] font-medium uppercase tracking-wider whitespace-nowrap">{item.label}</span>
                         <div className="flex items-center gap-2 min-w-0">
                             <span className="text-sm md:text-base font-bold text-text-light tracking-tight truncate">{loading ? '...' : item.value}</span>
@@ -650,7 +650,7 @@ export const TokenDetection: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-6">
-                <div className="bg-card border border-border rounded-2xl p-6">
+                <div className="green-corner-card bg-card border border-border rounded-2xl p-6">
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-lg">Token Detection Chart</h3>
                         <span className="text-xs font-bold uppercase tracking-wide text-text-medium">Market Chart</span>
@@ -664,7 +664,7 @@ export const TokenDetection: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="bg-card border border-border rounded-2xl p-6">
+                <div className="green-corner-card bg-card border border-border rounded-2xl p-6">
                     <h3 className="font-bold text-lg mb-6">Quick Actions</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
                         <button
@@ -710,23 +710,41 @@ export const TokenDetection: React.FC = () => {
                     <>
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                             {visibleActivity.map((event, index) => (
-                                <div key={`${event.id}-${index}`} className="bg-card border border-border rounded-xl flex overflow-hidden group hover:border-text-medium transition-colors shadow-md h-full">
-                                    <div className={`w-1.5 shrink-0 ${severityStyles(event.severity).bar}`}></div>
-                                    <div className="flex-1 p-5 flex flex-col justify-between gap-3">
+                                <div key={`${event.id}-${index}`} className="detection-event-card group flex w-full overflow-hidden rounded-xl border border-border bg-[#1C1F22] text-left shadow-sm transition-colors hover:border-text-medium">
+                                    <div className="flex min-h-[128px] flex-1 flex-col justify-between p-3.5">
                                         <div>
-                                            <div className="flex justify-between items-start mb-2">
-                                                <div className="flex items-center gap-2 font-bold text-xs text-text-light uppercase tracking-wide">
-                                                    <Activity size={16} /> {event.title}
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase text-text-light">
+                                                    <ShieldAlert size={13} className="shrink-0 text-text-light" />
+                                                    <span className="truncate">{event.title}</span>
                                                 </div>
-                                                <span className="text-[10px] text-text-dark font-mono whitespace-nowrap">{getTimeAgo(event.detectedAt)}</span>
+                                                <span className="shrink-0 text-[10px] font-mono text-text-medium">{getTimeAgo(event.detectedAt)}</span>
                                             </div>
-                                            <p className="text-sm text-text-light font-medium leading-snug line-clamp-2">{event.description}</p>
+                                            <p className="mt-3 line-clamp-2 text-xs font-bold leading-snug text-text-light">{event.description}</p>
                                         </div>
-                                        <div className="flex justify-between items-center pt-3 border-t border-border/50 mt-auto gap-3">
-                                            <span className="min-w-0 truncate text-xs font-bold text-text-medium" title={token?.name || tokenQuery}>
-                                                {token?.name || tokenQuery}
-                                            </span>
-                                            <span className="shrink-0 text-text-light font-bold text-sm whitespace-nowrap">{formatCurrency(event.usdValue)}</span>
+                                        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-2.5">
+                                            <div className="flex min-w-0 items-center gap-2">
+                                                {token?.imageUrl && (
+                                                    <img
+                                                        src={token.imageUrl}
+                                                        alt={token.symbol}
+                                                        title={token.name}
+                                                        className="h-5 w-5 shrink-0 rounded-full border border-border bg-[#111315] object-cover"
+                                                        onError={(imageEvent) => { imageEvent.currentTarget.style.display = 'none'; }}
+                                                    />
+                                                )}
+                                                <span className="truncate text-[11px] font-black text-text-medium" title={token?.name || tokenQuery}>
+                                                    {token?.symbol || tokenQuery}
+                                                </span>
+                                            </div>
+                                            <div className="flex shrink-0 items-center gap-2">
+                                                <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${severityStyles(event.severity).label}`}>
+                                                    {event.severity}
+                                                </span>
+                                                <span className="font-mono text-[11px] font-black text-text-light">
+                                                    {formatCurrency(event.usdValue)}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -742,7 +760,7 @@ export const TokenDetection: React.FC = () => {
                         )}
                     </>
                 ) : (
-                    <div className="bg-card border border-border rounded-xl p-6 text-text-medium">
+                    <div className="green-corner-card bg-card border border-border rounded-xl p-6 text-text-medium">
                         {activityLoading
                             ? 'Loading recent token activity...'
                             : 'No major activity has been detected yet. New major activity will appear here as it is found.'}

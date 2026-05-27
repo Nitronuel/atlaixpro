@@ -61,10 +61,10 @@ const normalizeChain = (chain: string) => {
     return chain || 'Unknown';
 };
 
-const eventSentimentAccentClass = (sentiment: GlobalTokenEvent['sentiment']) => {
-    if (sentiment === 'bullish') return 'bg-primary-green';
-    if (sentiment === 'bearish') return 'bg-primary-red';
-    return 'bg-primary-yellow';
+const eventSentimentCardClass = (sentiment: GlobalTokenEvent['sentiment']) => {
+    if (sentiment === 'bullish') return 'detection-event-card--bullish';
+    if (sentiment === 'bearish') return 'detection-event-card--bearish';
+    return 'detection-event-card--neutral';
 };
 
 const eventSentimentLabelClass = (sentiment: GlobalTokenEvent['sentiment']) => {
@@ -493,7 +493,7 @@ export const Detection: React.FC = () => {
                                                     key={eventType}
                                                     type="button"
                                                     onClick={() => toggleEventType(eventType)}
-                                                    className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-bold text-text-light transition-colors hover:bg-card"
+                                                    className={`filter-list-item flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-bold text-text-light transition-colors hover:bg-card ${selected ? 'selected' : ''}`}
                                                 >
                                                     <span className="min-w-0 truncate">{eventType}</span>
                                                     <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? 'border-primary-green bg-primary-green text-main' : 'border-border text-transparent'}`}>
@@ -556,9 +556,8 @@ export const Detection: React.FC = () => {
                                     <button
                                         key={globalEvent.id}
                                         onClick={() => navigate(`/detection/token/${encodeURIComponent(event.token.address || event.token.ticker)}?source=detection&severity=${encodeURIComponent(event.severity)}&eventType=${encodeURIComponent(event.eventType)}&score=${encodeURIComponent(String(event.score))}&detectedAt=${encodeURIComponent(String(event.detectedAt))}`)}
-                                        className="group flex w-full overflow-hidden rounded-xl border border-border bg-[#1C1F22] text-left shadow-sm transition-colors hover:border-text-medium"
+                                        className={`detection-event-card ${eventSentimentCardClass(globalEvent.sentiment)} group flex w-full overflow-hidden rounded-xl border border-border bg-[#1C1F22] text-left shadow-sm transition-colors hover:border-text-medium`}
                                     >
-                                        <div className={`w-1.5 shrink-0 ${eventSentimentAccentClass(globalEvent.sentiment)}`}></div>
                                         <div className="flex min-h-[128px] flex-1 flex-col justify-between p-3.5">
                                             <div>
                                                 <div className="flex items-start justify-between gap-3">

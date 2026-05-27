@@ -51,11 +51,11 @@ export const Sentiment: React.FC = () => {
                 colors: ['#26D356', '#9B51E0', '#2F80ED', '#EB5757'], 
                 stroke: { curve: 'smooth', width: 2 },
                 dataLabels: { enabled: false },
-                xaxis: { categories: categories, labels: { style: { colors: '#8F96A3', fontSize: '10px', fontFamily: 'Inter' } }, axisBorder: { show: false }, axisTicks: { show: false }, tickAmount: 5 },
-                yaxis: { show: true, labels: { style: { colors: '#8F96A3', fontFamily: 'Inter' } } },
+                xaxis: { categories: categories, labels: { style: { colors: '#8F96A3', fontSize: '10px', fontFamily: 'Geist' } }, axisBorder: { show: false }, axisTicks: { show: false }, tickAmount: 5 },
+                yaxis: { show: true, labels: { style: { colors: '#8F96A3', fontFamily: 'Geist' } } },
                 grid: { show: true, borderColor: '#2A2E33', strokeDashArray: 4, xaxis: { lines: { show: false } } },
                 theme: { mode: 'dark' },
-                legend: { position: 'top', horizontalAlign: 'left', labels: { colors: '#EAECEF', fontFamily: 'Inter' } }
+                legend: { position: 'top', horizontalAlign: 'left', labels: { colors: '#EAECEF', fontFamily: 'Geist' } }
             };
 
             if (chartInstance.current) { chartInstance.current.destroy(); }
@@ -75,12 +75,12 @@ export const Sentiment: React.FC = () => {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
                 <div className="w-full max-w-lg text-center">
-                    <h2 className="text-2xl font-bold mb-6">Sentiment Analysis</h2>
+                    <h2 className="text-2xl font-bold mb-6">Narrative Analysis</h2>
                     <div className="bg-main border border-border rounded-xl p-1 mb-4 flex items-center">
                         <input type="text" className="w-full bg-transparent p-4 text-text-light outline-none" placeholder="Enter Token Contract Address" value={contract} onChange={(e) => setContract(e.target.value)} />
                     </div>
                     <button className="w-full py-4 bg-primary-green text-main font-bold rounded-xl hover:bg-primary-green-darker transition-colors" onClick={() => { if(contract) setAnalyzed(true); }}>
-                        Analyze Sentiment
+                        Analyze Narrative
                     </button>
                 </div>
             </div>
