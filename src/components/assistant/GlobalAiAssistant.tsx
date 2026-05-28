@@ -477,7 +477,7 @@ const getRouteContext = (pathname: string, searchParams: URLSearchParams): Route
             subjectChain: chain,
             pairAddress: pair,
             module: 'token',
-            preferredTools: ['get_token_deep_brief', 'get_token_overview', 'get_detection_filtered', 'run_safe_scan', 'prepare_alert_setup'],
+            preferredTools: ['get_token_deep_brief', 'get_token_overview', 'get_token_holders', 'get_token_top_holder', 'get_token_holder_concentration', 'get_token_holder_bundle', 'get_detection_filtered', 'run_safe_scan', 'prepare_alert_setup'],
             icon: <Activity size={18} />,
             prompts: [
                 'Explain this token in plain English',
