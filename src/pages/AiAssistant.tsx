@@ -344,6 +344,12 @@ export const AiAssistant: React.FC = () => {
         window.open(href, '_blank', 'noopener,noreferrer');
     };
 
+    const startNewChat = () => {
+        setActiveMenu('assistant');
+        setMessages([createWelcomeMessage()]);
+        setDraft('');
+    };
+
     const sendMessage = async (text = draft) => {
         const trimmed = text.trim();
         if (!trimmed || sending) return;
@@ -486,11 +492,7 @@ export const AiAssistant: React.FC = () => {
                             ))}
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setActiveMenu('assistant');
-                                    setMessages([createWelcomeMessage()]);
-                                    setDraft('');
-                                }}
+                                onClick={startNewChat}
                                 className="flex h-11 shrink-0 items-center gap-2 rounded-full border border-border bg-main px-3 text-text-medium transition-colors hover:border-primary-green/50 hover:text-primary-green"
                                 aria-label="New assistant chat"
                             >
@@ -592,14 +594,23 @@ export const AiAssistant: React.FC = () => {
                                                     placeholder="Ask Atlaix AI"
                                                     className="ai-assistant-textarea max-h-32 min-h-[48px] w-full resize-none bg-transparent px-1 py-1 text-base font-medium text-text-light outline-none placeholder:text-text-dark"
                                                 />
-                                                <div className="flex items-center justify-end gap-3">
+                                                <div className="flex items-center justify-end gap-2">
                                                     <button
                                                         type="submit"
                                                         disabled={!draft.trim() || sending}
-                                                        className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-green text-main transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-45"
+                                                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-green text-main transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-45"
                                                         aria-label="Send assistant message"
                                                     >
                                                         <Send size={17} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={startNewChat}
+                                                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-green text-main transition-colors hover:bg-primary-green/90"
+                                                        aria-label="New assistant chat"
+                                                        title="New chat"
+                                                    >
+                                                        <Plus size={18} />
                                                     </button>
                                                 </div>
                                             </form>
@@ -718,7 +729,7 @@ export const AiAssistant: React.FC = () => {
                                     sendMessage();
                                 }}
                             >
-                                <div className="flex items-end gap-3">
+                                <div className="flex items-center gap-3">
                                     <textarea
                                         value={draft}
                                         onChange={(event) => setDraft(event.target.value)}
@@ -729,35 +740,31 @@ export const AiAssistant: React.FC = () => {
                                             }
                                         }}
                                         placeholder="Message Atlaix AI"
-                                        className="ai-assistant-textarea max-h-32 min-h-[48px] flex-1 resize-none rounded-2xl border border-border bg-main px-4 py-3 text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
+                                        className="ai-assistant-textarea max-h-32 min-h-[52px] flex-1 resize-none rounded-2xl border border-border bg-main px-4 py-[14px] text-sm font-medium text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60"
                                     />
-                                    <button
-                                        type="submit"
-                                        disabled={!draft.trim() || sending}
-                                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-green text-main transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-50"
-                                        aria-label="Send assistant message"
-                                    >
-                                        <Send size={18} />
-                                    </button>
+                                    <div className="flex shrink-0 items-center gap-3 self-center">
+                                        <button
+                                            type="submit"
+                                            disabled={!draft.trim() || sending}
+                                            className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-green text-main transition-colors hover:bg-primary-green/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                            aria-label="Send assistant message"
+                                        >
+                                            <Send size={18} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={startNewChat}
+                                            className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-green text-main transition-colors hover:bg-primary-green/90"
+                                            aria-label="New assistant chat"
+                                            title="New chat"
+                                        >
+                                            <Plus size={20} />
+                                        </button>
+                                    </div>
                                 </div>
                             </form>
                         </div>
                     </div>}
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setActiveMenu('assistant');
-                            setMessages([createWelcomeMessage()]);
-                            setDraft('');
-                        }}
-                        className="group absolute bottom-5 right-5 hidden h-12 w-12 items-center justify-center gap-2 overflow-hidden rounded-full bg-primary-green px-0 text-main shadow-[0_14px_44px_rgba(38,211,86,0.25)] transition-[width,transform,padding] duration-200 hover:w-36 hover:scale-105 hover:px-4 lg:flex"
-                        aria-label="New assistant chat"
-                    >
-                        <Plus size={20} className="shrink-0 transition-transform duration-200 group-hover:rotate-90" />
-                        <span className="w-0 overflow-hidden whitespace-nowrap text-sm font-black opacity-0 transition-all duration-200 group-hover:w-[72px] group-hover:opacity-100">
-                            New chat
-                        </span>
-                    </button>
                 </section>
             </div>
         </div>
