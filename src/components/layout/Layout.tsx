@@ -87,6 +87,7 @@ const formatPlanLabel = (plan?: string) => {
 export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthenticated, authLoading, profile, userEmail, onLogin }) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [navPinned, setNavPinned] = useState(false);
+  const [navHoverSuppressed, setNavHoverSuppressed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [darkMode, setDarkMode] = useState(() => {
@@ -112,6 +113,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
   const handleNavigation = (path: string) => {
     setMobileNavOpen(false);
     setNavPinned(false);
+    setNavHoverSuppressed(true);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     navigate(path);
   };
 
@@ -229,7 +234,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                     aria-expanded={userMenuOpen}
                   >
                     {isAuthenticated ? (
-                      <span className="grid h-full w-full place-items-center bg-[linear-gradient(135deg,#10131A,#3FA34D)] text-sm font-black text-white">{initial}</span>
+                      <span className="atlaix-profile-initial grid h-full w-full place-items-center text-sm font-black">{initial}</span>
                     ) : (
                       <User size={19} />
                     )}
@@ -240,7 +245,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                       <div className="fixed inset-0 z-[70]" onClick={() => setUserMenuOpen(false)} />
                       <div role="menu" className="atlaix-profile-menu absolute right-0 top-14 z-[80] w-72 overflow-hidden rounded-[24px] border border-[#D8EBDD] bg-white p-2 shadow-[0_18px_42px_rgba(50,74,59,0.16)] animate-fade-in">
                         <div className="atlaix-profile-summary flex items-center gap-3 rounded-[20px] bg-[#F2FAF5] p-3">
-                          <div className="atlaix-profile-avatar grid h-12 w-12 shrink-0 place-items-center rounded-full bg-black text-base font-black text-white">
+                          <div className="atlaix-profile-avatar grid h-12 w-12 shrink-0 place-items-center rounded-full text-base font-black">
                             {isAuthenticated ? initial : <User size={20} />}
                           </div>
                           <div className="min-w-0">
@@ -352,9 +357,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                     className="atlaix-side-account-card flex w-full items-center gap-3 rounded-[18px] border border-border bg-card px-3 py-3 text-left shadow-sm transition-all hover:border-primary-green/45 hover:bg-primary-green/10"
                     aria-label={isAuthenticated ? 'Log out' : 'Log in'}
                   >
-                    <span className={`atlaix-profile-avatar grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-black ${
-                      isAuthenticated ? 'bg-primary-green text-main' : 'bg-card-hover text-text-light ring-1 ring-border'
-                    }`}>
+                    <span className="atlaix-profile-avatar grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-black">
                       {isAuthenticated ? initial : <User size={20} />}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -372,13 +375,17 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
 
           <div className="pointer-events-none fixed bottom-5 left-0 top-[76px] z-50 hidden w-[72px] lg:block">
             <aside
-              className={`atlaix-app-rail group/app-rail pointer-events-auto absolute inset-y-0 left-0 flex flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/58 shadow-[18px_24px_70px_rgba(93,112,145,0.16),inset_0_1px_0_rgba(255,255,255,0.92)] backdrop-blur-2xl transition-[width,box-shadow] duration-300 ease-out hover:w-[286px] hover:shadow-[22px_28px_80px_rgba(73,119,88,0.20)] focus-within:w-[286px] focus-within:shadow-[22px_28px_80px_rgba(73,119,88,0.20)] ${navPinned ? 'is-pinned w-[286px]' : 'w-[72px]'}`}
+              className={`atlaix-app-rail group/app-rail pointer-events-auto absolute inset-y-0 left-0 flex flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/58 shadow-[18px_24px_70px_rgba(93,112,145,0.16),inset_0_1px_0_rgba(255,255,255,0.92)] backdrop-blur-2xl transition-[width,box-shadow] duration-300 ease-out hover:w-[286px] hover:shadow-[22px_28px_80px_rgba(73,119,88,0.20)] focus-within:w-[286px] focus-within:shadow-[22px_28px_80px_rgba(73,119,88,0.20)] ${navPinned ? 'is-pinned w-[286px]' : 'w-[72px]'} ${navHoverSuppressed ? 'is-auto-collapsed' : ''}`}
+              onMouseLeave={() => setNavHoverSuppressed(false)}
               aria-label="Primary navigation"
             >
               <div className="flex h-20 items-center gap-3 px-3">
                 <button
                   type="button"
-                  onClick={() => setNavPinned((current) => !current)}
+                  onClick={() => {
+                    setNavHoverSuppressed(false);
+                    setNavPinned((current) => !current);
+                  }}
                   className={`grid h-12 w-12 shrink-0 place-items-center rounded-full transition-all ${
                     navPinned
                       ? 'bg-primary-green text-white shadow-[0_12px_30px_rgba(63,163,77,0.28)]'
@@ -444,9 +451,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                   aria-label={isAuthenticated ? 'Log out' : 'Log in'}
                   title={isAuthenticated ? 'Log out' : 'Log in'}
                 >
-                  <span className={`atlaix-profile-avatar grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-black ${
-                    isAuthenticated ? 'bg-primary-green text-main' : 'bg-card-hover text-text-light ring-1 ring-border'
-                  }`}>
+                  <span className="atlaix-profile-avatar grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-black">
                     {isAuthenticated ? initial : <User size={19} />}
                   </span>
                   <span className={`atlaix-rail-reveal min-w-0 flex-1 ${navPinned ? 'opacity-100 translate-x-0' : ''}`}>

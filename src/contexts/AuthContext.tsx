@@ -53,14 +53,20 @@ const clearAtlaixLocalCaches = () => {
 
     const cacheKeys = [
         'atlaix-live-alpha-cache',
+        'atlaix-live-alpha-feed-order-v1',
+        'atlaix-live-alpha-feed-snapshot-v1',
         'atlaix-detection-events-cache',
         'atlaix-global-events-cache',
+        'atlaix-global-ai-assistant-v2',
+        'atlaix-ai-assistant-chat-v1',
         'atlaix-forensic-report:index'
     ];
     const cachePrefixes = [
         'atlaix-token-activity-cache:',
         'atlaix-safe-scan-report:',
-        'atlaix-forensic-report:'
+        'atlaix-forensic-report:',
+        'atlaix-global-',
+        'atlaix-detection-'
     ];
 
     for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
@@ -174,7 +180,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 emailRedirectTo: `${window.location.origin}/dashboard`
             }
         });
-        if (error) throw error;
+        if (error) {
+            if (isStorageQuotaError(error)) {
+                clearAtlaixLocalCaches();
+                const retry = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: { display_name: displayName || email.split('@')[0] },
+                        emailRedirectTo: `${window.location.origin}/dashboard`
+                    }
+                });
+                if (!retry.error) return { needsEmailConfirmation: Boolean(retry.data.user && !retry.data.session) };
+                throw retry.error;
+            }
+            throw error;
+        }
         return { needsEmailConfirmation: Boolean(data.user && !data.session) };
     }, []);
 

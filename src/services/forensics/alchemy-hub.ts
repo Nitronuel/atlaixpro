@@ -201,7 +201,7 @@ async function fetchJsonWithTimeout(input: RequestInfo | URL, init: RequestInit 
 
 async function alchemyRpc<T>(method: string, params: unknown): Promise<T> {
     if (!ALCHEMY_ENDPOINT) {
-        throw new Error('Alchemy Hub is not configured because the Alchemy key is missing.');
+        throw new Error('Safe Scan cluster mapping is not configured yet.');
     }
 
     const response = await fetchJsonWithTimeout(ALCHEMY_ENDPOINT, {
@@ -1046,18 +1046,18 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
 
         const tier = strongestTier(evidenceTiers);
         const reason = directFundingEdges.length >= 2
-            ? 'This holder group is tied together by multiple direct funding edges in the recent Alchemy history window.'
+            ? 'This holder group is tied together by multiple direct funding edges in recent wallet history.'
             : sharedConnectors.length
                 ? 'This holder group repeatedly converges through shared connector wallets in recent history.'
                 : sharedSecondHopSources.length
                     ? 'This holder group shares second-hop funding sources discovered through connector-wallet expansion.'
                 : directTransferEdges.length
                     ? 'This holder group is linked by recent direct token-transfer behavior.'
-                    : 'This holder group forms a bounded component inside the Alchemy holder graph.';
+                    : 'This holder group forms a bounded component inside the holder relationship graph.';
 
         return {
             clusterId,
-            clusterName: `Alchemy Cluster ${index + 1}`,
+            clusterName: `Holder Cluster ${index + 1}`,
             evidenceTier: tier,
             userEvidenceLabel: tierLabel(tier),
             walletCount: wallets.length,
@@ -1104,8 +1104,8 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
             currentHoldingsTokens: amount.toString(),
             currentHoldingsPct: calculatePct(amount, metadata.totalSupplyRaw),
             flagReason: clusterId
-                ? 'Included in the bounded Alchemy cluster map.'
-                : 'Visible as an independent top holder outside the current Alchemy cluster threshold.'
+                ? 'Included in the bounded holder cluster map.'
+                : 'Visible as an independent top holder outside the current cluster threshold.'
         };
     });
 
@@ -1225,14 +1225,14 @@ export async function analyzeAlchemyHubToken(tokenAddress: string, options: Alch
         evidenceHighlights: [],
         notes: [
             options.holderSeeds?.length
-                ? `Safe Scan seeded the map with ${options.holderSeeds.length} Moralis top holders before running the Alchemy lite cluster pass.`
-                : `Alchemy Hub ${depth} mode runs on a separate Alchemy-first cluster-map engine from Bubble Maps and Safe Scan.`,
+                ? `Safe Scan seeded the map with ${options.holderSeeds.length} top holders before running the cluster pass.`
+                : `Safe Scan ${depth} mode runs a dedicated cluster-map engine for this token.`,
             `It expanded ${trackedWallets.length} holders with ${holderHistoryWallets.length} direct history traces and ${connectorHistoryWallets.length} connector traces.`,
             options.seedOnly
-                ? 'Safe Scan limits the visible holder set to wallets returned by Moralis, then uses Alchemy for history, transfer links, and funding-source mapping.'
-                : 'It uses Alchemy account scans, recent holder history, and bounded 2-hop connector discovery to build the map.',
+                ? 'Safe Scan limits the visible holder set to top holder wallets, then maps history, transfer links, and funding-source relationships.'
+                : 'It uses account scans, recent holder history, and bounded 2-hop connector discovery to build the map.',
             options.holderSeeds?.length
-                ? 'Moralis improves holder selection, while Alchemy remains the source for wallet history, transfer links, and funding-source mapping.'
+                ? 'Top-holder sampling improves holder selection, while Safe Scan maps wallet history, transfer links, and funding-source relationships.'
                 : 'Safe Scan remains the deeper multi-hop forensic engine when you need full launch and bundle attribution.'
         ]
     };

@@ -23,6 +23,8 @@ interface MoralisTransfer {
     from_owner?: string;
 }
 
+type MoralisActivitySwap = Record<string, unknown>;
+
 export type MoralisTokenHolderInsights = {
     holderCount: number;
     topHolders: Array<{ address: string; percent: number; amount?: number }>;
@@ -120,14 +122,146 @@ const normalizeHolderRows = (rows: any[]) => rows.slice(0, 50).map((holder: any)
 
 const mapChainToMoralisEVM = (chain: string) => {
     switch (chain.toLowerCase()) {
+        case 'eth':
         case 'ethereum': return '0x1';
         case 'bsc': return '0x38';
+        case 'bnb':
+        case 'bnbchain': return '0x38';
         case 'base': return '0x2105';
         case 'arbitrum': return '0xa4b1';
+        case 'arbitrumone': return '0xa4b1';
         case 'polygon': return '0x89';
+        case 'matic': return '0x89';
         case 'avalanche': return '0xa86a';
+        case 'avax': return '0xa86a';
+        case 'optimism': return '0xa';
+        case 'op': return '0xa';
         default: return '0x1';
     }
+};
+
+const asString = (value: unknown) => typeof value === 'string' ? value : '';
+
+const asNumber = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+};
+
+const pickString = (source: Record<string, unknown>, keys: string[]) => {
+    for (const key of keys) {
+        const value = asString(source[key]);
+        if (value) return value;
+    }
+    return '';
+};
+
+const getNestedRecord = (source: Record<string, unknown>, keys: string[]) => {
+    for (const key of keys) {
+        const value = source[key];
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            return value as Record<string, unknown>;
+        }
+    }
+    return {};
+};
+
+const extractArrayPayload = (payload: unknown): Record<string, unknown>[] => {
+    if (Array.isArray(payload)) {
+        return payload.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry));
+    }
+
+    if (!payload || typeof payload !== 'object') return [];
+    const objectPayload = payload as Record<string, unknown>;
+    const result = objectPayload.result || objectPayload.swaps || objectPayload.transfers || objectPayload.data;
+    return Array.isArray(result)
+        ? result.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry))
+        : [];
+};
+
+const normalizeActivityTimestamp = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value > 10_000_000_000 ? new Date(value).toISOString() : new Date(value * 1000).toISOString();
+    }
+    if (typeof value === 'string' && value.trim()) {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+            return numeric > 10_000_000_000 ? new Date(numeric).toISOString() : new Date(numeric * 1000).toISOString();
+        }
+        return value;
+    }
+    return new Date().toISOString();
+};
+
+const normalizeSwapActivity = (swap: MoralisActivitySwap, tokenAddress: string, tokenPrice: number): RealActivity | null => {
+    const tokenAddressLower = tokenAddress.toLowerCase();
+    const bought = getNestedRecord(swap, ['bought', 'boughtToken', 'tokenBought', 'baseToken']);
+    const sold = getNestedRecord(swap, ['sold', 'soldToken', 'tokenSold', 'quoteToken']);
+    const transaction = getNestedRecord(swap, ['transaction']);
+    const boughtAddress = pickString(bought, ['address', 'tokenAddress', 'token_address', 'mint']).toLowerCase();
+    const soldAddress = pickString(sold, ['address', 'tokenAddress', 'token_address', 'mint']).toLowerCase();
+    const transactionType = pickString(swap, ['transactionType', 'transaction_type', 'type', 'side']).toLowerCase();
+
+    const isBuy = boughtAddress === tokenAddressLower || transactionType === 'buy';
+    const isSell = soldAddress === tokenAddressLower || transactionType === 'sell';
+    if (!isBuy && !isSell) return null;
+
+    const tokenSide = isBuy ? bought : sold;
+    const amount =
+        asNumber(tokenSide.amountFormatted) ??
+        asNumber(tokenSide.amount_formatted) ??
+        asNumber(tokenSide.amount) ??
+        asNumber(tokenSide.value) ??
+        asNumber(swap.amount) ??
+        0;
+    const usdValue =
+        asNumber(swap.totalValueUsd) ??
+        asNumber(swap.totalValueUSD) ??
+        asNumber(swap.usdValue) ??
+        asNumber(swap.usd_value) ??
+        asNumber(swap.valueUsd) ??
+        asNumber(tokenSide.usdValue) ??
+        asNumber(tokenSide.usd_value) ??
+        amount * tokenPrice;
+
+    if (!Number.isFinite(usdValue) || usdValue < MIN_ACTIVITY_USD) return null;
+
+    const wallet = pickString(swap, [
+        'walletAddress',
+        'wallet_address',
+        'wallet',
+        'traderAddress',
+        'trader_address',
+        'maker',
+        'signer'
+    ]) || pickString(transaction, ['fromAddress', 'from_address', 'walletAddress', 'wallet_address', 'signer', 'from']);
+    const hash = pickString(swap, ['transactionHash', 'transaction_hash', 'txHash', 'hash', 'signature']) || pickString(transaction, ['hash', 'signature']);
+    const timestamp = normalizeActivityTimestamp(
+        swap.blockTimestamp ||
+        swap.block_timestamp ||
+        swap.blockTime ||
+        swap.block_time ||
+        swap.timestamp ||
+        swap.createdAt ||
+        transaction.blockTimestamp ||
+        transaction.block_timestamp
+    );
+    const type: RealActivity['type'] = isSell ? 'Sell' : 'Buy';
+
+    return {
+        type,
+        val: amount > 0 ? (amount < 0.01 ? '< 0.01' : amount.toFixed(2)) : 'N/A',
+        desc: isSell ? 'sold on DEX' : 'bought on DEX',
+        time: getTimeAgo(timestamp),
+        color: isSell ? 'text-primary-red' : 'text-primary-green',
+        usd: `$${usdValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+        hash,
+        wallet,
+        tag: type
+    };
 };
 
 export const MoralisService = {
@@ -286,23 +420,38 @@ export const MoralisService = {
         }
 
         const isSolana = chain.toLowerCase() === 'solana';
-
-        // Select Endpoint
-        let url = '';
-        if (isSolana) {
-            url = `https://solana-gateway.moralis.io/token/mainnet/${tokenAddress}/transfers?limit=50`;
-        } else {
-            const hexChain = mapChainToMoralisEVM(chain);
-            url = `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/transfers?chain=${hexChain}&order=DESC&limit=50`;
-        }
+        const hexChain = !isSolana ? mapChainToMoralisEVM(chain) : '';
+        const headers = {
+            'accept': 'application/json',
+            'X-API-Key': MORALIS_API_KEY
+        };
 
         try {
-            const response = await fetchProvider('moralis', url, {
-                headers: {
-                    'accept': 'application/json',
-                    'X-API-Key': MORALIS_API_KEY
+            const swapUrl = isSolana
+                ? `https://solana-gateway.moralis.io/token/mainnet/${tokenAddress}/swaps?limit=100&order=DESC`
+                : `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/swaps?chain=${hexChain}&order=DESC&limit=100`;
+            const swapResponse = await fetchProvider('moralis', swapUrl, { headers });
+            if (swapResponse.ok) {
+                const swapPayload = await swapResponse.json();
+                const swapActivities = extractArrayPayload(swapPayload)
+                    .map((swap) => normalizeSwapActivity(swap, tokenAddress, tokenPrice))
+                    .filter(Boolean) as RealActivity[];
+
+                if (swapActivities.length > 0) {
+                    return swapActivities;
                 }
-            });
+            }
+        } catch (swapError) {
+            console.warn('Token swap activity lookup failed', swapError);
+        }
+
+        // Select transfer endpoint as fallback for chains/tokens without swap coverage.
+        const url = isSolana
+            ? `https://solana-gateway.moralis.io/token/mainnet/${tokenAddress}/transfers?limit=100`
+            : `https://deep-index.moralis.io/api/v2.2/erc20/${tokenAddress}/transfers?chain=${hexChain}&order=DESC&limit=100`;
+
+        try {
+            const response = await fetchProvider('moralis', url, { headers });
 
             // Gracefully handle 404/400 without crashing
             if (response.status === 404 || response.status === 400) {
@@ -313,7 +462,7 @@ export const MoralisService = {
             if (!response.ok) throw new Error(`Moralis API Error: ${response.status} ${response.statusText}`);
 
             const data = await response.json();
-            const transfers: MoralisTransfer[] = data.result;
+            const transfers: MoralisTransfer[] = extractArrayPayload(data) as MoralisTransfer[];
 
             if (!transfers || transfers.length === 0) return [];
 

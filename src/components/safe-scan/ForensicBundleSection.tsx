@@ -90,9 +90,9 @@ const formatForensicError = (value: string) => {
 };
 
 const tierTone = (tier: string) => {
-    if (tier === 'TIER_1') return 'bg-primary-red/15 text-primary-red border border-primary-red/20';
-    if (tier === 'TIER_2') return 'bg-primary-yellow/15 text-primary-yellow border border-primary-yellow/20';
-    return 'bg-primary-green/15 text-primary-green border border-primary-green/20';
+    if (tier === 'TIER_1') return 'safe-scan-cluster-risk is-high';
+    if (tier === 'TIER_2') return 'safe-scan-cluster-risk is-elevated';
+    return 'safe-scan-cluster-risk is-watchlist';
 };
 
 const tierRiskLabel = (tier: string) => {
@@ -102,7 +102,7 @@ const tierRiskLabel = (tier: string) => {
 };
 
 const CLUSTER_PALETTE = ['#4CC9F0', '#8B5CF6', '#F59E0B', '#10B981', '#EC4899', '#F97316', '#22D3EE', '#A3E635'];
-const ALCHEMY_CLUSTER_PALETTE = ['#F97316', '#EC4899', '#8B5CF6', '#4CC9F0', '#10B981', '#F59E0B', '#22D3EE', '#A3E635'];
+const GRAPH_CLUSTER_PALETTE = ['#F97316', '#EC4899', '#8B5CF6', '#4CC9F0', '#10B981', '#F59E0B', '#22D3EE', '#A3E635'];
 
 const hashString = (value: string) => {
     let hash = 2166136261;
@@ -114,6 +114,17 @@ const hashString = (value: string) => {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const userClusterName = (value: string | null | undefined, index?: number) => {
+    const fallbackIndex = typeof index === 'number' ? index + 1 : 1;
+    if (!value) return `Holder Cluster ${fallbackIndex}`;
+    return value
+        .replace(/\bAlchemy\s+Cluster\b/gi, 'Holder Cluster')
+        .replace(/\bMoralis\s+Cluster\b/gi, 'Holder Cluster')
+        .replace(/\bEVM\s+Cluster\b/gi, 'Holder Cluster')
+        .replace(/\bAlchemy\b/gi, 'Safe Scan')
+        .replace(/\bMoralis\b/gi, 'Safe Scan');
+};
 
 const AttributionRing: React.FC<{
     label: string;
@@ -245,18 +256,18 @@ export const ForensicBundleSection: React.FC<Props> = ({
     const selectedConnections = graphLayout && selectedNode
         ? graphLayout.edges.filter((edge) => edge.sourceWallet === selectedNode.walletAddress || edge.targetWallet === selectedNode.walletAddress)
         : [];
-    const alchemyClusterColorById = useMemo(() => {
+    const graphClusterColorById = useMemo(() => {
         if (graphLayoutStyle !== 'cluster-packed' || !report) return new Map<string, string>();
         return new Map(report.ecosystemGraph.clusters.map((cluster, index) => [
             cluster.clusterId,
-            ALCHEMY_CLUSTER_PALETTE[index % ALCHEMY_CLUSTER_PALETTE.length]
+            GRAPH_CLUSTER_PALETTE[index % GRAPH_CLUSTER_PALETTE.length]
         ]));
     }, [graphLayoutStyle, report]);
     const graphLegendItems = useMemo(() => {
         if (graphLayoutStyle === 'cluster-packed' && report) {
             const clusterItems = report.ecosystemGraph.clusters.slice(0, 3).map((cluster, index) => [
-                ALCHEMY_CLUSTER_PALETTE[index % ALCHEMY_CLUSTER_PALETTE.length],
-                cluster.clusterName || `Cluster ${index + 1}`
+                GRAPH_CLUSTER_PALETTE[index % GRAPH_CLUSTER_PALETTE.length],
+                userClusterName(cluster.clusterName, index)
             ]);
 
             return [
@@ -288,8 +299,8 @@ export const ForensicBundleSection: React.FC<Props> = ({
 
         if (graphLayoutStyle === 'cluster-packed') {
             return {
-                title: 'Alchemy supply map',
-                description: 'A cleaner Alchemy-focused view of clustered holder supply, connected wallet flow, concentration, and remaining circulating float.',
+                title: 'Cluster supply map',
+                description: 'A cleaner view of clustered holder supply, connected wallet flow, concentration, and remaining circulating float.',
                 items: [
                     {
                         label: 'Cluster-held',
@@ -341,7 +352,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
     const clusterColor = (clusterId: string | null, clusterName?: string | null) => {
         if (!clusterId) return '#64748B';
         if (graphLayoutStyle === 'cluster-packed') {
-            return alchemyClusterColorById.get(clusterId) ?? ALCHEMY_CLUSTER_PALETTE[hashString(clusterId) % ALCHEMY_CLUSTER_PALETTE.length];
+            return graphClusterColorById.get(clusterId) ?? GRAPH_CLUSTER_PALETTE[hashString(clusterId) % GRAPH_CLUSTER_PALETTE.length];
         }
         if (clusterName === 'Insider Cluster') return '#EF4444';
         return CLUSTER_PALETTE[hashString(clusterId) % CLUSTER_PALETTE.length];
@@ -596,7 +607,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                         />
                                     </div>
                                     <div className="col-span-2 text-xs text-text-medium">
-                                        {formatPct(report.supplyAttribution.combinedCoordinatedPct)} connected supply mapped by Alchemy.
+                                        {formatPct(report.supplyAttribution.combinedCoordinatedPct)} connected supply mapped by Safe Scan.
                                     </div>
                                 </div>
                             ) : null}
@@ -691,8 +702,8 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                 {graphLayout && graphLayout.nodes.length ? (
                                     <div
                                         ref={graphContainerRef}
-                                        className="overflow-hidden cursor-grab active:cursor-grabbing touch-none bg-black"
-                                        style={{ overscrollBehavior: 'contain' }}
+                                        className="overflow-hidden cursor-grab active:cursor-grabbing touch-none"
+                                        style={{ backgroundColor: '#000000', overscrollBehavior: 'contain' }}
                                         onWheel={handleGraphWheel}
                                         onPointerDown={handleGraphPointerDown}
                                         onPointerMove={handleGraphPointerMove}
@@ -700,7 +711,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                         onPointerLeave={handleGraphPointerEnd}
                                         onPointerCancel={handleGraphPointerEnd}
                                     >
-                                        <div className="w-full bg-black">
+                                        <div className="w-full" style={{ backgroundColor: '#000000' }}>
                                             <svg viewBox={`0 0 ${graphLayout.width} ${graphLayout.height}`} className="block w-full h-[440px] sm:h-[520px] lg:h-[640px]" role="img" aria-label="Cluster ecosystem graph">
                                                 <defs>
                                                     <radialGradient id="graph-bg-glow" cx="50%" cy="50%" r="75%">
@@ -745,7 +756,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                         if (!shouldShowClusterLabel) return null;
                                                         return (
                                                             <g key={group.clusterId}>
-                                                                <text x={group.x} y={group.y - haloRadius - 10} textAnchor="middle" fill="rgba(255,255,255,0.94)" fontSize="13" fontWeight="700">{group.clusterName}</text>
+                                                                <text x={group.x} y={group.y - haloRadius - 10} textAnchor="middle" fill="rgba(255,255,255,0.94)" fontSize="13" fontWeight="700">{userClusterName(group.clusterName)}</text>
                                                                 <text x={group.x} y={group.y - haloRadius + 5} textAnchor="middle" fill="rgba(148,163,184,0.95)" fontSize="10">{group.walletCount} wallets · {formatPct(group.supplyHeldPct)}</text>
                                                             </g>
                                                         );
@@ -869,7 +880,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                 <div className="text-[10px] uppercase tracking-wide text-text-medium mb-1">Cluster context</div>
                                                 <div className="text-text-light text-sm">
                                                     {selectedCluster
-                                                        ? `${selectedCluster.clusterName} controls ${formatPct(selectedCluster.supplyHeldPct)} across ${selectedCluster.walletCount} wallets.`
+                                                        ? `${userClusterName(selectedCluster.clusterName)} controls ${formatPct(selectedCluster.supplyHeldPct)} across ${selectedCluster.walletCount} wallets.`
                                                         : 'This wallet is visible in the graph but is not part of a confirmed cluster core.'}
                                                 </div>
                                             </div>
@@ -913,37 +924,37 @@ export const ForensicBundleSection: React.FC<Props> = ({
         ) : null}
 
         {isSupported && !loading && !error && report ? (
-            <section className="bg-card-hover/10 border border-border rounded-2xl p-6 min-w-0">
+            <section className="safe-scan-cluster-section rounded-2xl p-6 min-w-0">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
                                 <div>
-                                    <div className="text-[10px] uppercase tracking-[0.22em] font-bold text-primary-green mb-2">
+                                    <div className="safe-scan-cluster-kicker text-[10px] uppercase tracking-[0.22em] font-bold mb-2">
                                         Confirmed Coordinated Clusters
                                     </div>
                                     <h4 className="font-bold text-lg text-text-light">Cluster intelligence table</h4>
                                 </div>
-                                <div className="rounded-2xl border border-border bg-card px-4 py-3 text-sm">
+                                <div className="safe-scan-cluster-count rounded-2xl px-4 py-3 text-sm">
                                     <div className="text-text-medium">Clusters found</div>
                                     <div className="text-text-light font-extrabold text-xl">{report.walletClusters.length}</div>
                                 </div>
                             </div>
                             {report.walletClusters.length ? (
-                                <div className="rounded-[24px] border border-border overflow-hidden bg-[linear-gradient(180deg,rgba(12,17,22,0.98),rgba(10,16,21,0.96))]">
-                                    <div className="hidden lg:block border-b border-border bg-white/[0.02]">
+                                <div className="safe-scan-cluster-table rounded-[24px] overflow-hidden">
+                                    <div className="safe-scan-cluster-table-head hidden lg:block">
                                         <div className="grid w-max min-w-full grid-cols-[240px_88px_110px_260px_110px_84px] gap-0 px-4 py-3">
-                                            <div className="pr-4 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Cluster</div>
-                                            <div className="px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 text-right">Wallets</div>
-                                            <div className="px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 text-right">Supply Held</div>
-                                            <div className="px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 text-right">Combined Balance</div>
-                                            <div className="px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 text-center">Risk</div>
-                                            <div className="pl-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 text-right">Action</div>
+                                            <div className="safe-scan-cluster-column-label pr-4 text-[11px] font-bold uppercase tracking-[0.18em]">Cluster</div>
+                                            <div className="safe-scan-cluster-column-label px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-right">Wallets</div>
+                                            <div className="safe-scan-cluster-column-label px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-right">Supply Held</div>
+                                            <div className="safe-scan-cluster-column-label px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-right">Combined Balance</div>
+                                            <div className="safe-scan-cluster-column-label px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-center">Risk</div>
+                                            <div className="safe-scan-cluster-column-label pl-3 text-[11px] font-bold uppercase tracking-[0.18em] text-right">Action</div>
                                         </div>
                                     </div>
                                     {report.walletClusters.map((cluster) => {
                                         const expanded = !!expandedClusters[cluster.clusterId];
                                         return (
-                                            <div key={cluster.clusterId} className="border-t border-border first:border-t-0">
+                                            <div key={cluster.clusterId} className="safe-scan-cluster-entry first:border-t-0">
                                                 <div
-                                                    className="hidden lg:grid lg:w-max lg:min-w-full lg:grid-cols-[240px_88px_110px_260px_110px_84px] gap-0 px-4 py-3.5 items-center hover:bg-white/[0.02] transition-colors cursor-pointer"
+                                                    className="safe-scan-cluster-row hidden lg:grid lg:w-max lg:min-w-full lg:grid-cols-[240px_88px_110px_260px_110px_84px] gap-0 px-4 py-3.5 items-center transition-colors cursor-pointer"
                                                     onClick={() => toggleCluster(cluster.clusterId)}
                                                     role="button"
                                                     tabIndex={0}
@@ -955,7 +966,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                     }}
                                                 >
                                                     <div className="min-w-0 pr-4">
-                                                        <div className="text-[14px] text-text-light font-semibold truncate leading-tight">{cluster.clusterName}</div>
+                                                        <div className="text-[14px] text-text-light font-semibold truncate leading-tight">{userClusterName(cluster.clusterName)}</div>
                                                         <div className="text-[11px] text-text-medium mt-1 uppercase tracking-[0.16em] leading-tight">{cluster.userEvidenceLabel}</div>
                                                     </div>
                                                     <div className="px-3 text-right text-[14px] text-text-light font-semibold">{cluster.walletCount}</div>
@@ -971,7 +982,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                     <div className="pl-3 text-right">
                                                         <button
                                                             type="button"
-                                                            className="text-primary-green font-semibold text-[13px] hover:text-text-light transition-colors"
+                                                            className="safe-scan-cluster-action font-semibold text-[13px] transition-colors"
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
                                                                 toggleCluster(cluster.clusterId);
@@ -983,7 +994,7 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                 </div>
 
                                                 <div
-                                                    className="lg:hidden px-5 py-4 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                                                    className="safe-scan-cluster-row lg:hidden px-5 py-4 transition-colors cursor-pointer"
                                                     onClick={() => toggleCluster(cluster.clusterId)}
                                                     role="button"
                                                     tabIndex={0}
@@ -996,12 +1007,12 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                 >
                                                     <div className="flex items-start justify-between gap-3 mb-4">
                                                         <div className="min-w-0">
-                                                            <div className="text-text-light font-semibold">{cluster.clusterName}</div>
+                                                            <div className="text-text-light font-semibold">{userClusterName(cluster.clusterName)}</div>
                                                             <div className="text-xs text-text-medium mt-1 uppercase tracking-[0.14em]">{cluster.userEvidenceLabel}</div>
                                                         </div>
                                                         <button
                                                             type="button"
-                                                            className="text-primary-green font-semibold text-sm hover:text-text-light transition-colors"
+                                                            className="safe-scan-cluster-action font-semibold text-sm transition-colors"
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
                                                                 toggleCluster(cluster.clusterId);
@@ -1011,29 +1022,29 @@ export const ForensicBundleSection: React.FC<Props> = ({
                                                         </button>
                                                     </div>
                                                     <div className="grid grid-cols-3 gap-2.5">
-                                                        <div className="rounded-xl border border-border bg-card px-3 py-2.5">
-                                                            <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">Wallets</div>
+                                                        <div className="safe-scan-cluster-metric rounded-xl px-3 py-2.5">
+                                                            <div className="safe-scan-cluster-column-label text-[10px] uppercase tracking-[0.16em] mb-1">Wallets</div>
                                                             <div className="text-text-light font-bold">{cluster.walletCount}</div>
                                                         </div>
-                                                        <div className="rounded-xl border border-border bg-card px-3 py-2.5">
-                                                            <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">Supply Held</div>
+                                                        <div className="safe-scan-cluster-metric rounded-xl px-3 py-2.5">
+                                                            <div className="safe-scan-cluster-column-label text-[10px] uppercase tracking-[0.16em] mb-1">Supply Held</div>
                                                             <div className="text-text-light font-bold">{formatPct(cluster.supplyHeldPct)}</div>
                                                         </div>
-                                                        <div className="rounded-xl border border-border bg-card px-3 py-2.5">
-                                                            <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">Risk</div>
+                                                        <div className="safe-scan-cluster-metric rounded-xl px-3 py-2.5">
+                                                            <div className="safe-scan-cluster-column-label text-[10px] uppercase tracking-[0.16em] mb-1">Risk</div>
                                                             <span className={`inline-flex min-w-0 w-full justify-center px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-wide ${tierTone(cluster.evidenceTier)}`}>
                                                                 {tierRiskLabel(cluster.evidenceTier)}
                                                             </span>
                                                         </div>
-                                                        <div className="rounded-xl border border-border bg-card px-3 py-2.5 col-span-3">
-                                                            <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">Combined Balance</div>
+                                                        <div className="safe-scan-cluster-metric rounded-xl px-3 py-2.5 col-span-3">
+                                                            <div className="safe-scan-cluster-column-label text-[10px] uppercase tracking-[0.16em] mb-1">Combined Balance</div>
                                                             <div className="text-text-light font-bold">{formatTokenAmount(cluster.supplyHeldTokens, tokenDecimals)}</div>
                                                         </div>
                                                     </div>
                                                 </div>
 
                                                 {expanded ? (
-                                                    <div className="border-t border-border bg-[#0B1218] px-3 py-3 sm:px-4 sm:py-4">
+                                                    <div className="safe-scan-cluster-detail px-3 py-3 sm:px-4 sm:py-4">
                                                         <div className="overflow-x-auto">
                                                             <table className="w-full min-w-[430px] sm:min-w-[560px] lg:min-w-[720px] table-fixed text-[12px] sm:text-[13px] lg:text-sm">
                                                                 <colgroup>

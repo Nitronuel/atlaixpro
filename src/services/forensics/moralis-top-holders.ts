@@ -219,5 +219,5 @@ export async function fetchMoralisTopHolders(
         }
     }
 
-    throw new Error(errors[0] || 'Moralis did not return top holders for this token.');
+    throw new Error('Safe Scan could not identify top holders for this token on the selected chain.');
 }

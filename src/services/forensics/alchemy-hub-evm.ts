@@ -188,7 +188,7 @@ async function fetchJsonWithTimeout(input: RequestInfo | URL, init: RequestInit 
 
 function evmEndpoint(chain: EvmChain) {
     if (!APP_CONFIG.alchemyKey) {
-        throw new Error('Alchemy Hub EVM support is not configured because the Alchemy key is missing.');
+        throw new Error('Safe Scan cluster mapping is not configured yet.');
     }
     return `https://${EVM_ALCHEMY_NETWORK_BY_CHAIN[chain]}.g.alchemy.com/v2/${APP_CONFIG.alchemyKey}`;
 }
@@ -639,12 +639,12 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         const reason = directTransferEdges.length
             ? 'This holder group is linked by recent ERC-20 transfer behavior on the selected EVM chain.'
             : sharedFunders.length
-                ? 'This holder group shares one or more native funding sources in recent Alchemy transfer history.'
-                : 'This holder group forms a bounded component inside the EVM holder-transfer graph.';
+                ? 'This holder group shares one or more native funding sources in recent transfer history.'
+                : 'This holder group forms a bounded component inside the holder-transfer graph.';
 
         return {
             clusterId,
-            clusterName: `EVM Cluster ${index + 1}`,
+            clusterName: `Holder Cluster ${index + 1}`,
             evidenceTier: tier,
             userEvidenceLabel: tierLabel(tier),
             walletCount: wallets.length,
@@ -688,8 +688,8 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
             currentHoldingsTokens: amount.toString(),
             currentHoldingsPct: calculatePct(amount, metadata.totalSupplyRaw),
             flagReason: clusterId
-                ? 'Included in the bounded EVM Alchemy cluster map.'
-                : 'Visible as an independent holder outside the current EVM cluster threshold.'
+                ? 'Included in the bounded holder cluster map.'
+                : 'Visible as an independent holder outside the current cluster threshold.'
         };
     });
 
@@ -803,14 +803,14 @@ export async function analyzeAlchemyHubEvmToken(tokenAddress: string, chain: Evm
         evidenceHighlights: [],
         notes: [
             options.holderSeeds?.length
-                ? `Safe Scan seeded the EVM scan with ${options.holderSeeds.length} Moralis top holders before running the Alchemy ${chain} lite cluster pass.`
-                : `Alchemy Hub used the ${chain} EVM engine in ${depth} mode for this token.`,
+                ? `Safe Scan seeded the scan with ${options.holderSeeds.length} top holders before running the cluster pass.`
+                : `Safe Scan used the ${chain} cluster engine in ${depth} mode for this token.`,
             `It checked ${candidateWallets.length} balance candidates, expanded ${trackedWallets.length} holders, and traced funding for ${fundingWallets.length} wallets.`,
             options.seedOnly
-                ? 'Safe Scan limits EVM balance candidates to Moralis top-holder wallets, then uses Alchemy for live balances, token-transfer links, and native funding-source mapping.'
+                ? 'Safe Scan limits balance candidates to top-holder wallets, then maps live balances, token-transfer links, and native funding-source relationships.'
                 : 'EVM clustering is built from bounded ERC-20 transfer history, current candidate balances, and native funding-source links.',
             options.holderSeeds?.length
-                ? 'Moralis improves holder coverage by selecting the top holders first; Alchemy verifies live balances and maps wallet relationships.'
+                ? 'Top-holder sampling improves holder coverage before Safe Scan verifies live balances and maps wallet relationships.'
                 : 'Holder coverage is approximate because this path derives candidates from recent transfer history rather than a full holder-index export.'
         ]
     };

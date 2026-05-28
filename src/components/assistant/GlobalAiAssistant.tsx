@@ -736,23 +736,35 @@ export const GlobalAiAssistant: React.FC = () => {
     const location = useLocation();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const cached = useRef(loadCachedMessages());
     const routeContext = useMemo(
         () => getRouteContext(location.pathname, searchParams),
         [location.pathname, searchParams]
     );
     const [open, setOpen] = useState(false);
     const [messages, setMessages] = useState<FloatingMessage[]>(
-        cached.current?.messages?.length ? cached.current.messages : [createWelcomeMessage(routeContext.title)]
+        [createWelcomeMessage(routeContext.title)]
     );
-    const [draft, setDraft] = useState(cached.current?.draft || '');
-    const [provider, setProvider] = useState<AiAssistantProvider | null>(cached.current?.provider || null);
+    const [draft, setDraft] = useState('');
+    const [provider, setProvider] = useState<AiAssistantProvider | null>(null);
     const [sending, setSending] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
+    const routeKeyRef = useRef(`${location.pathname}${location.search}`);
 
     useEffect(() => {
-        saveCachedMessages(messages, draft, provider);
-    }, [draft, messages, provider]);
+        const routeKey = `${location.pathname}${location.search}`;
+        if (routeKeyRef.current === routeKey) return;
+
+        routeKeyRef.current = routeKey;
+        setOpen(false);
+        setDraft('');
+        setProvider(null);
+        setSending(false);
+        setMessages([createWelcomeMessage(routeContext.title)]);
+
+        if (canUseLocalStorage()) {
+            window.localStorage.removeItem(GLOBAL_ASSISTANT_CACHE_KEY);
+        }
+    }, [location.pathname, location.search, routeContext.title]);
 
     useEffect(() => {
         if (open) {
@@ -852,8 +864,13 @@ export const GlobalAiAssistant: React.FC = () => {
     const startNewChat = () => {
         setMessages([createWelcomeMessage(routeContext.title)]);
         setDraft('');
+        setProvider(null);
         setOpen(true);
     };
+
+    if (location.pathname.startsWith('/ai-assistant')) {
+        return null;
+    }
 
     return (
         <div className="fixed bottom-5 right-5 z-[70] sm:bottom-6 sm:right-6">

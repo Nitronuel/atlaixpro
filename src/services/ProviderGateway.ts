@@ -38,6 +38,24 @@ function apiUrl(path: string) {
         : path;
 }
 
+function localBackendApiUrl(path: string) {
+    if (APP_CONFIG.apiBaseUrl || !IS_BROWSER || typeof window === 'undefined') return '';
+    const hostname = window.location.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') return '';
+    return `http://127.0.0.1:3101${path}`;
+}
+
+async function retryLocalBackend(path: string, init: RequestInit, primaryResponse: Response) {
+    const fallbackUrl = localBackendApiUrl(path);
+    if (!fallbackUrl || primaryResponse.status !== 404) return primaryResponse;
+
+    try {
+        return await fetch(fallbackUrl, init);
+    } catch {
+        return primaryResponse;
+    }
+}
+
 export function getBackendAlchemyKey() {
     return readProcessEnv('ALCHEMY_API_KEY', 'VITE_ALCHEMY_KEY', 'VITE_ALCHEMY_API_KEY');
 }
@@ -45,8 +63,8 @@ export function getBackendAlchemyKey() {
 export async function fetchProvider(provider: ProviderName, url: string, init: ProviderFetchInit = {}) {
     if (IS_BROWSER) {
         const body = typeof init.body === 'string' ? init.body : init.body ? String(init.body) : undefined;
-
-        return fetch(apiUrl(`/api/providers/${provider}`), {
+        const path = `/api/providers/${provider}`;
+        const requestInit = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -55,7 +73,10 @@ export async function fetchProvider(provider: ProviderName, url: string, init: P
                 headers: copySafeHeaders(init.headers),
                 body
             })
-        });
+        };
+
+        const response = await fetch(apiUrl(path), requestInit);
+        return retryLocalBackend(path, requestInit, response);
     }
 
     const headers = new Headers(init.headers);
@@ -74,11 +95,14 @@ export async function fetchProvider(provider: ProviderName, url: string, init: P
 
 export async function fetchAlchemyRpc(network: string, payload: unknown) {
     if (IS_BROWSER) {
-        return fetch(apiUrl('/api/providers/alchemy-rpc'), {
+        const path = '/api/providers/alchemy-rpc';
+        const requestInit = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ network, payload })
-        });
+        };
+        const response = await fetch(apiUrl(path), requestInit);
+        return retryLocalBackend(path, requestInit, response);
     }
 
     const key = getBackendAlchemyKey();

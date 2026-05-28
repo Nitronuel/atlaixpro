@@ -33,6 +33,7 @@ const mapChainToAlchemyNetwork = (chain: string) => {
 const ALCHEMY_SUPPORTED_CHAINS = new Set(['ethereum', 'base', 'bsc', 'bnb', 'arbitrum', 'polygon', 'optimism']);
 const MIN_ACTIVITY_USD = 1000;
 const SOLANA_ACTIVITY_PAGES = 4;
+const SOLANA_RPC_ACTIVITY_TIMEOUT_MS = 9000;
 
 const getTimeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -40,6 +41,19 @@ const getTimeAgo = (timestamp: number) => {
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
     return `${Math.floor(seconds / 86400)}d ago`;
+};
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<T>((resolve) => {
+        timeoutId = setTimeout(() => resolve(fallback), timeoutMs);
+    });
+
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
 };
 
 export const ChainActivityService = {
@@ -191,137 +205,118 @@ export const ChainActivityService = {
      */
     getSolanaActivity: async (mint: string, priceUsd: number, pairAddress?: string): Promise<RealActivity[]> => {
         try {
-            const sources = [mint, ...(pairAddress ? [pairAddress] : [])];
-            const transactionsBySignature = new Map<string, ParsedAddressTransaction>();
+            const swapActivity = await MoralisService.getTokenActivity(mint, 'solana', pairAddress || '', priceUsd);
+            if (swapActivity.length > 0) return swapActivity;
 
-            await Promise.allSettled(sources.map(async (address) => {
-                let beforeSignature: string | undefined;
+            const rpcScan = async () => {
+                const sources = [mint, ...(pairAddress ? [pairAddress] : [])];
+                const transactionsBySignature = new Map<string, ParsedAddressTransaction>();
 
-                for (let page = 0; page < SOLANA_ACTIVITY_PAGES; page += 1) {
-                    const pageTransactions = await SolanaProvider.getParsedAddressTransactions(address, beforeSignature, 100);
-                    if (!pageTransactions.length) break;
+                await Promise.allSettled(sources.map(async (address) => {
+                    let beforeSignature: string | undefined;
 
-                    pageTransactions.forEach((transaction) => {
-                        if (transaction.signature) {
-                            transactionsBySignature.set(transaction.signature, transaction);
-                        }
-                    });
+                    for (let page = 0; page < SOLANA_ACTIVITY_PAGES; page += 1) {
+                        const pageTransactions = await SolanaProvider.getParsedAddressTransactions(address, beforeSignature, 100);
+                        if (!pageTransactions.length) break;
 
-                    beforeSignature = pageTransactions[pageTransactions.length - 1]?.signature;
-                    if (!beforeSignature) break;
-                }
-            }));
+                        pageTransactions.forEach((transaction) => {
+                            if (transaction.signature) {
+                                transactionsBySignature.set(transaction.signature, transaction);
+                            }
+                        });
 
-            const transactions = [...transactionsBySignature.values()]
-                .sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0));
+                        beforeSignature = pageTransactions[pageTransactions.length - 1]?.signature;
+                        if (!beforeSignature) break;
+                    }
+                }));
 
-            if (!Array.isArray(transactions)) {
-                return MoralisService.getTokenActivity(mint, 'solana', '', priceUsd);
-            }
+                const transactions = [...transactionsBySignature.values()]
+                    .sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0));
+                const activities: RealActivity[] = [];
 
-            const activities: RealActivity[] = [];
+                for (const tx of transactions) {
+                    const timestamp = (tx.timestamp || 0) * 1000;
+                    if (!timestamp) continue;
 
-            for (const tx of transactions) {
-                const timestamp = (tx.timestamp || 0) * 1000;
-                if (!timestamp) continue;
+                    const txType = tx.type;
+                    const signature = tx.signature;
 
-                const txType = tx.type;
-                const signature = tx.signature;
-
-                // --- BURN ---
-                if (txType === 'BURN') {
-                    const transfer = (tx.tokenTransfers || []).find((t: any) => t.mint === mint);
-                    const amount = transfer ? transfer.tokenAmount : 0;
-                    const usdValue = amount * priceUsd;
-                    if (usdValue < MIN_ACTIVITY_USD) continue;
-
-                    activities.push({
-                        type: 'Burn',
-                        val: amount.toFixed(2),
-                        desc: 'burned tokens',
-                        time: getTimeAgo(timestamp),
-                        color: 'text-primary-orange',
-                        usd: `$${usdValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-                        hash: signature,
-                        wallet: transfer ? transfer.fromUserAccount : 'Unknown',
-                        tag: 'Burner'
-                    });
-                    continue;
-                }
-
-                // --- SWAP (Buy/Sell) ---
-                if (txType === 'SWAP') {
-                    const transfer = (tx.tokenTransfers || []).find((t: any) => t.mint === mint);
-                    if (transfer) {
-                        const amount = transfer.tokenAmount;
+                    if (txType === 'BURN') {
+                        const transfer = (tx.tokenTransfers || []).find((t: any) => t.mint === mint);
+                        const amount = transfer ? transfer.tokenAmount : 0;
                         const usdValue = amount * priceUsd;
                         if (usdValue < MIN_ACTIVITY_USD) continue;
 
-                        const user = tx.feePayer;
-                        const isOut = transfer.fromUserAccount === user;
-
-                        const type = isOut ? 'Sell' : 'Buy';
-                        const color = isOut ? 'text-primary-red' : 'text-primary-green';
-
                         activities.push({
-                            type,
+                            type: 'Burn',
                             val: amount.toFixed(2),
-                            desc: isOut ? 'sold on DEX' : 'bought on DEX',
+                            desc: 'burned tokens',
                             time: getTimeAgo(timestamp),
-                            color,
+                            color: 'text-primary-orange',
                             usd: `$${usdValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
                             hash: signature,
-                            wallet: user,
-                            tag: type
+                            wallet: transfer ? transfer.fromUserAccount : 'Unknown',
+                            tag: 'Burner'
                         });
                         continue;
                     }
-                }
 
-                // --- TRANSFER (Whale check) ---
-                if (txType === 'TRANSFER') {
-                    const transfers = (tx.tokenTransfers || []).filter((t: any) => t.mint === mint);
-                    for (const t of transfers) {
-                        const amount = t.tokenAmount;
-                        const usdValue = amount * priceUsd;
-                        if (usdValue < MIN_ACTIVITY_USD) continue;
+                    if (txType === 'SWAP') {
+                        const transfer = (tx.tokenTransfers || []).find((t: any) => t.mint === mint);
+                        if (transfer) {
+                            const amount = transfer.tokenAmount;
+                            const usdValue = amount * priceUsd;
+                            if (usdValue < MIN_ACTIVITY_USD) continue;
 
-                        if (usdValue >= 500000) {
+                            const user = tx.feePayer;
+                            const isOut = transfer.fromUserAccount === user;
+                            const type = isOut ? 'Sell' : 'Buy';
+
                             activities.push({
-                                type: 'Transfer',
+                                type,
                                 val: amount.toFixed(2),
-                                desc: 'Whale Transfer',
+                                desc: isOut ? 'sold on DEX' : 'bought on DEX',
                                 time: getTimeAgo(timestamp),
-                                color: 'text-purple-500',
+                                color: isOut ? 'text-primary-red' : 'text-primary-green',
                                 usd: `$${usdValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
                                 hash: signature,
-                                wallet: t.fromUserAccount,
-                                tag: 'Whale'
+                                wallet: user,
+                                tag: type
                             });
-                        } else {
-                            // Standard Transfer
+                            continue;
+                        }
+                    }
+
+                    if (txType === 'TRANSFER') {
+                        const transfers = (tx.tokenTransfers || []).filter((t: any) => t.mint === mint);
+                        for (const t of transfers) {
+                            const amount = t.tokenAmount;
+                            const usdValue = amount * priceUsd;
+                            if (usdValue < MIN_ACTIVITY_USD) continue;
+
                             activities.push({
                                 type: 'Transfer',
                                 val: amount.toFixed(2),
-                                desc: 'transferred',
+                                desc: usdValue >= 500000 ? 'Whale Transfer' : 'transferred',
                                 time: getTimeAgo(timestamp),
-                                color: 'text-primary-blue',
+                                color: usdValue >= 500000 ? 'text-purple-500' : 'text-primary-blue',
                                 usd: `$${usdValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
                                 hash: signature,
                                 wallet: t.fromUserAccount,
-                                tag: 'Transfer'
+                                tag: usdValue >= 500000 ? 'Whale' : 'Transfer'
                             });
                         }
                     }
                 }
-            }
 
-            if (activities.length > 0) return activities;
-            return MoralisService.getTokenActivity(mint, 'solana', '', priceUsd);
+                return activities;
+            };
+
+            return withTimeout(rpcScan(), SOLANA_RPC_ACTIVITY_TIMEOUT_MS, []);
 
         } catch (e) {
             console.error("[ChainActivity] Solana Fetch Error", e);
-            return MoralisService.getTokenActivity(mint, 'solana', '', priceUsd);
+            return [];
         }
     }
 };

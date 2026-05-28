@@ -371,6 +371,37 @@
             transition-delay: 0ms;
         }
 
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned),
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):hover,
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):focus-within {
+            width: 72px !important;
+            box-shadow: 18px 24px 70px rgba(93, 112, 145, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+        }
+
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned) .atlaix-app-nav,
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):hover .atlaix-app-nav,
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):focus-within .atlaix-app-nav {
+            gap: 0 !important;
+            overflow: hidden !important;
+            scrollbar-width: none !important;
+        }
+
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned) .atlaix-rail-reveal,
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):hover .atlaix-rail-reveal,
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):focus-within .atlaix-rail-reveal {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transition-delay: 0ms !important;
+        }
+
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned) .atlaix-nav-section > .atlaix-rail-reveal,
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):hover .atlaix-nav-section > .atlaix-rail-reveal,
+        .atlaix-app-rail.is-auto-collapsed:not(.is-pinned):focus-within .atlaix-nav-section > .atlaix-rail-reveal {
+            height: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+        }
+
         @media (prefers-reduced-motion: reduce) {
             .atlaix-rail-reveal {
                 transition: opacity 1ms linear;
@@ -1277,10 +1308,22 @@
             box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
         }
 
+        .ai-assistant-hero-composer .ai-assistant-textarea {
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+        }
+
         .atlaix-dark-preview .ai-assistant-textarea {
             background: #111315 !important;
             border-color: #2A2E33 !important;
             color: #EAECEF !important;
+        }
+
+        .atlaix-dark-preview .ai-assistant-hero-composer .ai-assistant-textarea {
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
         }
 
         .atlaix-dark-preview .ai-assistant-textarea::placeholder {
@@ -1329,6 +1372,87 @@
         .atlaix-dark-preview input::placeholder,
         .atlaix-dark-preview textarea::placeholder {
             color: rgba(184, 197, 187, 0.64) !important;
+        }
+
+        .safe-scan-cluster-section {
+            border: 1px solid rgba(180, 202, 188, 0.78);
+            background:
+                radial-gradient(ellipse 52% 70% at 8% 0%, rgba(63, 163, 77, 0.075), transparent 64%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 252, 248, 0.78));
+            box-shadow: 0 18px 42px rgba(39, 71, 49, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+        }
+
+        .safe-scan-cluster-kicker {
+            color: #2E7D3C;
+        }
+
+        .safe-scan-cluster-count,
+        .safe-scan-cluster-table,
+        .safe-scan-cluster-metric {
+            border: 1px solid rgba(180, 202, 188, 0.76);
+            background: rgba(255, 255, 255, 0.72);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+        }
+
+        .safe-scan-cluster-table {
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.80), rgba(242, 249, 245, 0.74));
+        }
+
+        .safe-scan-cluster-table-head,
+        .safe-scan-cluster-detail {
+            border-top: 1px solid rgba(180, 202, 188, 0.70);
+            border-bottom: 1px solid rgba(180, 202, 188, 0.70);
+            background: rgba(237, 247, 241, 0.86);
+        }
+
+        .safe-scan-cluster-entry {
+            border-top: 1px solid rgba(180, 202, 188, 0.66);
+        }
+
+        .safe-scan-cluster-row:hover {
+            background: rgba(223, 241, 230, 0.56);
+        }
+
+        .safe-scan-cluster-column-label {
+            color: #6B7686;
+        }
+
+        .safe-scan-cluster-action {
+            color: #2E7D3C;
+        }
+
+        .safe-scan-cluster-action:hover {
+            color: #10131A;
+        }
+
+        .safe-scan-cluster-risk {
+            border: 1px solid transparent;
+        }
+
+        .safe-scan-cluster-risk.is-high {
+            border-color: rgba(210, 72, 96, 0.28);
+            background: rgba(210, 72, 96, 0.11);
+            color: #B73250;
+        }
+
+        .safe-scan-cluster-risk.is-elevated {
+            border-color: rgba(172, 129, 18, 0.30);
+            background: rgba(245, 195, 71, 0.18);
+            color: #8A640B;
+        }
+
+        .safe-scan-cluster-risk.is-watchlist {
+            border-color: rgba(63, 163, 77, 0.26);
+            background: rgba(63, 163, 77, 0.13);
+            color: #2E7D3C;
+        }
+
+        .safe-scan-summary-surface {
+            border: 1px solid rgba(180, 202, 188, 0.74);
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(244, 250, 247, 0.72));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 10px 28px rgba(39, 71, 49, 0.07);
         }
 
         .atlaix-dark-preview .border-white\/70,
@@ -1444,9 +1568,29 @@
             border-color: rgba(114, 229, 132, 0.62) !important;
         }
 
+        .atlaix-profile-trigger,
+        .atlaix-profile-avatar {
+            background: #FFFFFF !important;
+            border: 1px solid #D8EBDD !important;
+            color: var(--text-light) !important;
+            box-shadow: 0 8px 22px rgba(93, 112, 145, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+        }
+
+        .atlaix-profile-trigger:hover,
+        .atlaix-profile-avatar:hover {
+            border-color: rgba(63, 163, 77, 0.38) !important;
+            color: var(--text-light) !important;
+        }
+
+        .atlaix-profile-initial {
+            background: transparent;
+            color: inherit;
+        }
+
         .atlaix-dark-preview .atlaix-profile-trigger {
             background: #1C1F22 !important;
             border: 1px solid #2A2E33 !important;
+            color: #EAECEF !important;
             box-shadow: var(--surface-shadow-soft) !important;
         }
 
@@ -1543,9 +1687,10 @@
         }
 
         .atlaix-dark-preview .atlaix-profile-avatar {
-            background: linear-gradient(135deg, #72E584 0%, #3FA34D 100%) !important;
-            color: #031006 !important;
-            box-shadow: 0 12px 30px rgba(63, 163, 77, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+            background: #1C1F22 !important;
+            border-color: #2A2E33 !important;
+            color: #EAECEF !important;
+            box-shadow: var(--surface-shadow-soft) !important;
         }
 
         .atlaix-dark-preview .atlaix-profile-menu-item {
@@ -1848,6 +1993,79 @@
             box-shadow:
                 0 18px 42px rgba(0, 0, 0, 0.34),
                 inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-section {
+            border-color: #2A2E33;
+            background:
+                radial-gradient(ellipse 58% 64% at 8% 0%, rgba(42, 245, 152, 0.045), transparent 66%),
+                linear-gradient(180deg, #1C1F22 0%, #171B1F 100%) !important;
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-kicker,
+        .atlaix-dark-preview .safe-scan-cluster-action {
+            color: #72E584;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-action:hover {
+            color: #EAECEF;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-count,
+        .atlaix-dark-preview .safe-scan-cluster-table,
+        .atlaix-dark-preview .safe-scan-cluster-metric {
+            border-color: #2A2E33;
+            background: rgba(17, 19, 21, 0.54) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.026) !important;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-table {
+            background:
+                linear-gradient(180deg, rgba(17, 19, 21, 0.88), rgba(14, 16, 18, 0.86)) !important;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-table-head,
+        .atlaix-dark-preview .safe-scan-cluster-detail {
+            border-color: rgba(42, 46, 51, 0.90);
+            background: rgba(28, 31, 34, 0.78) !important;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-entry {
+            border-top-color: rgba(42, 46, 51, 0.82);
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-row:hover {
+            background: rgba(34, 37, 41, 0.72) !important;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-column-label {
+            color: #8F96A3;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-risk.is-high {
+            border-color: rgba(255, 111, 138, 0.26);
+            background: rgba(255, 111, 138, 0.13);
+            color: #FF8DA1;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-risk.is-elevated {
+            border-color: rgba(246, 217, 103, 0.24);
+            background: rgba(246, 217, 103, 0.12);
+            color: #F6D967;
+        }
+
+        .atlaix-dark-preview .safe-scan-cluster-risk.is-watchlist {
+            border-color: rgba(114, 229, 132, 0.24);
+            background: rgba(114, 229, 132, 0.11);
+            color: #72E584;
+        }
+
+        .atlaix-dark-preview .safe-scan-summary-surface {
+            border-color: #2A2E33;
+            background:
+                linear-gradient(180deg, rgba(28, 31, 34, 0.96), rgba(17, 19, 21, 0.94)) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028), 0 14px 34px rgba(0, 0, 0, 0.20) !important;
         }
 
         .atlaix-dark-preview main .detection-event-card::before,

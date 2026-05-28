@@ -409,7 +409,8 @@ export const TokenDetails: React.FC = () => {
             subtitle: 'Identify threats',
             path: `/safe-scan?${new URLSearchParams({
                 address: tokenAddress,
-                chain: getSafeScanChain(tokenChain)
+                chain: getSafeScanChain(tokenChain),
+                autoScan: '1'
             }).toString()}`
         },
         {

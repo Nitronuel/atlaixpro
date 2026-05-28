@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Copy, Loader2, ShieldCheck } from 'lucide-react';
 import { ForensicBundleSection } from '../components/safe-scan/ForensicBundleSection';
 import { SafeScanService, type AlchemyHubChain, type ForensicBundleReport } from '../services/SafeScanService';
@@ -126,7 +127,7 @@ const SafeScanSummary: React.FC<{
                             </div>
                             <div className="h-2 rounded-full bg-primary-green" style={{ width: `${Math.max(4, lp?.burnPercent || 0)}%` }} />
                         </div>
-                        <div className="grid gap-3 rounded-xl border border-border bg-[#16181A] p-4 sm:grid-cols-2">
+                        <div className="safe-scan-summary-surface grid gap-3 rounded-xl p-4 sm:grid-cols-2">
                             <div>
                                 <div className="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#8FA0BF]">Lock Duration</div>
                                 <div className="text-base font-black text-text-light">{lp?.lockDuration || 'Unknown'}</div>
@@ -137,7 +138,7 @@ const SafeScanSummary: React.FC<{
                             </div>
                         </div>
                     </div>
-                    <div className="mt-auto rounded-xl border border-border bg-[#16181A] p-4">
+                    <div className="safe-scan-summary-surface mt-auto rounded-xl p-4">
                         <div className="flex items-center justify-between gap-4">
                             <div>
                                 <div className={lpSafe ? 'font-black text-primary-green' : 'font-black text-primary-red'}>
@@ -163,24 +164,24 @@ const SafeScanSummary: React.FC<{
                     </div>
                     <div className="grid gap-4 md:grid-cols-[1fr_1.3fr]">
                         <div className="grid gap-4">
-                            <div className="rounded-xl border border-border bg-[#16181A] p-5">
+                            <div className="safe-scan-summary-surface rounded-xl p-5">
                                 <div className="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#8FA0BF]">Cluster Supply Value</div>
                                 <div className="text-2xl font-black text-text-light">{formatUsd(report.supplyAttribution.estimatedCombinedValueUsd)}</div>
                                 <div className="mt-2 text-sm text-[#A6B4CF]">{formatPct(report.supplyAttribution.combinedCoordinatedPct)} coordinated supply</div>
                             </div>
-                            <div className="rounded-xl border border-border bg-[#16181A] p-5">
+                            <div className="safe-scan-summary-surface rounded-xl p-5">
                                 <div className="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#8FA0BF]">Live Liquidity</div>
                                 <div className="text-2xl font-black text-text-light">{formatUsd(lp?.totalLiquidity)}</div>
                             </div>
                         </div>
-                        <div className="flex min-h-[250px] flex-col items-center justify-center rounded-xl border border-border bg-[#16181A]">
+                        <div className="safe-scan-summary-surface flex min-h-[250px] flex-col items-center justify-center rounded-xl">
                             <div className="mb-5 text-center text-[11px] font-black uppercase tracking-[0.3em] text-[#8FA0BF]">Cluster/Liquidity Ratio</div>
                             <div className="flex h-24 w-24 items-center justify-center rounded-full border-[10px] border-card-hover bg-card text-2xl font-black text-[#A6B4CF]">
                                 {clusterLiquidityRatio === null ? 'N/A' : `${Math.round(clusterLiquidityRatio * 100)}%`}
                             </div>
                         </div>
                     </div>
-                    <div className="mt-6 rounded-xl border border-border bg-[#16181A] p-5 text-base leading-7 text-[#A6B4CF]">
+                    <div className="safe-scan-summary-surface mt-6 rounded-xl p-5 text-base leading-7 text-[#A6B4CF]">
                         {drainSupported
                             ? 'Drain risk compares clustered holder value against live liquidity to estimate whether coordinated wallets could overwhelm available exit liquidity.'
                             : 'Drain risk is only available when liquidity and forensic cluster valuation are available for this token.'}
@@ -201,30 +202,39 @@ const SafeScanSummary: React.FC<{
 };
 
 export const SafeScan: React.FC = () => {
+    const [searchParams] = useSearchParams();
     const [contract, setContract] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [report, setReport] = useState<ForensicBundleReport | null>(null);
     const [securityReport, setSecurityReport] = useState<SecurityReport | null>(null);
     const [chain, setChain] = useState<AlchemyHubChain>('solana');
+    const [resolvingChain, setResolvingChain] = useState(false);
+    const autoScanKeyRef = useRef('');
+    const chainManuallySelectedRef = useRef(false);
 
     const normalizedContract = contract.trim();
     const isSupported = SafeScanService.isSupported(normalizedContract, chain);
     const chainLabel = ALCHEMY_HUB_CHAINS.find((option) => option.id === chain)?.label ?? 'Chain';
 
-    const handleScan = async () => {
-        const tokenAddress = contract.trim();
+    const handleScan = async (nextContract = contract, nextChain = chain) => {
+        const tokenAddress = nextContract.trim();
         if (!tokenAddress) return;
 
         setLoading(true);
         setError(null);
         setReport(null);
         setSecurityReport(null);
+        setContract(tokenAddress);
 
         try {
+            const resolvedChain = !chainManuallySelectedRef.current || (nextChain === 'solana' && tokenAddress.startsWith('0x'))
+                ? await SafeScanService.detectTokenChain(tokenAddress, nextChain).then((detected) => detected ?? nextChain)
+                : nextChain;
+            setChain(resolvedChain);
             const [nextReport, nextSecurity] = await Promise.all([
-                SafeScanService.analyzeToken(tokenAddress, chain),
-                GoPlusService.fetchTokenSecurity(tokenAddress, scanSecurityChain(chain)).catch(() => null)
+                SafeScanService.analyzeToken(tokenAddress, resolvedChain),
+                GoPlusService.fetchTokenSecurity(tokenAddress, scanSecurityChain(resolvedChain)).catch(() => null)
             ]);
             setReport(nextReport);
             setSecurityReport(nextSecurity);
@@ -241,8 +251,57 @@ export const SafeScan: React.FC = () => {
         setReport(null);
         setSecurityReport(null);
         setLoading(false);
+        setResolvingChain(false);
+        chainManuallySelectedRef.current = false;
         setChain('solana');
     };
+
+    useEffect(() => {
+        if (chainManuallySelectedRef.current || !normalizedContract.startsWith('0x') || normalizedContract.length < 42) {
+            return;
+        }
+
+        let cancelled = false;
+        setResolvingChain(true);
+        const timeoutId = window.setTimeout(() => {
+            SafeScanService.detectTokenChain(normalizedContract, chain)
+                .then((detectedChain) => {
+                    if (!cancelled && detectedChain) {
+                        setChain(detectedChain);
+                    }
+                })
+                .finally(() => {
+                    if (!cancelled) setResolvingChain(false);
+                });
+        }, 250);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timeoutId);
+            setResolvingChain(false);
+        };
+    }, [normalizedContract, chain]);
+
+    useEffect(() => {
+        const queryContract = searchParams.get('address')?.trim() || '';
+        if (!queryContract) return;
+
+        const queryChain = ALCHEMY_HUB_CHAINS.some((option) => option.id === searchParams.get('chain'))
+            ? searchParams.get('chain') as AlchemyHubChain
+            : queryContract.startsWith('0x')
+                ? 'eth'
+                : 'solana';
+        const shouldAutoScan = searchParams.get('autoScan') === '1';
+        const autoScanKey = `${queryChain}:${queryContract}`;
+
+        setContract(queryContract);
+        setChain(queryChain);
+
+        if (shouldAutoScan && autoScanKeyRef.current !== autoScanKey) {
+            autoScanKeyRef.current = autoScanKey;
+            void handleScan(queryContract, queryChain);
+        }
+    }, [searchParams]);
 
     if (!report) {
         return (
@@ -257,7 +316,10 @@ export const SafeScan: React.FC = () => {
                     >
                         <select
                             value={chain}
-                            onChange={(event) => setChain(event.target.value as AlchemyHubChain)}
+                            onChange={(event) => {
+                                chainManuallySelectedRef.current = true;
+                                setChain(event.target.value as AlchemyHubChain);
+                            }}
                             disabled={loading}
                             className="rounded-xl border border-border bg-[#16181A] px-4 py-3.5 text-base font-semibold text-text-light outline-none transition-colors focus:border-primary-green/60 disabled:opacity-60"
                             aria-label="Select blockchain"
@@ -268,29 +330,24 @@ export const SafeScan: React.FC = () => {
                                 </option>
                             ))}
                         </select>
-                        <div className="flex-1 rounded-xl border border-border bg-[#16181A] px-4 transition-colors focus-within:border-primary-green/60">
-                            <input
-                                type="text"
-                                className="w-full bg-transparent py-3.5 text-base text-text-light outline-none placeholder:text-text-dark"
-                                placeholder="Enter Token Contract Address"
-                                value={contract}
-                                onChange={(event) => {
-                                    const nextValue = event.target.value;
-                                    setContract(nextValue);
-                                    if (nextValue.trim().startsWith('0x') && chain === 'solana') {
-                                        setChain('eth');
-                                    }
-                                }}
-                                disabled={loading}
-                            />
-                        </div>
+                        <input
+                            type="text"
+                            className="w-full flex-1 rounded-xl border border-border bg-[#111315] px-4 py-3.5 text-base text-text-light outline-none transition-colors placeholder:text-text-dark focus:border-primary-green/60 disabled:opacity-60"
+                            placeholder="Enter Token Contract Address"
+                            value={contract}
+                            onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setContract(nextValue);
+                            }}
+                            disabled={loading}
+                        />
                         <button
                             type="submit"
-                            disabled={loading || !isSupported}
+                            disabled={loading || resolvingChain || !isSupported}
                             className="flex min-w-[180px] items-center justify-center gap-2 rounded-xl bg-primary-green px-8 py-3 font-bold text-main transition-colors hover:bg-primary-green-darker disabled:cursor-not-allowed disabled:bg-card-hover disabled:text-text-medium"
                         >
                             {loading && <Loader2 size={18} className="animate-spin" />}
-                            {loading ? 'Scanning...' : 'Safe Scan'}
+                            {loading ? 'Scanning...' : resolvingChain ? 'Detecting...' : 'Safe Scan'}
                         </button>
                     </form>
 

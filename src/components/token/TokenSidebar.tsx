@@ -89,7 +89,7 @@ export const TokenSidebar: React.FC<TokenSidebarProps> = ({ data, loading, class
             icon: Scan,
             label: 'Safe Scan',
             iconClass: 'group-hover:text-primary-green',
-            path: `/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: safeScanChain }).toString()}`
+            path: `/safe-scan?${new URLSearchParams({ address: tokenAddress, chain: safeScanChain, autoScan: '1' }).toString()}`
         },
         {
             icon: Radar,

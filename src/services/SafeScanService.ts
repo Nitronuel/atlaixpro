@@ -1,6 +1,7 @@
 import type { ForensicBundleReport } from './ForensicBundleService';
 import { APP_CONFIG } from '../config';
 import { getAlchemyHubChain, type AlchemyHubChain } from './forensics/alchemy-hub-chains';
+import { DatabaseService } from './DatabaseService';
 
 type CacheRecord = {
     savedAt: number;
@@ -21,6 +22,18 @@ function isLikelyEvmAddress(value: string) {
 
 function cacheKey(tokenAddress: string, chain: AlchemyHubChain) {
     return `${CACHE_PREFIX}${chain}:lite:${tokenAddress.toLowerCase()}`;
+}
+
+function mapDexChainToSafeScanChain(chainId: string | null | undefined): AlchemyHubChain | null {
+    const normalized = String(chainId || '').trim().toLowerCase();
+    if (normalized === 'ethereum' || normalized === 'eth') return 'eth';
+    if (normalized === 'base') return 'base';
+    if (normalized === 'bsc' || normalized === 'bnb' || normalized === 'bnbchain') return 'bsc';
+    if (normalized === 'polygon' || normalized === 'matic') return 'polygon';
+    if (normalized === 'arbitrum' || normalized === 'arbitrumone') return 'arbitrum';
+    if (normalized === 'optimism' || normalized === 'op') return 'optimism';
+    if (normalized === 'solana') return 'solana';
+    return null;
 }
 
 function readCachedReport(tokenAddress: string, chain: AlchemyHubChain) {
@@ -73,6 +86,23 @@ export const SafeScanService = {
         return chain === 'solana'
             ? isLikelySolanaAddress(tokenAddress)
             : isLikelyEvmAddress(tokenAddress);
+    },
+
+    async detectTokenChain(tokenAddress: string, preferredChain?: AlchemyHubChain): Promise<AlchemyHubChain | null> {
+        const normalizedAddress = tokenAddress.trim();
+        if (!normalizedAddress) return null;
+        if (isLikelySolanaAddress(normalizedAddress) && !isLikelyEvmAddress(normalizedAddress)) return 'solana';
+        if (!isLikelyEvmAddress(normalizedAddress)) return null;
+
+        const preferred = preferredChain && preferredChain !== 'solana' ? preferredChain : undefined;
+        const preferredDetails = preferred
+            ? await DatabaseService.getTokenDetails(normalizedAddress, preferred).catch(() => null)
+            : null;
+        const preferredMatch = mapDexChainToSafeScanChain(preferredDetails?.chainId);
+        if (preferredMatch) return preferredMatch;
+
+        const bestDetails = await DatabaseService.getTokenDetails(normalizedAddress).catch(() => null);
+        return mapDexChainToSafeScanChain(bestDetails?.chainId) ?? preferred ?? null;
     },
 
     async analyzeToken(tokenAddress: string, chain: AlchemyHubChain = 'solana') {
