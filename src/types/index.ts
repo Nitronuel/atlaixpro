@@ -11,6 +11,7 @@ export type ViewState =
     | 'ai-assistant'
     | 'wallet-tracking'
     | 'smart-money'
+    | 'safefy-scan'
     | 'safe-scan'
     | 'smart-alerts'
     | 'settings';

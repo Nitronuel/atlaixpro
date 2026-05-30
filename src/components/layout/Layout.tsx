@@ -4,7 +4,7 @@ import { ViewState } from '../../types';
 import {
   Activity, Bell, Briefcase,
   LayoutDashboard, LogIn, LogOut, Menu, MessageSquare, Moon, PanelLeft, Radar,
-  Settings, ShieldCheck, Sun, Target, User, Wallet,
+  Settings, Shield, ShieldCheck, Sun, Target, User, Wallet,
   X, Zap
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -42,6 +42,7 @@ const navItems: NavItem[] = [
   { path: '/wallet', label: 'Wallet Tracker', shortLabel: 'Wallets', icon: <Wallet size={19} />, group: 'capital' },
   { path: '/smart-alerts', label: 'Smart Alerts', shortLabel: 'Alerts', icon: <Bell size={19} />, group: 'tools' },
   { path: '/ai-assistant', label: 'AI Assistant', shortLabel: 'Assistant', icon: <MessageSquare size={19} />, group: 'tools' },
+  { path: '/safefy-scan', label: 'Safefy Scan', shortLabel: 'Safefy', icon: <Shield size={19} />, group: 'tools' },
   { path: '/safe-scan', label: 'Safe Scan', shortLabel: 'Safe Scan', icon: <ShieldCheck size={19} />, group: 'tools' },
   { path: '/settings', label: 'Settings', shortLabel: 'Settings', icon: <Settings size={19} />, group: 'account' },
   { path: '#theme', label: 'Switch Theme', shortLabel: 'Theme', icon: <Sun size={19} />, group: 'account', action: 'theme' }
@@ -73,6 +74,7 @@ const getPageTitle = (pathname: string) => {
   if (pathname.startsWith('/wallet')) return 'Wallet Tracker';
   if (pathname.startsWith('/smart-alerts')) return 'Smart Alerts';
   if (pathname.startsWith('/ai-assistant')) return 'AI Assistant';
+  if (pathname.startsWith('/safefy-scan')) return 'Safefy Scan';
   if (pathname.startsWith('/safe-scan') || pathname.startsWith('/alchemy-hub')) return 'Safe Scan';
   if (pathname.startsWith('/settings')) return 'Settings';
   if (pathname.startsWith('/token/')) return 'Token Overview';

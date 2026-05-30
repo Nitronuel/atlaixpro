@@ -14,6 +14,7 @@ const Detection = lazy(async () => ({ default: (await import('./pages/Detection'
 const TokenDetection = lazy(async () => ({ default: (await import('./pages/TokenDetection')).TokenDetection }));
 const AiAssistant = lazy(async () => ({ default: (await import('./pages/AiAssistant')).AiAssistant }));
 const WalletTracking = lazy(async () => ({ default: (await import('./pages/WalletTracking')).WalletTracking }));
+const SafefyScan = lazy(async () => ({ default: (await import('./pages/SafefyScan')).SafefyScan }));
 const SafeScan = lazy(async () => ({ default: (await import('./pages/SafeScan')).SafeScan }));
 const SmartAlerts = lazy(async () => ({ default: (await import('./pages/SmartAlerts')).SmartAlerts }));
 const SmartMoney = lazy(async () => ({ default: (await import('./pages/SmartMoney')).SmartMoney }));
@@ -75,6 +76,7 @@ function AppContent() {
                             'detection': '/detection',
                             'ai-assistant': '/ai-assistant',
                             'wallet-tracking': '/wallet',
+                            'safefy-scan': '/safefy-scan',
                             'safe-scan': '/safe-scan',
                             'settings': '/settings',
                             'smart-money': '/smart-money',
@@ -101,6 +103,7 @@ function AppContent() {
                             <Route path="/wallet" element={<WalletTracking />} />
                             <Route path="/wallet/:address" element={<WalletTracking />} />
 
+                            <Route path="/safefy-scan" element={<SafefyScan />} />
                             <Route path="/safe-scan" element={<SafeScan />} />
                             <Route path="/alchemy-hub" element={<Navigate to="/safe-scan" replace />} />
 
