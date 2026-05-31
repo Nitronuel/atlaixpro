@@ -14,7 +14,6 @@ const Detection = lazy(async () => ({ default: (await import('./pages/Detection'
 const TokenDetection = lazy(async () => ({ default: (await import('./pages/TokenDetection')).TokenDetection }));
 const AiAssistant = lazy(async () => ({ default: (await import('./pages/AiAssistant')).AiAssistant }));
 const WalletTracking = lazy(async () => ({ default: (await import('./pages/WalletTracking')).WalletTracking }));
-const SafefyScan = lazy(async () => ({ default: (await import('./pages/SafefyScan')).SafefyScan }));
 const SafeScan = lazy(async () => ({ default: (await import('./pages/SafeScan')).SafeScan }));
 const SmartAlerts = lazy(async () => ({ default: (await import('./pages/SmartAlerts')).SmartAlerts }));
 const SmartMoney = lazy(async () => ({ default: (await import('./pages/SmartMoney')).SmartMoney }));
@@ -26,6 +25,17 @@ const PlaceholderView = ({ title }: { title: string }) => (
     <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center p-6 animate-fade-in">
         <h2 className="text-2xl font-bold mb-2 text-text-light">{title}</h2>
         <p className="text-text-medium">This workspace is not available yet.</p>
+    </div>
+);
+
+const UnavailableView = () => (
+    <div className="flex min-h-[58vh] flex-col items-center justify-center px-6 text-center animate-fade-in">
+        <div className="max-w-md rounded-2xl border border-border bg-card px-8 py-10 shadow-sm">
+            <h2 className="text-2xl font-black text-text-light">This page is unavailable.</h2>
+            <p className="mt-3 text-sm font-semibold leading-6 text-text-medium">
+                This workspace is temporarily disabled.
+            </p>
+        </div>
     </div>
 );
 
@@ -76,7 +86,6 @@ function AppContent() {
                             'detection': '/detection',
                             'ai-assistant': '/ai-assistant',
                             'wallet-tracking': '/wallet',
-                            'safefy-scan': '/safefy-scan',
                             'safe-scan': '/safe-scan',
                             'settings': '/settings',
                             'smart-money': '/smart-money',
@@ -103,7 +112,7 @@ function AppContent() {
                             <Route path="/wallet" element={<WalletTracking />} />
                             <Route path="/wallet/:address" element={<WalletTracking />} />
 
-                            <Route path="/safefy-scan" element={<SafefyScan />} />
+                            <Route path="/safefy-scan" element={<UnavailableView />} />
                             <Route path="/safe-scan" element={<SafeScan />} />
                             <Route path="/alchemy-hub" element={<Navigate to="/safe-scan" replace />} />
 
