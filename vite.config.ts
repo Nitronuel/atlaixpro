@@ -46,7 +46,7 @@ export default defineConfig(({ mode }) => {
               return 'market-data';
             }
 
-            if (id.includes('/src/pages/SafeScan') || id.includes('/src/components/safe-scan') || id.includes('/src/services/forensics')) {
+            if (id.includes('/src/pages/SafefyScan') || id.includes('/src/services/SafefyScanService') || id.includes('/src/services/forensics')) {
               return 'safe-scan';
             }
 

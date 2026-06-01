@@ -11,7 +11,6 @@ import {
     Search,
     Shield,
     ShieldAlert,
-    Timer,
     Users,
     Wallet,
     XCircle
@@ -30,6 +29,8 @@ import {
     type InsightXScannerResponse,
     type InsightXSnipers,
     type InsightXWalletEntry,
+    type DetectedTokenNetwork,
+    type LiveTokenLiquidity,
     type SafefyScanReport
 } from '../services/SafefyScanService';
 
@@ -46,12 +47,28 @@ const formatPct = (value: unknown, fallback = 'N/A') => {
     return `${normalized.toFixed(normalized >= 10 ? 1 : 2)}%`;
 };
 
+const formatPercent = (value: number, fallback = 'N/A') => {
+    if (!Number.isFinite(value)) return fallback;
+    return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+};
+
 const formatCompact = (value: unknown) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return 'N/A';
     return new Intl.NumberFormat('en-US', {
         notation: 'compact',
         maximumFractionDigits: 2
+    }).format(numeric);
+};
+
+const formatCurrencyCompact = (value: unknown) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        notation: 'compact',
+        maximumFractionDigits: numeric >= 100 ? 2 : 4
     }).format(numeric);
 };
 
@@ -71,14 +88,16 @@ const formatAgeOrDate = (value: unknown) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) return 'Unknown';
 
-    if (numeric >= 1_000_000_000) return toDate(numeric);
+    const ageSeconds = numeric >= 1_000_000_000
+        ? Math.max(0, (Date.now() - (numeric < 10_000_000_000 ? numeric * 1000 : numeric)) / 1000)
+        : numeric;
 
-    const days = Math.floor(numeric / 86400);
+    const days = Math.floor(ageSeconds / 86400);
     if (days >= 1) return `${formatNumber(days)}d`;
-    const hours = Math.floor(numeric / 3600);
+    const hours = Math.floor(ageSeconds / 3600);
     if (hours >= 1) return `${formatNumber(hours)}h`;
-    const minutes = Math.floor(numeric / 60);
-    return minutes >= 1 ? `${formatNumber(minutes)}m` : `${formatNumber(numeric)}s`;
+    const minutes = Math.floor(ageSeconds / 60);
+    return minutes >= 1 ? `${formatNumber(minutes)}m` : `${formatNumber(ageSeconds)}s`;
 };
 
 const endpointTone = (status: InsightXEndpointResult['status']) => {
@@ -99,6 +118,18 @@ const riskLabel = (score: number | null) => {
     if (score >= 80) return 'Lower Risk';
     if (score >= 55) return 'Watch Closely';
     return 'High Risk';
+};
+
+const getDrainRiskPenalty = (clusterBalance: number | null, liquidity: LiveTokenLiquidity | null) => {
+    const liquidityDepth = Number(liquidity?.tokenLiquidity);
+    if (clusterBalance === null || !Number.isFinite(liquidityDepth) || liquidityDepth <= 0) return 0;
+
+    const liquidityShare = (clusterBalance / liquidityDepth) * 100;
+    if (liquidityShare >= 500) return 12;
+    if (liquidityShare >= 250) return 9;
+    if (liquidityShare >= 100) return 6;
+    if (liquidityShare >= 50) return 3;
+    return 0;
 };
 
 const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
@@ -135,7 +166,7 @@ const StatusPill: React.FC<{ result?: InsightXEndpointResult; label?: string }> 
     </span>
 );
 
-const MetricCard: React.FC<{ label: string; value: string; detail?: string; tone?: string }> = ({ label, value, detail, tone = 'text-text-light' }) => (
+const MetricCard: React.FC<{ label: string; value: React.ReactNode; detail?: React.ReactNode; tone?: string }> = ({ label, value, detail, tone = 'text-text-light' }) => (
     <div className="rounded-2xl border border-border bg-card-hover/45 p-4">
         <div className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">{label}</div>
         <div className={`text-2xl font-black ${tone}`}>{value}</div>
@@ -144,6 +175,105 @@ const MetricCard: React.FC<{ label: string; value: string; detail?: string; tone
 );
 
 const getEndpointData = <T,>(result?: InsightXEndpointResult<T>) => result?.status === 'available' ? result.data : null;
+
+const getWalletAddressValue = (entry: any) => {
+    if (typeof entry === 'string') return entry.trim();
+    return String(entry?.address ?? entry?.wallet ?? entry?.owner ?? entry?.account ?? '').trim();
+};
+
+const getBalanceValue = (entry: any) => Number(entry?.balance ?? entry?.amount ?? entry?.token_balance);
+
+const getSupplyPercentField = (entry: any) => entry?.percentage ?? entry?.pct ?? entry?.supply_pct ?? entry?.total_pct;
+
+const formatReportedSupplyPercent = (value: unknown, fallback = 'N/A') => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? formatPercent(numeric) : fallback;
+};
+
+const normalizePercentValue = (value: unknown) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return numeric > 0 && numeric <= 1 ? numeric * 100 : numeric;
+};
+
+const formatSupplyShare = (entry: any, totalSupply?: number | null) => {
+    const balance = getBalanceValue(entry);
+    const supply = Number(totalSupply);
+    if (Number.isFinite(balance) && Number.isFinite(supply) && supply > 0) {
+        return formatPercent((balance / supply) * 100);
+    }
+    return formatReportedSupplyPercent(getSupplyPercentField(entry));
+};
+
+const getClusterSupplyBalance = (cluster: any) => {
+    const directBalance = Number(
+        cluster?.balance
+        ?? cluster?.amount
+        ?? cluster?.token_balance
+        ?? cluster?.total_balance
+        ?? cluster?.cluster_balance
+        ?? cluster?.supply_balance
+    );
+    if (Number.isFinite(directBalance) && directBalance > 0) return directBalance;
+
+    const members = getClusterMembers(cluster);
+    const summedBalance = members.reduce((total: number, member: any) => {
+        const balance = getBalanceValue(member);
+        return Number.isFinite(balance) && balance > 0 ? total + balance : total;
+    }, 0);
+    return summedBalance > 0 ? summedBalance : null;
+};
+
+const formatClusterSupplyShare = (cluster: any, totalSupply?: number | null) => {
+    const balance = getClusterSupplyBalance(cluster);
+    const supply = Number(totalSupply);
+    if (balance !== null && Number.isFinite(supply) && supply > 0) {
+        return formatPercent((balance / supply) * 100);
+    }
+    return formatReportedSupplyPercent(getSupplyPercentField(cluster));
+};
+
+const formatWalletGroupSupplyShare = (rows: InsightXWalletEntry[], totalSupply?: number | null, fallback?: unknown) => {
+    const supply = Number(totalSupply);
+    if (Number.isFinite(supply) && supply > 0) {
+        const balance = rows.reduce((total, row) => {
+            const value = getBalanceValue(row);
+            return Number.isFinite(value) && value > 0 ? total + value : total;
+        }, 0);
+
+        if (balance > 0 || rows.length > 0) {
+            return formatPercent((balance / supply) * 100);
+        }
+    }
+
+    return formatReportedSupplyPercent(fallback);
+};
+
+const getWalletGroupSupplyBalance = (rows: InsightXWalletEntry[], totalSupply?: number | null, fallback?: unknown) => {
+    const balance = rows.reduce((total, row) => {
+        const value = getBalanceValue(row);
+        return Number.isFinite(value) && value > 0 ? total + value : total;
+    }, 0);
+    if (balance > 0) return balance;
+
+    const supply = Number(totalSupply);
+    const fallbackPercent = normalizePercentValue(fallback);
+    if (Number.isFinite(supply) && supply > 0 && fallbackPercent !== null) {
+        return (supply * fallbackPercent) / 100;
+    }
+
+    return null;
+};
+
+const formatCreatorSupplyShare = (scanner: InsightXScannerResponse | null, fallback?: unknown) => {
+    const creatorBalance = Number(scanner?.results?.advanced?.creator?.balance);
+    const totalSupply = Number(scanner?.token?.total_supply);
+    if (Number.isFinite(creatorBalance) && creatorBalance >= 0 && Number.isFinite(totalSupply) && totalSupply > 0) {
+        return formatPercent((creatorBalance / totalSupply) * 100);
+    }
+
+    return formatReportedSupplyPercent(fallback);
+};
 
 const collectClusterList = (data: any) => {
     if (!data) return [];
@@ -167,6 +297,48 @@ const getClusterMembers = (cluster: any) => Array.isArray(cluster?.members)
 
 const getMemberAddress = (member: any) => String(member?.address || member?.wallet || member || '').toLowerCase();
 
+const getTotalClusterSupplyBalance = (clusters: any, totalSupply?: number | null, fallback?: unknown) => {
+    const seen = new Set<string>();
+    const totalBalance = collectClusterList(clusters).reduce((clusterTotal: number, cluster: any) => {
+        const members = getClusterMembers(cluster);
+        const memberTotal = members.reduce((memberSum: number, member: any) => {
+            const address = getWalletAddressValue(member).toLowerCase();
+            if (address && seen.has(address)) return memberSum;
+            if (address) seen.add(address);
+
+            const balance = getBalanceValue(member);
+            return Number.isFinite(balance) && balance > 0 ? memberSum + balance : memberSum;
+        }, 0);
+
+        if (memberTotal > 0) return clusterTotal + memberTotal;
+
+        const clusterBalance = getClusterSupplyBalance(cluster);
+        return clusterBalance !== null ? clusterTotal + clusterBalance : clusterTotal;
+    }, 0);
+
+    if (totalBalance > 0) return totalBalance;
+
+    const supply = Number(totalSupply);
+    const fallbackPercent = normalizePercentValue(fallback);
+    if (Number.isFinite(supply) && supply > 0 && fallbackPercent !== null) {
+        return (supply * fallbackPercent) / 100;
+    }
+
+    return null;
+};
+
+const formatTotalClusterSupplyShare = (clusters: any, totalSupply?: number | null, fallback?: unknown) => {
+    const supply = Number(totalSupply);
+    if (Number.isFinite(supply) && supply > 0) {
+        const totalBalance = getTotalClusterSupplyBalance(clusters);
+        if (totalBalance > 0) {
+            return formatPercent((totalBalance / supply) * 100);
+        }
+    }
+
+    return formatReportedSupplyPercent(fallback);
+};
+
 const labelMapFrom = (labels: InsightXLabel[] | null) => {
     const map = new Map<string, InsightXLabel>();
     (labels || []).forEach((label) => map.set(label.address.toLowerCase(), label));
@@ -182,11 +354,44 @@ const collectLabels = (data: unknown): InsightXLabel[] => {
     return [];
 };
 
+const uniqueWalletRows = (rows: InsightXWalletEntry[] = []) => {
+    const byAddress = new Map<string, InsightXWalletEntry>();
+
+    rows.forEach((row) => {
+        const address = getWalletAddressValue(row);
+        if (!address) {
+            return;
+        }
+
+        const key = address.toLowerCase();
+        const existing = byAddress.get(key);
+        if (!existing) {
+            byAddress.set(key, { ...row, address });
+            return;
+        }
+
+        const existingBalance = getBalanceValue(existing);
+        const nextBalance = getBalanceValue(row);
+        const base = Number.isFinite(nextBalance) && (!Number.isFinite(existingBalance) || nextBalance > existingBalance)
+            ? { ...existing, ...row, address }
+            : { ...row, ...existing, address };
+        byAddress.set(key, {
+            ...base,
+            reasons: [...new Set([...(existing.reasons || []), ...(row.reasons || [])])],
+            tags: [...new Set([...(existing.tags || []), ...(row.tags || [])])]
+        });
+    });
+
+    return [...byAddress.values()];
+};
+
 const enrichWalletRows = (rows: InsightXWalletEntry[] = [], labels: Map<string, InsightXLabel>) =>
-    rows.map((row) => {
-        const label = row.address ? labels.get(row.address.toLowerCase()) : undefined;
+    uniqueWalletRows(rows).map((row) => {
+        const address = getWalletAddressValue(row);
+        const label = address ? labels.get(address.toLowerCase()) : undefined;
         return {
             ...row,
+            address: address || row.address,
             label: label?.label || row.label,
             tags: label?.tags || row.tags,
             smart_contract: label?.smart_contract ?? row.smart_contract
@@ -211,6 +416,9 @@ const hexToRgba = (hex: string, alpha: number) => {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const ATLAS_MIN_ZOOM = 0.25;
+const ATLAS_MAX_ZOOM = 4.2;
 
 const atlasNodeFill = (node: any) => node.clustered
     ? hexToRgba(node.color, 0.48)
@@ -515,7 +723,75 @@ const LiquidityLockSummary: React.FC<{ scanner: InsightXScannerResponse | null }
     );
 };
 
-const WalletTable: React.FC<{ rows: InsightXWalletEntry[]; empty: string }> = ({ rows, empty }) => {
+const drainRiskTone = (value: number | null) => {
+    if (value === null) return 'border-border bg-card-hover/45 text-text-light';
+    if (value >= 100) return 'border-primary-red/30 bg-primary-red/10 text-primary-red';
+    if (value >= 50) return 'border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#B45309]';
+    return 'border-primary-green/25 bg-primary-green/10 text-primary-green';
+};
+
+const drainRiskLabel = (value: number | null) => {
+    if (value === null) return 'Liquidity unavailable';
+    if (value >= 100) return 'Cluster supply can exceed live liquidity';
+    if (value >= 50) return 'High liquidity pressure';
+    return 'Below live liquidity';
+};
+
+const DrainRiskSummary: React.FC<{
+    clusterBalance: number | null;
+    totalSupply?: number | null;
+    liquidity: LiveTokenLiquidity | null;
+    loading: boolean;
+    error: string | null;
+    className?: string;
+}> = ({ clusterBalance, totalSupply, liquidity, loading, error, className = '' }) => {
+    const liquidityDepth = liquidity?.tokenLiquidity ?? null;
+    const clusterSupplyShare = clusterBalance !== null && Number(totalSupply) > 0
+        ? (clusterBalance / Number(totalSupply)) * 100
+        : null;
+    const clusterValueUsd = clusterBalance !== null && liquidity?.tokenPriceUsd
+        ? clusterBalance * liquidity.tokenPriceUsd
+        : null;
+    const liquidityValueUsd = liquidity?.liquidityUsd ?? null;
+    const liquidityShare = clusterBalance !== null && liquidityDepth !== null && liquidityDepth > 0
+        ? (clusterBalance / liquidityDepth) * 100
+        : null;
+    const tone = drainRiskTone(liquidityShare);
+
+    return (
+        <div className={`rounded-2xl border p-4 ${tone} ${className}`}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.16em]">Drain risk</div>
+                    <div className="mt-1 text-sm font-bold">{drainRiskLabel(liquidityShare)}</div>
+                </div>
+                {loading ? <Loader2 size={18} className="shrink-0 animate-spin" /> : null}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.14em] opacity-70">Cluster held supply</div>
+                    <div className="mt-1 text-lg font-black text-text-light">{formatCurrencyCompact(clusterValueUsd)}</div>
+                    <div className="mt-1 text-xs font-black text-text-medium">{clusterSupplyShare !== null ? `${formatPercent(clusterSupplyShare)} of supply` : 'N/A of supply'}</div>
+                </div>
+                <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.14em] opacity-70">Live liquidity</div>
+                    <div className="mt-1 text-lg font-black text-text-light">{formatCurrencyCompact(liquidityValueUsd)}</div>
+                </div>
+                <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.14em] opacity-70">Liquidity held</div>
+                    <div className="mt-1 text-lg font-black text-text-light">{liquidityShare !== null ? formatPercent(liquidityShare) : 'N/A'}</div>
+                </div>
+            </div>
+            {error || loading || !liquidity ? (
+                <div className="mt-3 text-xs font-semibold leading-5 text-text-medium">
+                    {error || (loading ? 'Checking live pool depth...' : 'No live token-side liquidity was found for this token.')}
+                </div>
+            ) : null}
+        </div>
+    );
+};
+
+const WalletTable: React.FC<{ rows: InsightXWalletEntry[]; empty: string; totalSupply?: number | null }> = ({ rows, empty, totalSupply }) => {
     if (!rows.length) {
         return <EmptyBlock title="No wallet rows" body={empty} />;
     }
@@ -541,7 +817,7 @@ const WalletTable: React.FC<{ rows: InsightXWalletEntry[]; empty: string }> = ({
                                 {row.tags?.length ? <div className="mt-1 text-xs text-text-medium">{row.tags.slice(0, 3).join(', ')}</div> : null}
                             </td>
                             <td className="py-3 pr-4 font-semibold text-text-medium">{formatCompact(row.balance)}</td>
-                            <td className="py-3 pr-4 font-black text-text-light">{formatPct(row.percentage)}</td>
+                            <td className="py-3 pr-4 font-black text-text-light">{formatSupplyShare(row, totalSupply)}</td>
                             <td className="py-3 text-xs text-text-medium">{row.reasons?.length ? row.reasons.join(', ') : row.slot ? `Slot ${row.slot}` : 'Detected relationship'}</td>
                         </tr>
                     ))}
@@ -554,7 +830,6 @@ const WalletTable: React.FC<{ rows: InsightXWalletEntry[]; empty: string }> = ({
 const ScannerPanel: React.FC<{ scanner: InsightXScannerResponse | null; result?: InsightXEndpointResult<InsightXScannerResponse> }> = ({ scanner, result }) => {
     const advanced = scanner?.results?.advanced || {};
     const simple = scanner?.results?.simple;
-    const token = scanner?.token;
     const securityTone = (state: 'safe' | 'risk' | 'unknown') => {
         if (state === 'safe') return 'border-primary-green/20 bg-primary-green/10 text-primary-green';
         if (state === 'risk') return 'border-primary-red/25 bg-primary-red/10 text-primary-red';
@@ -589,57 +864,33 @@ const ScannerPanel: React.FC<{ scanner: InsightXScannerResponse | null; result?:
 
     return (
         <Card>
-            <SectionHeader icon={<Shield size={19} />} title="Security Scanner" eyebrow="Token contract and metadata" action={<StatusPill result={result} />} />
+            <SectionHeader icon={<Shield size={19} />} title="Security Scanner" eyebrow="Contract checks" action={<StatusPill result={result} />} />
             {!scanner ? (
                 <EmptyBlock title="Scanner unavailable" body={result?.error || 'No scanner report was returned for this token.'} />
             ) : (
-                <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
-                    <div className="rounded-2xl border border-border bg-card-hover/40 p-5">
-                        <div className="mb-4 flex items-center gap-3">
-                            <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-full border border-border bg-card text-lg font-black text-primary-green">
-                                {token?.logo ? <img src={token.logo} alt="" className="h-full w-full object-cover" /> : (token?.symbol || 'IX').slice(0, 2)}
+                <div className="space-y-4">
+                    {simple?.reasons?.length ? (
+                        <div className="rounded-2xl border border-border bg-card-hover/40 p-4">
+                            <div className="mb-3 text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Score reasons</div>
+                            <div className="grid gap-2">
+                                {simple.reasons.slice(0, 6).map((reason) => (
+                                    <div key={reason} className="flex gap-2 text-sm font-semibold text-text-medium">
+                                        <Info size={16} className="mt-0.5 shrink-0 text-primary-green" />
+                                        <span>{reason}</span>
+                                    </div>
+                                ))}
                             </div>
-                            <div className="min-w-0">
-                                <div className="truncate text-xl font-black text-text-light">{token?.name || 'Unknown token'}</div>
-                                <div className="font-semibold text-text-medium">{token?.symbol || 'N/A'}</div>
+                        </div>
+                    ) : null}
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {flags.map(([label, value, state]) => (
+                            <div key={String(label)} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card-hover/35 px-3 py-3">
+                                <span className="min-w-0 truncate text-sm font-bold text-text-medium">{label}</span>
+                                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${securityTone(state as 'safe' | 'risk' | 'unknown')}`}>
+                                    {String(value)}
+                                </span>
                             </div>
-                        </div>
-                        <div className={`mb-4 rounded-2xl border p-4 ${riskTone(Number(simple?.score ?? NaN))}`}>
-                            <div className="text-[11px] font-black uppercase tracking-[0.16em]">Safety Score</div>
-                            <div className="mt-2 text-4xl font-black">{simple?.score ?? 'N/A'}</div>
-                            <div className="mt-1 text-sm font-bold">{simple?.message || riskLabel(Number(simple?.score ?? NaN))}</div>
-                        </div>
-                        <div className="grid gap-2 text-sm">
-                            <div className="flex justify-between gap-3"><span className="text-text-medium">Supply</span><span className="font-black text-text-light">{formatCompact(token?.total_supply)}</span></div>
-                            <div className="flex justify-between gap-3"><span className="text-text-medium">Decimals</span><span className="font-black text-text-light">{token?.decimals ?? 'N/A'}</span></div>
-                            <div className="flex justify-between gap-3"><span className="text-text-medium">Age</span><span className="text-right font-black text-text-light">{formatAgeOrDate(token?.age)}</span></div>
-                            <div className="flex justify-between gap-3"><span className="text-text-medium">Holders</span><span className="font-black text-text-light">{formatNumber(advanced.holder_count)}</span></div>
-                        </div>
-                    </div>
-                    <div className="space-y-4">
-                        {simple?.reasons?.length ? (
-                            <div className="rounded-2xl border border-border bg-card-hover/40 p-4">
-                                <div className="mb-3 text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Score reasons</div>
-                                <div className="grid gap-2">
-                                    {simple.reasons.slice(0, 6).map((reason) => (
-                                        <div key={reason} className="flex gap-2 text-sm font-semibold text-text-medium">
-                                            <Info size={16} className="mt-0.5 shrink-0 text-primary-green" />
-                                            <span>{reason}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : null}
-                        <div className="grid gap-3 sm:grid-cols-2">
-                            {flags.map(([label, value, state]) => (
-                                <div key={String(label)} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card-hover/35 px-3 py-3">
-                                    <span className="min-w-0 truncate text-sm font-bold text-text-medium">{label}</span>
-                                    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${securityTone(state as 'safe' | 'risk' | 'unknown')}`}>
-                                        {String(value)}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
+                        ))}
                     </div>
                 </div>
             )}
@@ -653,21 +904,32 @@ const ManipulationPanel: React.FC<{
     bundlers: InsightXBundlers | null;
     insiders: InsightXInsiders | null;
     labels: Map<string, InsightXLabel>;
-}> = ({ overview, snipers, bundlers, insiders, labels }) => {
+    totalSupply?: number | null;
+    tokenPriceUsd?: number | null;
+}> = ({ overview, snipers, bundlers, insiders, labels, totalSupply, tokenPriceUsd }) => {
     const sniperRows = enrichWalletRows(snipers?.snipers || [], labels);
     const bundlerRows = enrichWalletRows(bundlers?.bundlers || [], labels);
     const insiderRows = enrichWalletRows(insiders?.insiders || [], labels);
     const [tab, setTab] = useState<'bundlers' | 'snipers' | 'insiders'>('bundlers');
     const rows = tab === 'bundlers' ? bundlerRows : tab === 'snipers' ? sniperRows : insiderRows;
+    const bundlerSupply = formatWalletGroupSupplyShare(bundlerRows, totalSupply, bundlers?.total_bundlers_pct ?? overview?.bundlers_pct);
+    const sniperSupply = formatWalletGroupSupplyShare(sniperRows, totalSupply, snipers?.total_sniper_pct ?? overview?.snipers_pct);
+    const insiderSupply = formatWalletGroupSupplyShare(insiderRows, totalSupply, insiders?.total_insiders_pct ?? overview?.insiders_pct);
+    const priceUsd = Number(tokenPriceUsd);
+    const usdValue = (balance: number | null) => balance !== null && Number.isFinite(priceUsd) && priceUsd > 0
+        ? formatCurrencyCompact(balance * priceUsd)
+        : 'N/A';
+    const bundlerUsd = usdValue(getWalletGroupSupplyBalance(bundlerRows, totalSupply, bundlers?.total_bundlers_pct ?? overview?.bundlers_pct));
+    const sniperUsd = usdValue(getWalletGroupSupplyBalance(sniperRows, totalSupply, snipers?.total_sniper_pct ?? overview?.snipers_pct));
+    const insiderUsd = usdValue(getWalletGroupSupplyBalance(insiderRows, totalSupply, insiders?.total_insiders_pct ?? overview?.insiders_pct));
 
     return (
         <Card>
             <SectionHeader icon={<Radar size={19} />} title="Launch Manipulation Intelligence" eyebrow="Bundlers, snipers, insiders" />
-            <div className="mb-5 grid gap-3 md:grid-cols-4">
-                <MetricCard label="Bundlers" value={formatPct(bundlers?.total_bundlers_pct ?? overview?.bundlers_pct)} detail={`${formatNumber(bundlerRows.length)} wallets`} />
-                <MetricCard label="Snipers" value={formatPct(snipers?.total_sniper_pct ?? overview?.snipers_pct)} detail={`${formatNumber(snipers?.count?.total)} detected`} />
-                <MetricCard label="Insiders" value={formatPct(insiders?.total_insiders_pct ?? overview?.insiders_pct)} detail={`${formatNumber(insiderRows.length)} wallets`} />
-                <MetricCard label="Sniper sold fully" value={formatNumber(snipers?.count?.sold_fully)} detail="Early buyers fully exited" />
+            <div className="mb-5 grid gap-3 md:grid-cols-3">
+                <MetricCard label="Bundlers" value={<><div>{bundlerSupply}</div><div className="mt-1 text-base font-black text-text-medium">{bundlerUsd}</div></>} detail={`${formatNumber(bundlerRows.length)} wallet interaction`} />
+                <MetricCard label="Snipers" value={<><div>{sniperSupply}</div><div className="mt-1 text-base font-black text-text-medium">{sniperUsd}</div></>} detail={`${formatNumber(sniperRows.length)} wallet interaction`} />
+                <MetricCard label="Insiders" value={<><div>{insiderSupply}</div><div className="mt-1 text-base font-black text-text-medium">{insiderUsd}</div></>} detail={`${formatNumber(insiderRows.length)} wallet interaction`} />
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
                 {(['bundlers', 'snipers', 'insiders'] as const).map((item) => (
@@ -681,20 +943,18 @@ const ManipulationPanel: React.FC<{
                     </button>
                 ))}
             </div>
-            <WalletTable rows={rows} empty="This endpoint returned no detailed wallets or is unsupported for the selected network." />
+            <WalletTable rows={rows} empty="This endpoint returned no detailed wallets or is unsupported for the selected network." totalSupply={totalSupply} />
         </Card>
     );
 };
 
-const ClusterPanel: React.FC<{ clusters: any; labels: Map<string, InsightXLabel> }> = ({ clusters, labels }) => {
+const ClusterPanel: React.FC<{ clusters: any; labels: Map<string, InsightXLabel>; totalSupply?: number | null }> = ({ clusters, labels, totalSupply }) => {
     const clusterList = collectClusterList(clusters);
     const [expandedCluster, setExpandedCluster] = useState<string | null>(null);
     const getClusterKey = (cluster: any, index: number) => String(cluster?.id || cluster?.cluster_id || cluster?.name || cluster?.tag || index);
     const clusterTags = (cluster: any) => Array.isArray(cluster?.tags)
         ? cluster.tags.filter(Boolean).join(', ')
         : cluster?.type || cluster?.reason || 'Relationship cluster';
-    const clusterPercent = (cluster: any) => cluster?.percentage ?? cluster?.pct ?? cluster?.supply_pct ?? cluster?.total_pct;
-
     return (
         <Card>
             <SectionHeader icon={<GitBranch size={19} />} title="Cluster Explorer" eyebrow="Related holder groups" />
@@ -747,7 +1007,7 @@ const ClusterPanel: React.FC<{ clusters: any; labels: Map<string, InsightXLabel>
                                             <div className="mt-1 truncate text-xs font-semibold uppercase tracking-[0.14em] text-text-medium">{clusterTags(cluster)}</div>
                                         </div>
                                         <div className="px-3 text-right text-sm font-black text-text-light">{formatNumber(members.length)}</div>
-                                        <div className="px-3 text-right text-sm font-black text-primary-green">{formatPct(clusterPercent(cluster))}</div>
+                                        <div className="px-3 text-right text-sm font-black text-primary-green">{formatClusterSupplyShare(cluster, totalSupply)}</div>
                                         <div className="truncate px-3 text-right text-xs font-semibold text-text-medium">{clusterTags(cluster)}</div>
                                         <div className="pl-3 text-right">
                                             <button
@@ -798,7 +1058,7 @@ const ClusterPanel: React.FC<{ clusters: any; labels: Map<string, InsightXLabel>
                                             </div>
                                             <div className="rounded-xl border border-border bg-card px-3 py-2">
                                                 <div className="text-[10px] font-black uppercase tracking-[0.14em] text-text-dark">Supply</div>
-                                                <div className="mt-1 font-black text-primary-green">{formatPct(clusterPercent(cluster))}</div>
+                                                <div className="mt-1 font-black text-primary-green">{formatClusterSupplyShare(cluster, totalSupply)}</div>
                                             </div>
                                             <div className="rounded-xl border border-border bg-card px-3 py-2">
                                                 <div className="text-[10px] font-black uppercase tracking-[0.14em] text-text-dark">Rank</div>
@@ -849,7 +1109,7 @@ const ClusterPanel: React.FC<{ clusters: any; labels: Map<string, InsightXLabel>
                                                                             {(label?.tags || member?.tags)?.length ? <div className="mt-1 text-xs text-text-medium">{(label?.tags || member?.tags).slice(0, 3).join(', ')}</div> : null}
                                                                         </td>
                                                                         <td className="py-3 pr-4 text-right font-semibold text-text-medium">{formatCompact(member?.balance ?? member?.amount ?? member?.token_balance)}</td>
-                                                                        <td className="py-3 pr-4 text-right font-black text-text-light">{formatPct(member?.percentage ?? member?.pct ?? member?.supply_pct)}</td>
+                                                                        <td className="py-3 pr-4 text-right font-black text-text-light">{formatSupplyShare(member, totalSupply)}</td>
                                                                         <td className="py-3 text-xs leading-5 text-text-medium">{evidence}</td>
                                                                     </tr>
                                                                 );
@@ -879,7 +1139,7 @@ const LiquidityAndHoldersPanel: React.FC<{ scanner: InsightXScannerResponse | nu
             {!holders.length ? (
                 <EmptyBlock title="No holder rows" body="No top holder details were returned for this scan." />
             ) : (
-                <WalletTable rows={enrichWalletRows(holders, labels)} empty="No top holders returned." />
+                <WalletTable rows={enrichWalletRows(holders, labels)} empty="No top holders returned." totalSupply={scanner?.token?.total_supply} />
             )}
         </Card>
     );
@@ -984,9 +1244,39 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
     const setZoom = (nextScale: number) => {
         setAtlasView((current) => ({
             ...current,
-            scale: Math.max(0.55, Math.min(4.2, nextScale))
+            scale: Math.max(ATLAS_MIN_ZOOM, Math.min(ATLAS_MAX_ZOOM, nextScale))
         }));
     };
+
+    useEffect(() => {
+        const chart = chartRef.current;
+        if (!chart || !layout.nodes.length) return undefined;
+
+        const handleWheel = (event: WheelEvent) => {
+            event.preventDefault();
+
+            const rect = chart.getBoundingClientRect();
+            const pointerX = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * atlasViewport.width;
+            const pointerY = ((event.clientY - rect.top) / Math.max(rect.height, 1)) * atlasViewport.height;
+            const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1;
+
+            setAtlasView((current) => {
+                const nextScale = Math.max(ATLAS_MIN_ZOOM, Math.min(ATLAS_MAX_ZOOM, current.scale * zoomFactor));
+                const worldX = (pointerX - current.x) / current.scale;
+                const worldY = (pointerY - current.y) / current.scale;
+
+                return {
+                    scale: nextScale,
+                    x: pointerX - worldX * nextScale,
+                    y: pointerY - worldY * nextScale
+                };
+            });
+        };
+
+        chart.addEventListener('wheel', handleWheel, { passive: false });
+        return () => chart.removeEventListener('wheel', handleWheel);
+    }, [atlasViewport.height, atlasViewport.width, layout.nodes.length]);
+
     const resetAtlasView = () => {
         setAtlasView(fitView);
         setSelectedNodeId(null);
@@ -997,7 +1287,7 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
         <Card>
             <SectionHeader
                 icon={<Network size={19} />}
-                title="Atlas Holder Graph"
+                title="Holder's Graph"
                 eyebrow={tokenLabel || 'Snapshots and relationships'}
                 action={snapshotTime ? <span className="rounded-full border border-border bg-card-hover px-3 py-1.5 text-xs font-bold text-text-medium">Snapshot {toDate(snapshotTime)}</span> : null}
             />
@@ -1020,10 +1310,10 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                                     {Math.round(atlasView.scale * 100)}%
                                 </span>
                             </div>
-                            <div className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#151827]/90 shadow-xl backdrop-blur">
-                                <button type="button" onClick={() => setZoom(atlasView.scale * 1.18)} className="grid h-11 w-11 place-items-center border-b border-white/10 text-xl font-black text-text-light transition-colors hover:bg-white/10" aria-label="Zoom in">+</button>
-                                <button type="button" onClick={() => setZoom(atlasView.scale / 1.18)} className="grid h-11 w-11 place-items-center border-b border-white/10 text-xl font-black text-text-light transition-colors hover:bg-white/10" aria-label="Zoom out">-</button>
-                                <button type="button" onClick={resetAtlasView} className="grid h-11 w-11 place-items-center text-[10px] font-black uppercase text-text-medium transition-colors hover:bg-white/10" aria-label="Reset map view">Fit</button>
+                            <div className="absolute right-4 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-white/30 bg-[#151827]/95 shadow-xl backdrop-blur">
+                                <button type="button" onClick={() => setZoom(atlasView.scale * 1.18)} className="grid h-11 w-11 place-items-center border-b border-white/20 text-xl font-black text-white transition-colors hover:bg-white/18 hover:text-white" aria-label="Zoom in">+</button>
+                                <button type="button" onClick={() => setZoom(atlasView.scale / 1.18)} className="grid h-11 w-11 place-items-center border-b border-white/20 text-xl font-black text-white transition-colors hover:bg-white/18 hover:text-white" aria-label="Zoom out">-</button>
+                                <button type="button" onClick={resetAtlasView} className="grid h-11 w-11 place-items-center text-[10px] font-black uppercase text-white transition-colors hover:bg-white/18 hover:text-white" aria-label="Reset map view">Fit</button>
                             </div>
                             <svg
                                 viewBox={`0 0 ${atlasViewport.width} ${atlasViewport.height}`}
@@ -1031,11 +1321,6 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                                 role="img"
                                 aria-label="Atlas wallet relationship bubble map"
                                 style={{ touchAction: 'none' }}
-                                onWheel={(event) => {
-                                    event.preventDefault();
-                                    const direction = event.deltaY > 0 ? 0.9 : 1.1;
-                                    setZoom(atlasView.scale * direction);
-                                }}
                                 onClick={() => setSelectedNodeId(null)}
                                 onPointerDown={(event) => {
                                     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1162,7 +1447,7 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                 <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card-hover/30" onClick={() => setSelectedNodeId(null)}>
                     <div className="border-b border-border px-4 py-4">
                         <div className="text-xs font-black uppercase tracking-[0.16em] text-text-dark">Address List</div>
-                        <div className="mt-1 text-sm font-semibold text-text-medium">Ranked Atlas holders and cluster colors</div>
+                        <div className="mt-1 text-sm font-semibold text-text-medium">Ranked holders and cluster colors</div>
                         <label className="mt-4 flex h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-sm text-text-medium">
                             <Search size={16} />
                             <input
@@ -1229,6 +1514,11 @@ export const SafefyScan: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [report, setReport] = useState<SafefyScanReport | null>(null);
+    const [liveLiquidity, setLiveLiquidity] = useState<LiveTokenLiquidity | null>(null);
+    const [liquidityLoading, setLiquidityLoading] = useState(false);
+    const [liquidityError, setLiquidityError] = useState<string | null>(null);
+    const [detectedNetwork, setDetectedNetwork] = useState<DetectedTokenNetwork | null>(null);
+    const [detectingNetwork, setDetectingNetwork] = useState(false);
 
     const normalizedAddress = address.trim();
     const addressSupported = !normalizedAddress || isLikelyInsightXAddress(normalizedAddress, network);
@@ -1244,6 +1534,83 @@ export const SafefyScan: React.FC = () => {
     const labelsByAddress = useMemo(() => labelMapFrom(labels), [labels]);
     const score = Number(scanner?.results?.simple?.score ?? NaN);
     const normalizedScore = Number.isFinite(score) ? score : null;
+    const tokenTotalSupply = scanner?.token?.total_supply;
+    const clusterSupplyBalance = getTotalClusterSupplyBalance(clustersData, tokenTotalSupply, overview?.cluster_pct);
+    const clusterSupplyUsd = clusterSupplyBalance !== null && liveLiquidity?.tokenPriceUsd
+        ? clusterSupplyBalance * liveLiquidity.tokenPriceUsd
+        : null;
+    const drainRiskPenalty = getDrainRiskPenalty(clusterSupplyBalance, liveLiquidity);
+    const adjustedScore = normalizedScore !== null ? Math.max(0, normalizedScore - drainRiskPenalty) : null;
+    useEffect(() => {
+        if (!normalizedAddress || loading) {
+            setDetectedNetwork(null);
+            setDetectingNetwork(false);
+            return;
+        }
+        const canDetect = /^0x[a-fA-F0-9]{40}$/.test(normalizedAddress)
+            || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(normalizedAddress)
+            || normalizedAddress.length > 44;
+        if (!canDetect) {
+            setDetectedNetwork(null);
+            setDetectingNetwork(false);
+            return;
+        }
+
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            setDetectingNetwork(true);
+            SafefyScanService.detectTokenNetwork(normalizedAddress)
+                .then((detection) => {
+                    if (cancelled) return;
+                    setDetectedNetwork(detection);
+                    if (detection && detection.network !== network) {
+                        setNetwork(detection.network);
+                    }
+                })
+                .catch(() => {
+                    if (!cancelled) setDetectedNetwork(null);
+                })
+                .finally(() => {
+                    if (!cancelled) setDetectingNetwork(false);
+                });
+        }, 350);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [normalizedAddress, loading]);
+
+    useEffect(() => {
+        if (!report) {
+            setLiveLiquidity(null);
+            setLiquidityError(null);
+            setLiquidityLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        setLiquidityLoading(true);
+        setLiquidityError(null);
+        setLiveLiquidity(null);
+
+        SafefyScanService.getLiveTokenLiquidity(report.network, report.address)
+            .then((liquidity) => {
+                if (!cancelled) setLiveLiquidity(liquidity);
+            })
+            .catch((nextError) => {
+                if (!cancelled) {
+                    setLiquidityError(nextError instanceof Error ? nextError.message : 'Live liquidity is unavailable.');
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setLiquidityLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [report]);
 
     const handleScan = async (event?: React.FormEvent) => {
         event?.preventDefault();
@@ -1255,7 +1622,7 @@ export const SafefyScan: React.FC = () => {
             const nextReport = await SafefyScanService.scanToken(network, normalizedAddress);
             setReport(nextReport);
         } catch (nextError) {
-            setError(nextError instanceof Error ? nextError.message : 'Safefy Scan failed.');
+            setError(nextError instanceof Error ? nextError.message : 'Safety Scan failed.');
         } finally {
             setLoading(false);
         }
@@ -1264,6 +1631,10 @@ export const SafefyScan: React.FC = () => {
     const reset = () => {
         setReport(null);
         setError(null);
+        setLiveLiquidity(null);
+        setLiquidityError(null);
+        setDetectedNetwork(null);
+        setDetectingNetwork(false);
         setAddress('');
         setNetwork('sol');
     };
@@ -1303,7 +1674,7 @@ export const SafefyScan: React.FC = () => {
                         className="inline-flex min-h-16 items-center justify-center gap-2 rounded-2xl bg-primary-green px-8 text-base font-black text-main transition-colors hover:bg-primary-green-darker disabled:cursor-not-allowed disabled:bg-card-hover disabled:text-text-medium"
                     >
                         {loading ? <Loader2 size={20} className="animate-spin" /> : <Shield size={20} />}
-                        {loading ? 'Scanning...' : 'Safefy Scan'}
+                        {loading ? 'Scanning...' : 'Safety Scan'}
                     </button>
                 </form>
 
@@ -1338,46 +1709,21 @@ export const SafefyScan: React.FC = () => {
             <Card className="overflow-hidden">
                 <div className="grid gap-6 xl:grid-cols-[1.1fr_1.4fr] xl:items-end">
                     <div>
-                        <h1 className="text-3xl font-black tracking-tight text-text-light sm:text-4xl">Safefy Scan</h1>
+                        <h1 className="text-3xl font-black tracking-tight text-text-light sm:text-4xl">Safety Scan</h1>
                         <p className="mt-3 max-w-2xl text-base leading-7 text-text-medium">
                             Run token security, holder concentration, cluster, insider, sniper, bundler, graph, and label intelligence from one Atlaix workspace.
                         </p>
                     </div>
-                    <form onSubmit={handleScan} className="grid gap-3 lg:grid-cols-[180px_1fr_auto]">
-                        <label className="sr-only" htmlFor="safefy-network">Network</label>
-                        <select
-                            id="safefy-network"
-                            value={network}
-                            onChange={(event) => setNetwork(event.target.value as InsightXNetwork)}
-                            disabled={loading}
-                            className="min-h-12 rounded-2xl border border-border bg-card-hover px-4 text-sm font-black text-text-light outline-none transition-colors focus:border-primary-green/60 disabled:opacity-60"
-                        >
-                            {INSIGHTX_NETWORKS.map((item) => (
-                                <option key={item.id} value={item.id}>{item.label}</option>
-                            ))}
-                        </select>
-                        <label className="sr-only" htmlFor="safefy-address">Token address</label>
-                        <div className="flex min-h-12 items-center gap-3 rounded-2xl border border-border bg-card-hover px-4 transition-colors focus-within:border-primary-green/60">
-                            <Search size={18} className="shrink-0 text-text-medium" />
-                            <input
-                                id="safefy-address"
-                                type="text"
-                                value={address}
-                                onChange={(event) => setAddress(event.target.value)}
-                                placeholder="Paste token contract address..."
-                                disabled={loading}
-                                className="w-full bg-transparent text-base font-semibold text-text-light outline-none placeholder:text-text-dark disabled:opacity-60"
-                            />
-                        </div>
+                    <div className="flex justify-start xl:justify-end">
                         <button
-                            type="submit"
-                            disabled={loading || !normalizedAddress || !addressSupported}
-                            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-primary-green px-6 text-sm font-black text-main transition-colors hover:bg-primary-green-darker disabled:cursor-not-allowed disabled:bg-card-hover disabled:text-text-medium"
+                            type="button"
+                            onClick={reset}
+                            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-primary-green px-6 text-sm font-black text-main transition-colors hover:bg-primary-green-darker focus:outline-none focus:ring-2 focus:ring-primary-green/40 focus:ring-offset-2 focus:ring-offset-card"
                         >
-                            {loading ? <Loader2 size={18} className="animate-spin" /> : <Shield size={18} />}
-                            {loading ? 'Scanning' : 'Scan'}
+                            <Shield size={18} />
+                            New scan
                         </button>
-                    </form>
+                    </div>
                 </div>
                 {!addressSupported ? (
                     <div className="mt-4 rounded-2xl border border-primary-red/25 bg-primary-red/10 px-4 py-3 text-sm font-semibold text-primary-red">
@@ -1417,26 +1763,56 @@ export const SafefyScan: React.FC = () => {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className={`min-w-[180px] rounded-2xl border p-4 text-center ${riskTone(normalizedScore)}`}>
+                                    <div className={`min-w-[180px] rounded-2xl border p-4 text-center ${riskTone(adjustedScore)}`}>
                                         <div className="text-[11px] font-black uppercase tracking-[0.18em]">Safety score</div>
-                                        <div className="mt-1 text-4xl font-black">{normalizedScore ?? 'N/A'}</div>
-                                        <div className="text-sm font-black">{riskLabel(normalizedScore)}</div>
+                                        <div className="mt-1 text-4xl font-black">{adjustedScore ?? 'N/A'}</div>
+                                        <div className="text-sm font-black">{riskLabel(adjustedScore)}</div>
                                     </div>
                                 </div>
                                 <div className="grid gap-3 sm:grid-cols-2">
-                                    <MetricCard label="Cluster supply" value={formatPct(overview?.cluster_pct)} detail="Supply held by detected clusters" />
-                                    <MetricCard label="Dev holdings" value={formatPct(overview?.dev_pct)} detail="Creator/deployer exposure" />
+                                    <MetricCard
+                                        label="Cluster supply"
+                                        value={(
+                                            <div>
+                                                <div>{formatTotalClusterSupplyShare(clustersData, tokenTotalSupply, overview?.cluster_pct)}</div>
+                                                <div className="mt-1 text-base font-black text-text-medium">{formatCurrencyCompact(clusterSupplyUsd)}</div>
+                                            </div>
+                                        )}
+                                        detail="Supply held by detected clusters"
+                                    />
+                                    <MetricCard label="Dev holdings" value={formatCreatorSupplyShare(scanner, overview?.dev_pct)} detail="Creator/deployer exposure" />
                                 </div>
-                                <LiquidityLockSummary scanner={scanner} />
+                                <div className="grid gap-3 rounded-2xl border border-border bg-card-hover/35 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                                    <div>
+                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Supply</div>
+                                        <div className="mt-2 text-lg font-black text-text-light">{formatCompact(scanner?.token?.total_supply)}</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Decimals</div>
+                                        <div className="mt-2 text-lg font-black text-text-light">{scanner?.token?.decimals ?? 'N/A'}</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Token age</div>
+                                        <div className="mt-2 text-lg font-black text-text-light">{formatAgeOrDate(scanner?.token?.age)}</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Holders</div>
+                                        <div className="mt-2 text-lg font-black text-text-light">{formatNumber(scanner?.results?.advanced?.holder_count)}</div>
+                                    </div>
+                                </div>
                             </div>
                         </Card>
-                        <Card>
-                            <SectionHeader icon={<Timer size={19} />} title="Report Freshness" eyebrow="Request state" action={<button type="button" onClick={reset} className="min-h-10 rounded-full border border-border bg-card-hover px-4 text-sm font-black text-text-medium transition-colors hover:text-text-light">New scan</button>} />
-                            <div className="grid gap-3">
-                                <MetricCard label="Generated" value={new Date(report.generatedAt).toLocaleTimeString()} detail={new Date(report.generatedAt).toLocaleDateString()} />
-                                <MetricCard label="Network" value={getInsightXNetworkLabel(report.network)} detail="Selected scan network" />
-                            </div>
-                        </Card>
+                        <div className="grid gap-5">
+                            <LiquidityLockSummary scanner={scanner} />
+                            <DrainRiskSummary
+                                clusterBalance={clusterSupplyBalance}
+                                totalSupply={tokenTotalSupply}
+                                liquidity={liveLiquidity}
+                                loading={liquidityLoading}
+                                error={liquidityError}
+                                className="min-h-[280px]"
+                            />
+                        </div>
                     </div>
 
                     <div className="grid gap-5">
@@ -1444,8 +1820,10 @@ export const SafefyScan: React.FC = () => {
                     </div>
 
                     <LiquidityAndHoldersPanel scanner={scanner} labels={labelsByAddress} />
-                    <ManipulationPanel overview={overview} snipers={snipers} bundlers={bundlers} insiders={insiders} labels={labelsByAddress} />
-                    <ClusterPanel clusters={clustersData} labels={labelsByAddress} />
+                    {report.network === 'sol' ? (
+                        <ManipulationPanel overview={overview} snipers={snipers} bundlers={bundlers} insiders={insiders} labels={labelsByAddress} totalSupply={tokenTotalSupply} tokenPriceUsd={liveLiquidity?.tokenPriceUsd} />
+                    ) : null}
+                    <ClusterPanel clusters={clustersData} labels={labelsByAddress} totalSupply={tokenTotalSupply} />
                     <AtlasPanel atlas={atlas} timestamps={atlasTimestamps} clusters={clustersData} />
                 </>
         </div>

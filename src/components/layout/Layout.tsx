@@ -73,7 +73,7 @@ const getPageTitle = (pathname: string) => {
   if (pathname.startsWith('/wallet')) return 'Wallet Tracker';
   if (pathname.startsWith('/smart-alerts')) return 'Smart Alerts';
   if (pathname.startsWith('/ai-assistant')) return 'AI Assistant';
-  if (pathname.startsWith('/safefy-scan')) return 'Page Unavailable';
+  if (pathname.startsWith('/safefy-scan')) return 'Safe Scan';
   if (pathname.startsWith('/safe-scan') || pathname.startsWith('/alchemy-hub')) return 'Safe Scan';
   if (pathname.startsWith('/settings')) return 'Settings';
   if (pathname.startsWith('/token/')) return 'Token Overview';
