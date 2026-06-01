@@ -106,32 +106,6 @@ const endpointTone = (status: InsightXEndpointResult['status']) => {
     return 'border-primary-red/25 bg-primary-red/10 text-primary-red';
 };
 
-const riskTone = (score: number | null) => {
-    if (score === null) return 'border-border bg-card-hover text-text-medium';
-    if (score >= 80) return 'border-primary-green/25 bg-primary-green/10 text-primary-green';
-    if (score >= 55) return 'border-primary-yellow/30 bg-primary-yellow/10 text-[#8A6A00]';
-    return 'border-primary-red/25 bg-primary-red/10 text-primary-red';
-};
-
-const riskLabel = (score: number | null) => {
-    if (score === null) return 'Unknown';
-    if (score >= 80) return 'Lower Risk';
-    if (score >= 55) return 'Watch Closely';
-    return 'High Risk';
-};
-
-const getDrainRiskPenalty = (clusterBalance: number | null, liquidity: LiveTokenLiquidity | null) => {
-    const liquidityDepth = Number(liquidity?.tokenLiquidity);
-    if (clusterBalance === null || !Number.isFinite(liquidityDepth) || liquidityDepth <= 0) return 0;
-
-    const liquidityShare = (clusterBalance / liquidityDepth) * 100;
-    if (liquidityShare >= 500) return 12;
-    if (liquidityShare >= 250) return 9;
-    if (liquidityShare >= 100) return 6;
-    if (liquidityShare >= 50) return 3;
-    return 0;
-};
-
 const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
     <section className={`rounded-[24px] border border-border bg-card p-5 shadow-sm ${className}`}>
         {children}
@@ -911,7 +885,9 @@ const ManipulationPanel: React.FC<{
     const bundlerRows = enrichWalletRows(bundlers?.bundlers || [], labels);
     const insiderRows = enrichWalletRows(insiders?.insiders || [], labels);
     const [tab, setTab] = useState<'bundlers' | 'snipers' | 'insiders'>('bundlers');
+    const [expanded, setExpanded] = useState(false);
     const rows = tab === 'bundlers' ? bundlerRows : tab === 'snipers' ? sniperRows : insiderRows;
+    const detailRowCount = bundlerRows.length + sniperRows.length + insiderRows.length;
     const bundlerSupply = formatWalletGroupSupplyShare(bundlerRows, totalSupply, bundlers?.total_bundlers_pct ?? overview?.bundlers_pct);
     const sniperSupply = formatWalletGroupSupplyShare(sniperRows, totalSupply, snipers?.total_sniper_pct ?? overview?.snipers_pct);
     const insiderSupply = formatWalletGroupSupplyShare(insiderRows, totalSupply, insiders?.total_insiders_pct ?? overview?.insiders_pct);
@@ -922,28 +898,54 @@ const ManipulationPanel: React.FC<{
     const bundlerUsd = usdValue(getWalletGroupSupplyBalance(bundlerRows, totalSupply, bundlers?.total_bundlers_pct ?? overview?.bundlers_pct));
     const sniperUsd = usdValue(getWalletGroupSupplyBalance(sniperRows, totalSupply, snipers?.total_sniper_pct ?? overview?.snipers_pct));
     const insiderUsd = usdValue(getWalletGroupSupplyBalance(insiderRows, totalSupply, insiders?.total_insiders_pct ?? overview?.insiders_pct));
+    const summaryValue = (supply: string, usd: string) => (
+        <div className="flex items-baseline justify-between gap-4">
+            <span>{supply}</span>
+            <span className="text-base font-black text-text-medium">{usd}</span>
+        </div>
+    );
 
     return (
         <Card>
-            <SectionHeader icon={<Radar size={19} />} title="Launch Manipulation Intelligence" eyebrow="Bundlers, snipers, insiders" />
+            <SectionHeader
+                icon={<Radar size={19} />}
+                title="Launch Manipulation Intelligence"
+                eyebrow="Bundlers, snipers, insiders"
+            />
             <div className="mb-5 grid gap-3 md:grid-cols-3">
-                <MetricCard label="Bundlers" value={<><div>{bundlerSupply}</div><div className="mt-1 text-base font-black text-text-medium">{bundlerUsd}</div></>} detail={`${formatNumber(bundlerRows.length)} wallet interaction`} />
-                <MetricCard label="Snipers" value={<><div>{sniperSupply}</div><div className="mt-1 text-base font-black text-text-medium">{sniperUsd}</div></>} detail={`${formatNumber(sniperRows.length)} wallet interaction`} />
-                <MetricCard label="Insiders" value={<><div>{insiderSupply}</div><div className="mt-1 text-base font-black text-text-medium">{insiderUsd}</div></>} detail={`${formatNumber(insiderRows.length)} wallet interaction`} />
+                <MetricCard label="Bundlers" value={summaryValue(bundlerSupply, bundlerUsd)} detail={`${formatNumber(bundlerRows.length)} wallet interaction`} />
+                <MetricCard label="Snipers" value={summaryValue(sniperSupply, sniperUsd)} detail={`${formatNumber(sniperRows.length)} wallet interaction`} />
+                <MetricCard label="Insiders" value={summaryValue(insiderSupply, insiderUsd)} detail={`${formatNumber(insiderRows.length)} wallet interaction`} />
             </div>
-            <div className="mb-4 flex flex-wrap gap-2">
-                {(['bundlers', 'snipers', 'insiders'] as const).map((item) => (
+            {detailRowCount ? (
+                <div className="mb-5 flex justify-center">
                     <button
-                        key={item}
                         type="button"
-                        onClick={() => setTab(item)}
-                        className={`min-h-11 rounded-full border px-4 text-sm font-black capitalize transition-colors ${tab === item ? 'border-primary-green bg-primary-green text-main' : 'border-border bg-card-hover text-text-medium hover:text-text-light'}`}
+                        onClick={() => setExpanded((value) => !value)}
+                        aria-expanded={expanded}
+                        className="inline-flex min-h-12 items-center justify-center rounded-full border border-border bg-card-hover px-6 text-base font-black text-text-medium transition-colors hover:text-text-light focus:outline-none focus:ring-2 focus:ring-primary-green/35"
                     >
-                        {item}
+                        {expanded ? 'Hide details' : `See details (${formatNumber(detailRowCount)})`}
                     </button>
-                ))}
-            </div>
-            <WalletTable rows={rows} empty="This endpoint returned no detailed wallets or is unsupported for the selected network." totalSupply={totalSupply} />
+                </div>
+            ) : null}
+            {expanded ? (
+                <>
+                    <div className="mb-4 flex flex-wrap gap-2">
+                        {(['bundlers', 'snipers', 'insiders'] as const).map((item) => (
+                            <button
+                                key={item}
+                                type="button"
+                                onClick={() => setTab(item)}
+                                className={`min-h-11 rounded-full border px-4 text-sm font-black capitalize transition-colors ${tab === item ? 'border-primary-green bg-primary-green text-main' : 'border-border bg-card-hover text-text-medium hover:text-text-light'}`}
+                            >
+                                {item}
+                            </button>
+                        ))}
+                    </div>
+                    <WalletTable rows={rows} empty="This endpoint returned no detailed wallets or is unsupported for the selected network." totalSupply={totalSupply} />
+                </>
+            ) : null}
         </Card>
     );
 };
@@ -1133,31 +1135,50 @@ const ClusterPanel: React.FC<{ clusters: any; labels: Map<string, InsightXLabel>
 const LiquidityAndHoldersPanel: React.FC<{ scanner: InsightXScannerResponse | null; labels: Map<string, InsightXLabel> }> = ({ scanner, labels }) => {
     const advanced = scanner?.results?.advanced || {};
     const holders = Array.isArray(advanced.top_holders) ? advanced.top_holders : [];
+    const [expanded, setExpanded] = useState(false);
+    const holderCount = holders.length;
     return (
         <Card>
-            <SectionHeader icon={<Users size={19} />} title="Top Holders" eyebrow="Largest balances" />
-            {!holders.length ? (
+            <SectionHeader
+                icon={<Users size={19} />}
+                title="Top Holders"
+                eyebrow="Largest balances"
+                action={holderCount ? (
+                    <button
+                        type="button"
+                        onClick={() => setExpanded((value) => !value)}
+                        aria-expanded={expanded}
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-border bg-card-hover px-4 text-sm font-black text-text-medium transition-colors hover:text-text-light focus:outline-none focus:ring-2 focus:ring-primary-green/35"
+                    >
+                        {expanded ? 'Hide holders' : `Show holders (${formatNumber(holderCount)})`}
+                    </button>
+                ) : undefined}
+            />
+            {!holderCount ? (
                 <EmptyBlock title="No holder rows" body="No top holder details were returned for this scan." />
-            ) : (
+            ) : expanded ? (
                 <WalletTable rows={enrichWalletRows(holders, labels)} empty="No top holders returned." totalSupply={scanner?.token?.total_supply} />
-            )}
+            ) : null}
         </Card>
     );
 };
 
-const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> = ({ atlas, timestamps, clusters }) => {
+const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any; labels: Map<string, InsightXLabel>; totalSupply?: number | null }> = ({ atlas, timestamps, clusters, labels, totalSupply }) => {
     const holders = useMemo(() => readAtlasHolders(atlas), [atlas]);
     const links = useMemo(() => readAtlasLinks(atlas), [atlas]);
     const layout = useMemo(() => buildAtlasLayout(holders, links), [holders, links]);
     const visualGroups = useMemo(() => buildAtlasVisualGroups(clusters), [clusters]);
     const hasRelatedGroups = visualGroups.size > 0;
+    const clusterList = useMemo(() => collectClusterList(clusters), [clusters]);
     const chartRef = useRef<HTMLDivElement | null>(null);
     const [chartSize, setChartSize] = useState({ width: 1200, height: 760 });
     const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
+    const [expandedCluster, setExpandedCluster] = useState<string | null>(null);
+    const [hoveredClusterKey, setHoveredClusterKey] = useState<string | null>(null);
+    const [selectedClusterKey, setSelectedClusterKey] = useState<string | null>(null);
     const [atlasView, setAtlasView] = useState({ scale: 1, x: 0, y: 0 });
     const [dragStart, setDragStart] = useState<{ pointerId: number; x: number; y: number; viewX: number; viewY: number } | null>(null);
     const [hoveredNodeId, setHoveredNodeId] = useState<number | null>(null);
-    const [addressSearch, setAddressSearch] = useState('');
     const displayNodes = useMemo(() => layout.nodes.map((node: any) => {
         const visualGroup = visualGroups.get(node.address.toLowerCase());
         return visualGroup
@@ -1180,30 +1201,48 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
             };
     }), [hasRelatedGroups, layout.nodes, visualGroups]);
     const displayNodeById = useMemo(() => new Map(displayNodes.map((node: any) => [node.id, node])), [displayNodes]);
+    const displayNodeByAddress = useMemo(() => new Map(displayNodes.map((node: any) => [node.address.toLowerCase(), node])), [displayNodes]);
     const selectedNode = displayNodes.find((node) => node.id === selectedNodeId) ?? null;
     const hoveredNode = displayNodes.find((node) => node.id === hoveredNodeId) ?? null;
     const activeNode = selectedNode ?? hoveredNode;
-    const activeNeighborIds = useMemo(() => {
-        if (!activeNode) return new Set<number>();
-        const next = new Set<number>([activeNode.id]);
-        layout.links.forEach((link: any) => {
-            if (link.source === activeNode.id) next.add(link.target);
-            if (link.target === activeNode.id) next.add(link.source);
-        });
-        return next;
-    }, [activeNode, layout.links]);
+    const activeClusterKey = activeNode ? null : hoveredClusterKey ?? selectedClusterKey;
     const timestampList = Array.isArray(timestamps) ? timestamps : Array.isArray((timestamps as any)?.timestamps) ? (timestamps as any).timestamps : [];
     const snapshotTime = atlas?.snapshot?.timestamp || atlas?.snapshot?.created_at;
     const tokenLabel = [atlas?.token?.symbol, atlas?.network?.name].filter(Boolean).join(' on ');
-    const filteredNodes = useMemo(() => {
-        const query = addressSearch.trim().toLowerCase();
-        if (!query) return displayNodes;
-        return displayNodes.filter((node) =>
-            node.address.toLowerCase().includes(query)
-            || String(node.label || '').toLowerCase().includes(query)
-            || node.tags.join(' ').toLowerCase().includes(query)
-        );
-    }, [addressSearch, displayNodes]);
+    const getClusterKey = (cluster: any, index: number) => String(cluster?.id || cluster?.cluster_id || cluster?.name || cluster?.tag || `cluster-${index + 1}`);
+    const clusterBrowserItems = useMemo(() => {
+        const items = clusterList.map((cluster: any, index: number) => {
+            const members = getClusterMembers(cluster);
+            const key = getClusterKey(cluster, index);
+            const name = String(cluster?.name || cluster?.tag || `Cluster ${index + 1}`);
+            return {
+                cluster,
+                key,
+                members,
+                name,
+                visibleMembers: members
+            };
+        });
+
+        const clusteredAddresses = new Set<string>();
+        clusterList.forEach((cluster: any) => {
+            getClusterMembers(cluster).forEach((member: any) => {
+                const address = getWalletAddressValue(member).toLowerCase();
+                if (address) clusteredAddresses.add(address);
+            });
+        });
+        const unclustered = displayNodes.filter((node: any) => !clusteredAddresses.has(node.address.toLowerCase()));
+        if (unclustered.length) {
+            items.push({
+                cluster: null,
+                key: 'unclustered-wallets',
+                members: unclustered,
+                name: 'Unclustered wallets',
+                visibleMembers: unclustered
+            });
+        }
+        return items;
+    }, [clusterList, displayNodes]);
     const visualClusterCount = hasRelatedGroups
         ? new Set(displayNodes.filter((node: any) => node.visualGroupIndex !== null).map((node: any) => node.visualGroup)).size
         : layout.topComponents.length;
@@ -1239,6 +1278,8 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
         setAtlasView(fitView);
         setSelectedNodeId(null);
         setHoveredNodeId(null);
+        setSelectedClusterKey(null);
+        setHoveredClusterKey(null);
     }, [fitView.scale, fitView.x, fitView.y]);
 
     const setZoom = (nextScale: number) => {
@@ -1281,6 +1322,8 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
         setAtlasView(fitView);
         setSelectedNodeId(null);
         setHoveredNodeId(null);
+        setSelectedClusterKey(null);
+        setHoveredClusterKey(null);
     };
 
     return (
@@ -1358,9 +1401,10 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                                     {layout.links.map((link: any) => {
                                         const source = displayNodeById.get(link.source) ?? link.sourceNode;
                                         const target = displayNodeById.get(link.target) ?? link.targetNode;
-                                        const active = activeNode ? source.id === activeNode.id || target.id === activeNode.id : false;
-                                        const related = activeNode ? source.visualGroup === activeNode.visualGroup && target.visualGroup === activeNode.visualGroup : false;
-                                        const muted = activeNode && !active && !related;
+                                        const related = activeClusterKey
+                                            ? source.visualGroup === activeClusterKey && target.visualGroup === activeClusterKey
+                                            : false;
+                                        const muted = activeNode ? true : Boolean(activeClusterKey && !related);
                                         const midX = (source.x + target.x) / 2;
                                         const midY = (source.y + target.y) / 2 - Math.min(34, Math.abs(source.x - target.x) * 0.06);
                                         return (
@@ -1368,9 +1412,9 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                                                 key={link.id}
                                                 d={`M ${source.x.toFixed(1)} ${source.y.toFixed(1)} Q ${midX.toFixed(1)} ${midY.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`}
                                                 fill="none"
-                                                stroke={active ? '#F8FAFC' : '#D8E2F4'}
-                                                strokeOpacity={muted ? 0.08 : active ? 0.82 : related ? 0.42 : 0.28}
-                                                strokeWidth={active ? 1.75 : Math.min(1.45, 0.5 + link.strength * 0.18)}
+                                                stroke="#D8E2F4"
+                                                strokeOpacity={muted ? 0.06 : related ? 0.42 : 0.28}
+                                                strokeWidth={related ? 1.55 : Math.min(1.45, 0.5 + link.strength * 0.18)}
                                                 strokeLinecap="round"
                                             />
                                         );
@@ -1380,10 +1424,12 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                                     {displayNodes.map((node: any) => {
                                         const active = selectedNode?.id === node.id;
                                         const hovered = hoveredNodeId === node.id;
-                                        const directNeighbor = activeNeighborIds.has(node.id);
-                                        const related = activeNode && node.visualGroup === activeNode.visualGroup;
-                                        const muted = activeNode && !active && !hovered && !directNeighbor && !related;
-                                        const emphasized = active || hovered || directNeighbor;
+                                        const related = activeClusterKey
+                                            ? node.visualGroup === activeClusterKey
+                                            : false;
+                                        const focusedWallet = active || hovered;
+                                        const muted = activeNode ? !focusedWallet : Boolean(activeClusterKey && !related);
+                                        const emphasized = focusedWallet || Boolean(activeClusterKey && related);
                                         const stroke = atlasNodeStroke(node, emphasized);
                                         return (
                                             <g
@@ -1396,10 +1442,10 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                                                     setSelectedNodeId(node.id);
                                                 }}
                                             >
-                                                <circle cx={node.x} cy={node.y} r={node.radius + (directNeighbor ? 8 : 6)} fill={node.color} opacity={atlasNodeGlow(node, emphasized, Boolean(muted))} filter="url(#atlas-node-glow)" />
-                                                <circle cx={node.x} cy={node.y} r={node.radius} fill={atlasNodeFill(node)} fillOpacity={muted ? 0.18 : directNeighbor ? 0.82 : node.clustered ? 0.58 : 0.72} stroke={stroke} strokeOpacity={muted ? 0.22 : emphasized ? 1 : 0.92} strokeWidth={active ? 3 : hovered ? 2.55 : directNeighbor ? 2.35 : node.clustered ? 2.1 : 1.55} />
-                                                <circle cx={node.x - node.radius * 0.28} cy={node.y - node.radius * 0.32} r={Math.max(1.6, node.radius * 0.2)} fill="#FFFFFF" opacity={muted ? 0.03 : directNeighbor ? 0.22 : node.clustered ? 0.18 : 0.12} />
-                                                {(active || hovered || directNeighbor || node.rank <= 4) ? (
+                                                <circle cx={node.x} cy={node.y} r={node.radius + (focusedWallet ? 7 : 6)} fill={node.color} opacity={atlasNodeGlow(node, emphasized, Boolean(muted))} filter="url(#atlas-node-glow)" />
+                                                <circle cx={node.x} cy={node.y} r={node.radius} fill={atlasNodeFill(node)} fillOpacity={muted ? 0.18 : focusedWallet ? 0.88 : node.clustered ? 0.58 : 0.72} stroke={stroke} strokeOpacity={muted ? 0.22 : emphasized ? 1 : 0.92} strokeWidth={active ? 3 : hovered ? 2.55 : node.clustered ? 2.1 : 1.55} />
+                                                <circle cx={node.x - node.radius * 0.28} cy={node.y - node.radius * 0.32} r={Math.max(1.6, node.radius * 0.2)} fill="#FFFFFF" opacity={muted ? 0.03 : focusedWallet ? 0.24 : node.clustered ? 0.18 : 0.12} />
+                                                {(active || hovered || node.rank <= 4) ? (
                                                     <text x={node.x} y={node.y + node.radius + 13} textAnchor="middle" fill={muted ? 'rgba(148,163,184,0.28)' : 'rgba(226,232,240,0.86)'} fontSize="10" fontWeight="800">
                                                         #{node.rank}
                                                     </text>
@@ -1446,47 +1492,115 @@ const AtlasPanel: React.FC<{ atlas: any; timestamps: unknown; clusters: any }> =
                 </div>
                 <div className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card-hover/30" onClick={() => setSelectedNodeId(null)}>
                     <div className="border-b border-border px-4 py-4">
-                        <div className="text-xs font-black uppercase tracking-[0.16em] text-text-dark">Address List</div>
-                        <div className="mt-1 text-sm font-semibold text-text-medium">Ranked holders and cluster colors</div>
-                        <label className="mt-4 flex h-11 items-center gap-2 rounded-xl border border-border bg-card px-3 text-sm text-text-medium">
-                            <Search size={16} />
-                            <input
-                                type="search"
-                                value={addressSearch}
-                                onChange={(event) => setAddressSearch(event.target.value)}
-                                placeholder="Search wallet or label"
-                                className="min-w-0 flex-1 bg-transparent font-semibold text-text-light outline-none placeholder:text-text-dark"
-                            />
-                        </label>
+                        <div className="text-xs font-black uppercase tracking-[0.16em] text-text-dark">{clusterList.length ? 'Cluster List' : 'Address List'}</div>
+                        <div className="mt-1 text-sm font-semibold text-text-medium">{clusterList.length ? 'Expand clusters to inspect wallet members' : 'Ranked holders and cluster colors'}</div>
                     </div>
                     <div className="max-h-[620px] overflow-y-auto">
-                        {filteredNodes.slice(0, 120).map((node: any) => {
-                            const active = selectedNode?.id === node.id;
-                            const hovered = hoveredNodeId === node.id;
-                            return (
-                                <button
-                                    type="button"
-                                    key={node.id}
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        setSelectedNodeId(node.id);
-                                    }}
-                                    onMouseEnter={() => setHoveredNodeId(node.id)}
-                                    onMouseLeave={() => setHoveredNodeId(null)}
-                                    className={`grid w-full grid-cols-[36px_minmax(0,1fr)_62px] items-center gap-3 border-b border-border/70 px-4 py-3 text-left transition-colors ${active ? 'bg-primary-green/10' : hovered ? 'bg-card-hover/70' : 'hover:bg-card-hover/60'}`}
-                                >
-                                    <span className="text-xs font-black text-text-dark">#{node.rank}</span>
-                                    <span className="min-w-0">
-                                        <span className="flex items-center gap-2">
-                                            <span className="h-3 w-3 shrink-0 rounded-full border-2" style={{ backgroundColor: hexToRgba(node.color, node.clustered ? 0.32 : 0.18), borderColor: node.color, boxShadow: node.clustered ? `0 0 12px ${hexToRgba(node.color, 0.45)}` : 'none' }} />
-                                            <span className="truncate text-sm font-black text-text-light">{node.label || shortenAddress(node.address)}</span>
+                        {clusterList.length ? (
+                            clusterBrowserItems.slice(0, 60).map((item, index) => {
+                                const expanded = expandedCluster === item.key;
+                                const clusterColor = item.cluster ? atlasPalette[index % atlasPalette.length] : '#6D7FA8';
+                                const supply = item.cluster ? formatClusterSupplyShare(item.cluster, totalSupply) : 'Mixed';
+                                return (
+                                    <div key={item.key} className="border-b border-border/70">
+                                        <button
+                                            type="button"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                setExpandedCluster(expanded ? null : item.key);
+                                                setSelectedClusterKey(item.cluster && !expanded ? item.key : null);
+                                                setSelectedNodeId(null);
+                                                setHoveredNodeId(null);
+                                            }}
+                                            onMouseEnter={() => {
+                                                if (item.cluster) setHoveredClusterKey(item.key);
+                                            }}
+                                            onMouseLeave={() => setHoveredClusterKey(null)}
+                                            aria-expanded={expanded}
+                                            className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left transition-colors ${expanded ? 'bg-primary-green/10' : 'hover:bg-card-hover/60'}`}
+                                        >
+                                            <span className="min-w-0">
+                                                <span className="flex items-center gap-2">
+                                                    <span className="h-3 w-3 shrink-0 rounded-full border-2" style={{ backgroundColor: hexToRgba(clusterColor, 0.24), borderColor: clusterColor, boxShadow: item.cluster ? `0 0 12px ${hexToRgba(clusterColor, 0.35)}` : 'none' }} />
+                                                    <span className="truncate text-sm font-black text-text-light">{item.name}</span>
+                                                </span>
+                                                <span className="mt-2 grid grid-cols-2 gap-3 text-xs font-semibold text-text-medium">
+                                                    <span>{formatNumber(item.members.length)} wallets</span>
+                                                    <span className="text-center">{supply} supply</span>
+                                                </span>
+                                            </span>
+                                            <span className="rounded-full border border-border bg-card px-3 py-1 text-xs font-black text-text-medium">{expanded ? 'Close' : 'View'}</span>
+                                        </button>
+                                        {expanded ? (
+                                            <div className="border-t border-border/60 bg-card/55">
+                                                {item.visibleMembers.slice(0, 80).map((member: any, memberIndex: number) => {
+                                                    const address = getWalletAddressValue(member);
+                                                    const node = address ? displayNodeByAddress.get(address.toLowerCase()) : null;
+                                                    const label = address ? labels.get(address.toLowerCase()) : undefined;
+                                                    const active = node ? selectedNode?.id === node.id : false;
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            key={`${item.key}-${address || memberIndex}`}
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                if (node) {
+                                                                    setSelectedClusterKey(null);
+                                                                    setSelectedNodeId(node.id);
+                                                                }
+                                                            }}
+                                                            onMouseEnter={() => {
+                                                                if (node) {
+                                                                    setHoveredClusterKey(null);
+                                                                    setHoveredNodeId(node.id);
+                                                                }
+                                                            }}
+                                                            onMouseLeave={() => setHoveredNodeId(null)}
+                                                            className={`grid w-full grid-cols-[32px_minmax(0,1fr)_72px] items-center gap-3 border-b border-border/50 px-4 py-3 text-left last:border-b-0 transition-colors ${active ? 'bg-primary-green/10' : 'hover:bg-card-hover/60'}`}
+                                                        >
+                                                            <span className="text-xs font-black text-text-dark">{node ? `#${node.rank}` : `#${memberIndex + 1}`}</span>
+                                                            <span className="min-w-0">
+                                                                <span className="truncate text-sm font-black text-text-light">{label?.label || member?.label || (address ? shortenAddress(address) : 'Wallet')}</span>
+                                                                <span className="mt-1 block truncate text-xs font-semibold text-text-medium">{address ? shortenAddress(address) : 'wallet'}</span>
+                                                            </span>
+                                                            <span className="text-right text-xs font-black text-text-medium">{formatSupplyShare(member, totalSupply)}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                );
+                            })
+                        ) : (
+                            displayNodes.slice(0, 120).map((node: any) => {
+                                const active = selectedNode?.id === node.id;
+                                const hovered = hoveredNodeId === node.id;
+                                return (
+                                    <button
+                                        type="button"
+                                        key={node.id}
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            setSelectedNodeId(node.id);
+                                        }}
+                                        onMouseEnter={() => setHoveredNodeId(node.id)}
+                                        onMouseLeave={() => setHoveredNodeId(null)}
+                                        className={`grid w-full grid-cols-[36px_minmax(0,1fr)_62px] items-center gap-3 border-b border-border/70 px-4 py-3 text-left transition-colors ${active ? 'bg-primary-green/10' : hovered ? 'bg-card-hover/70' : 'hover:bg-card-hover/60'}`}
+                                    >
+                                        <span className="text-xs font-black text-text-dark">#{node.rank}</span>
+                                        <span className="min-w-0">
+                                            <span className="flex items-center gap-2">
+                                                <span className="h-3 w-3 shrink-0 rounded-full border-2" style={{ backgroundColor: hexToRgba(node.color, node.clustered ? 0.32 : 0.18), borderColor: node.color, boxShadow: node.clustered ? `0 0 12px ${hexToRgba(node.color, 0.45)}` : 'none' }} />
+                                                <span className="truncate text-sm font-black text-text-light">{node.label || shortenAddress(node.address)}</span>
+                                            </span>
+                                            <span className="mt-1 block truncate text-xs font-semibold text-text-medium">{node.tags.slice(0, 3).join(', ') || 'wallet'}</span>
                                         </span>
-                                        <span className="mt-1 block truncate text-xs font-semibold text-text-medium">{node.tags.slice(0, 3).join(', ') || 'wallet'}</span>
-                                    </span>
-                                    <span className="text-right text-xs font-black text-text-medium">{node.degree ? `${formatNumber(node.degree)} links` : 'solo'}</span>
-                                </button>
-                            );
-                        })}
+                                        <span className="text-right text-xs font-black text-text-medium">{node.degree ? `${formatNumber(node.degree)} links` : 'solo'}</span>
+                                    </button>
+                                );
+                            })
+                        )}
                     </div>
                     <div className="grid grid-cols-3 gap-px border-t border-border bg-border text-center">
                         <div className="bg-card px-2 py-3">
@@ -1532,15 +1646,11 @@ export const SafefyScan: React.FC = () => {
     const atlasTimestamps = getEndpointData(report?.endpoints.atlasTimestamps);
     const labels = collectLabels(getEndpointData<any>(report?.endpoints.labels));
     const labelsByAddress = useMemo(() => labelMapFrom(labels), [labels]);
-    const score = Number(scanner?.results?.simple?.score ?? NaN);
-    const normalizedScore = Number.isFinite(score) ? score : null;
     const tokenTotalSupply = scanner?.token?.total_supply;
     const clusterSupplyBalance = getTotalClusterSupplyBalance(clustersData, tokenTotalSupply, overview?.cluster_pct);
     const clusterSupplyUsd = clusterSupplyBalance !== null && liveLiquidity?.tokenPriceUsd
         ? clusterSupplyBalance * liveLiquidity.tokenPriceUsd
         : null;
-    const drainRiskPenalty = getDrainRiskPenalty(clusterSupplyBalance, liveLiquidity);
-    const adjustedScore = normalizedScore !== null ? Math.max(0, normalizedScore - drainRiskPenalty) : null;
     useEffect(() => {
         if (!normalizedAddress || loading) {
             setDetectedNetwork(null);
@@ -1738,7 +1848,7 @@ export const SafefyScan: React.FC = () => {
             </Card>
 
                 <>
-                    <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+                    <div className="grid items-start gap-5 xl:grid-cols-[1.2fr_0.8fr]">
                         <Card>
                             <div className="flex flex-col gap-5">
                                 <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
@@ -1763,10 +1873,15 @@ export const SafefyScan: React.FC = () => {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className={`min-w-[180px] rounded-2xl border p-4 text-center ${riskTone(adjustedScore)}`}>
-                                        <div className="text-[11px] font-black uppercase tracking-[0.18em]">Safety score</div>
-                                        <div className="mt-1 text-4xl font-black">{adjustedScore ?? 'N/A'}</div>
-                                        <div className="text-sm font-black">{riskLabel(adjustedScore)}</div>
+                                    <div className="grid min-w-[220px] gap-3 sm:grid-cols-2">
+                                        <div className="rounded-2xl border border-border bg-card-hover/45 p-3">
+                                            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Supply</div>
+                                            <div className="mt-1 text-xl font-black text-text-light">{formatCompact(scanner?.token?.total_supply)}</div>
+                                        </div>
+                                        <div className="rounded-2xl border border-border bg-card-hover/45 p-3">
+                                            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Token age</div>
+                                            <div className="mt-1 text-xl font-black text-text-light">{formatAgeOrDate(scanner?.token?.age)}</div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1782,24 +1897,6 @@ export const SafefyScan: React.FC = () => {
                                     />
                                     <MetricCard label="Dev holdings" value={formatCreatorSupplyShare(scanner, overview?.dev_pct)} detail="Creator/deployer exposure" />
                                 </div>
-                                <div className="grid gap-3 rounded-2xl border border-border bg-card-hover/35 p-4 sm:grid-cols-2 lg:grid-cols-4">
-                                    <div>
-                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Supply</div>
-                                        <div className="mt-2 text-lg font-black text-text-light">{formatCompact(scanner?.token?.total_supply)}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Decimals</div>
-                                        <div className="mt-2 text-lg font-black text-text-light">{scanner?.token?.decimals ?? 'N/A'}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Token age</div>
-                                        <div className="mt-2 text-lg font-black text-text-light">{formatAgeOrDate(scanner?.token?.age)}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-[11px] font-black uppercase tracking-[0.16em] text-text-dark">Holders</div>
-                                        <div className="mt-2 text-lg font-black text-text-light">{formatNumber(scanner?.results?.advanced?.holder_count)}</div>
-                                    </div>
-                                </div>
                             </div>
                         </Card>
                         <div className="grid gap-5">
@@ -1810,7 +1907,6 @@ export const SafefyScan: React.FC = () => {
                                 liquidity={liveLiquidity}
                                 loading={liquidityLoading}
                                 error={liquidityError}
-                                className="min-h-[280px]"
                             />
                         </div>
                     </div>
@@ -1823,8 +1919,7 @@ export const SafefyScan: React.FC = () => {
                     {report.network === 'sol' ? (
                         <ManipulationPanel overview={overview} snipers={snipers} bundlers={bundlers} insiders={insiders} labels={labelsByAddress} totalSupply={tokenTotalSupply} tokenPriceUsd={liveLiquidity?.tokenPriceUsd} />
                     ) : null}
-                    <ClusterPanel clusters={clustersData} labels={labelsByAddress} totalSupply={tokenTotalSupply} />
-                    <AtlasPanel atlas={atlas} timestamps={atlasTimestamps} clusters={clustersData} />
+                    <AtlasPanel atlas={atlas} timestamps={atlasTimestamps} clusters={clustersData} labels={labelsByAddress} totalSupply={tokenTotalSupply} />
                 </>
         </div>
     );
