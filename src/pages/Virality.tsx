@@ -74,9 +74,9 @@ export const Virality: React.FC = () => {
         <div className="flex flex-col gap-6">
             <div className="bg-card border border-border rounded-2xl p-6 md:p-8 flex flex-col justify-center gap-4 w-full shadow-sm mb-2">
                 <div className="flex gap-3 w-full">
-                    <div className="flex-1 bg-[#111315] border border-border rounded-xl flex items-center px-4 transition-colors focus-within:border-primary-green/50">
-                        <Search className="text-text-medium mr-2" size={20} />
-                        <input type="text" className="bg-transparent border-none text-text-light outline-none w-full py-3.5 text-[0.95rem] placeholder-text-dark" placeholder="Enter a token or paste link..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                    <div className="atlaix-search-field flex-1 px-4">
+                        <Search className="text-text-medium" size={20} />
+                        <input type="text" className="py-3.5 text-[0.95rem] font-semibold text-text-light placeholder-text-dark" placeholder="Enter a token or paste link..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                     </div>
                     <button className="bg-primary-green text-main font-bold px-8 rounded-xl hover:bg-primary-green-darker transition-colors shadow-lg whitespace-nowrap">Search</button>
                 </div>

@@ -844,8 +844,8 @@ export const SmartAlerts: React.FC = () => {
                     </div>
                 </div>
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
-                    <div className="relative">
-                        <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-dark" />
+                    <div className="atlaix-search-field px-4">
+                        <Search size={18} className="pointer-events-none text-text-medium" />
                         <input
                             value={tokenQuery}
                             onChange={(event) => {
@@ -857,7 +857,7 @@ export const SmartAlerts: React.FC = () => {
                             onKeyDown={(event) => {
                                 if (event.key === 'Enter') lookupToken();
                             }}
-                            className="w-full rounded-xl border border-border bg-main py-3 pl-11 pr-4 font-mono text-sm text-text-light outline-none placeholder:text-text-dark focus:border-primary-green/60"
+                            className="py-3 font-mono text-sm text-text-light placeholder:text-text-dark"
                             placeholder="Paste token contract address"
                         />
                     </div>
@@ -1094,11 +1094,14 @@ export const SmartAlerts: React.FC = () => {
 
                             <label className="block">
                                 <span className="mb-2 block text-xs font-bold text-text-medium">Token or pair address</span>
-                                <input value={setupDraft.tokenAddress} onChange={(event) => {
-                                    setSetupTokenLookupError(null);
-                                    setSelectedToken(null);
-                                    setSetupDraft((current) => ({ ...current, target: '', chainId: '', tokenAddress: event.target.value }));
-                                }} className="w-full rounded-xl border border-border bg-main px-4 py-3 font-mono text-sm text-text-light outline-none placeholder:text-text-dark focus:border-primary-green/60" placeholder="Paste token contract address" />
+                                <div className="atlaix-search-field px-4">
+                                    <Search size={18} className="text-text-medium" />
+                                    <input value={setupDraft.tokenAddress} onChange={(event) => {
+                                        setSetupTokenLookupError(null);
+                                        setSelectedToken(null);
+                                        setSetupDraft((current) => ({ ...current, target: '', chainId: '', tokenAddress: event.target.value }));
+                                    }} className="py-3 font-mono text-sm text-text-light placeholder:text-text-dark" placeholder="Paste token contract address" />
+                                </div>
                                 {setupTokenLookupLoading && <div className="mt-2 text-xs font-medium text-text-medium">Looking up token...</div>}
                                 {setupTokenLookupError && <div className="mt-2 text-xs font-medium text-primary-red">{setupTokenLookupError}</div>}
                             </label>

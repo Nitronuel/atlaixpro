@@ -1228,10 +1228,11 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
             <div className="relative z-40 flex justify-end">
                 <div className="flex w-full flex-row items-center gap-2 flex-nowrap md:max-w-[560px]">
-                    <div className="flex-1 bg-[#111315] border border-border rounded-lg flex items-center px-3 py-2 transition-all focus-within:border-primary-green/50 relative shadow-sm">
+                    <div className="atlaix-search-field atlaix-search-field--compact flex-1 px-4">
+                        <Search className="text-text-medium" size={18} />
                         <input
                             type="text"
-                            className="bg-transparent border-none text-text-light outline-none w-full text-sm placeholder-text-dark"
+                            className="text-sm font-semibold text-text-light placeholder-text-dark"
                             placeholder="search token name or past CA"
                             value={searchQuery}
                             onChange={(e) => {
@@ -1306,7 +1307,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                         )}
                     </div>
                     <button
-                        className="bg-primary-green text-main h-10 w-10 rounded-lg flex-shrink-0 flex items-center justify-center hover:bg-primary-green-darker transition-colors shadow-md"
+                        className="bg-primary-green text-main h-12 w-12 rounded-[18px] flex-shrink-0 flex items-center justify-center hover:bg-primary-green-darker transition-colors shadow-md"
                         onClick={handleSearchSubmit}
                         tabIndex={-1}
                     >

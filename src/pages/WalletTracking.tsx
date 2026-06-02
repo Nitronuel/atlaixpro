@@ -298,12 +298,12 @@ export const WalletTracking: React.FC = () => {
                                 <p className="text-text-medium text-sm mt-1">Track wallet's assets, performance and history</p>
                             </div>
                             <div className="flex gap-2 w-full md:w-auto">
-                                <div className="flex-1 md:w-80 bg-[#111315] border border-border rounded-lg flex items-center px-3 py-2.5 focus-within:border-primary-green/50">
-                                    <Search className="text-text-medium mr-2" size={18} />
+                                <div className="atlaix-search-field atlaix-search-field--compact flex-1 px-4 md:w-80">
+                                    <Search className="text-text-medium" size={18} />
                                     <input
                                         ref={searchInputRef}
                                         type="text"
-                                        className="bg-transparent border-none text-text-light outline-none w-full text-sm placeholder-text-dark"
+                                        className="text-sm font-semibold text-text-light placeholder-text-dark"
                                         placeholder="Search wallet address..."
                                         value={searchQuery}
                                         onChange={(e) => {

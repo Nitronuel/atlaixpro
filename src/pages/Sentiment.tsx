@@ -1,5 +1,6 @@
 // Route-level product screen for the Atlaix application.
 import React, { useState, useRef, useEffect } from 'react';
+import { Search } from 'lucide-react';
 
 export const Sentiment: React.FC = () => {
     const [analyzed, setAnalyzed] = useState(false);
@@ -76,8 +77,9 @@ export const Sentiment: React.FC = () => {
             <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
                 <div className="w-full max-w-lg text-center">
                     <h2 className="text-2xl font-bold mb-6">Narrative Analysis</h2>
-                    <div className="bg-main border border-border rounded-xl p-1 mb-4 flex items-center">
-                        <input type="text" className="w-full bg-transparent p-4 text-text-light outline-none" placeholder="Enter Token Contract Address" value={contract} onChange={(e) => setContract(e.target.value)} />
+                    <div className="atlaix-search-field mb-4 px-4">
+                        <Search className="text-text-medium" size={20} />
+                        <input type="text" className="p-4 font-semibold text-text-light" placeholder="Enter Token Contract Address" value={contract} onChange={(e) => setContract(e.target.value)} />
                     </div>
                     <button className="w-full py-4 bg-primary-green text-main font-bold rounded-xl hover:bg-primary-green-darker transition-colors" onClick={() => { if(contract) setAnalyzed(true); }}>
                         Analyze Narrative

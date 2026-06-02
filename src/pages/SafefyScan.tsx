@@ -1766,7 +1766,7 @@ export const SafefyScan: React.FC = () => {
                         ))}
                     </select>
                     <label className="sr-only" htmlFor="safefy-address-empty">Token address</label>
-                    <div className="flex min-h-16 items-center gap-3 rounded-2xl border border-border bg-card-hover px-5 transition-colors focus-within:border-primary-green/60">
+                    <div className="atlaix-search-field min-h-16 px-5">
                         <Search size={20} className="shrink-0 text-text-medium" />
                         <input
                             id="safefy-address-empty"
@@ -1775,7 +1775,7 @@ export const SafefyScan: React.FC = () => {
                             onChange={(event) => setAddress(event.target.value)}
                             placeholder="Enter Token Contract Address"
                             disabled={loading}
-                            className="w-full bg-transparent text-lg font-semibold text-text-light outline-none placeholder:text-text-dark disabled:opacity-60"
+                            className="text-lg font-semibold text-text-light placeholder:text-text-dark disabled:opacity-60"
                         />
                     </div>
                     <button

@@ -39,11 +39,11 @@ export const ChainSelectionModal: React.FC<ChainSelectionModalProps> = ({
                 </div>
 
                 <div className="p-4 border-b border-border/50">
-                    <div className="bg-main border border-border rounded-lg flex items-center px-3 py-2 focus-within:border-primary-green/50">
-                        <Search className="text-text-medium mr-2" size={16} />
+                    <div className="atlaix-search-field atlaix-search-field--compact px-4">
+                        <Search className="text-text-medium" size={16} />
                         <input
                             type="text"
-                            className="bg-transparent border-none text-text-light outline-none w-full text-sm placeholder-text-dark"
+                            className="text-sm font-semibold text-text-light placeholder-text-dark"
                             placeholder="Search chain..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}

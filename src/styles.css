@@ -518,6 +518,70 @@
             color: var(--text-dark) !important;
         }
 
+        .atlaix-search-field {
+            --atlaix-search-bg-top: rgba(255, 255, 255, 0.86);
+            --atlaix-search-bg-bottom: rgba(239, 249, 243, 0.90);
+            --atlaix-search-border: rgba(196, 222, 204, 0.96);
+            --atlaix-search-border-accent: rgba(63, 163, 77, 0.24);
+            --atlaix-search-focus: rgba(63, 163, 77, 0.58);
+            --atlaix-search-shadow: 0 10px 26px rgba(73, 119, 88, 0.08);
+            --atlaix-search-inset: inset 6px 8px 20px rgba(73, 119, 88, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+            position: relative;
+            display: flex;
+            min-height: 54px;
+            align-items: center;
+            gap: 0.75rem;
+            overflow: hidden;
+            border: 1px solid var(--atlaix-search-border);
+            border-radius: 22px !important;
+            background:
+                linear-gradient(180deg, var(--atlaix-search-bg-top), var(--atlaix-search-bg-bottom)) padding-box,
+                linear-gradient(135deg, rgba(255, 255, 255, 0.95), var(--atlaix-search-border-accent)) border-box;
+            box-shadow: var(--atlaix-search-inset), var(--atlaix-search-shadow);
+            transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+        }
+
+        .atlaix-search-field:hover {
+            border-color: rgba(63, 163, 77, 0.34);
+        }
+
+        .atlaix-search-field:focus-within {
+            border-color: var(--atlaix-search-focus);
+            box-shadow:
+                var(--atlaix-search-inset),
+                0 0 0 3px rgba(63, 163, 77, 0.10),
+                0 14px 32px rgba(73, 119, 88, 0.11);
+        }
+
+        .atlaix-search-field svg {
+            flex-shrink: 0;
+            color: var(--text-medium) !important;
+        }
+
+        .atlaix-search-field input {
+            min-width: 0;
+            width: 100%;
+            border: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            color: var(--text-light) !important;
+            outline: none !important;
+        }
+
+        .atlaix-search-field input::placeholder {
+            color: var(--text-dark) !important;
+            opacity: 1;
+        }
+
+        .atlaix-search-field--compact {
+            min-height: 48px;
+            border-radius: 18px !important;
+        }
+
+        .atlaix-search-field:has(input:disabled) {
+            opacity: 0.64;
+        }
+
         button {
             letter-spacing: 0;
         }
@@ -1372,6 +1436,49 @@
         .atlaix-dark-preview input::placeholder,
         .atlaix-dark-preview textarea::placeholder {
             color: rgba(184, 197, 187, 0.64) !important;
+        }
+
+        .atlaix-dark-preview .atlaix-search-field {
+            --atlaix-search-bg-top: rgba(28, 31, 34, 0.96);
+            --atlaix-search-bg-bottom: rgba(17, 19, 21, 0.96);
+            --atlaix-search-border: rgba(42, 46, 51, 0.96);
+            --atlaix-search-border-accent: rgba(38, 211, 86, 0.30);
+            --atlaix-search-focus: rgba(114, 229, 132, 0.60);
+            --atlaix-search-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+            --atlaix-search-inset: inset 7px 9px 22px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+            border-color: var(--atlaix-search-border) !important;
+            background:
+                linear-gradient(180deg, var(--atlaix-search-bg-top), var(--atlaix-search-bg-bottom)) padding-box,
+                linear-gradient(135deg, rgba(255, 255, 255, 0.050), var(--atlaix-search-border-accent)) border-box !important;
+            box-shadow: var(--atlaix-search-inset), var(--atlaix-search-shadow) !important;
+        }
+
+        .atlaix-dark-preview .atlaix-search-field:hover {
+            border-color: rgba(114, 229, 132, 0.34) !important;
+        }
+
+        .atlaix-dark-preview .atlaix-search-field:focus-within {
+            border-color: var(--atlaix-search-focus) !important;
+            box-shadow:
+                var(--atlaix-search-inset),
+                0 0 0 3px rgba(114, 229, 132, 0.11),
+                0 16px 38px rgba(0, 0, 0, 0.30) !important;
+        }
+
+        .atlaix-dark-preview .atlaix-search-field input {
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+            color: #EAECEF !important;
+        }
+
+        .atlaix-dark-preview .atlaix-search-field input::placeholder {
+            color: #8F96A3 !important;
+            opacity: 1;
+        }
+
+        .atlaix-dark-preview .atlaix-search-field svg {
+            color: #8F96A3 !important;
         }
 
         .safe-scan-cluster-section {
