@@ -286,6 +286,85 @@ const getFeedEventLabel = (coin: MarketCoin, eventType?: AlphaGauntletEventType)
     return 'None';
 };
 
+const normalizeSearchValue = (value: string | undefined) =>
+    (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const getTokenSearchKey = (coin: MarketCoin) =>
+    (coin.pairAddress || coin.address || `${coin.chain}:${coin.ticker}:${coin.name}`).toLowerCase();
+
+const isOneEditAway = (source: string, target: string) => {
+    if (!source || !target || Math.abs(source.length - target.length) > 1) return false;
+
+    let edits = 0;
+    let sourceIndex = 0;
+    let targetIndex = 0;
+
+    while (sourceIndex < source.length && targetIndex < target.length) {
+        if (source[sourceIndex] === target[targetIndex]) {
+            sourceIndex += 1;
+            targetIndex += 1;
+            continue;
+        }
+
+        edits += 1;
+        if (edits > 1) return false;
+
+        if (source.length > target.length) {
+            sourceIndex += 1;
+        } else if (target.length > source.length) {
+            targetIndex += 1;
+        } else {
+            sourceIndex += 1;
+            targetIndex += 1;
+        }
+    }
+
+    return true;
+};
+
+const scoreTokenSearchMatch = (coin: MarketCoin, rawQuery: string) => {
+    const query = normalizeSearchValue(rawQuery);
+    if (!query) return 0;
+
+    const ticker = normalizeSearchValue(coin.ticker);
+    const name = normalizeSearchValue(coin.name);
+    const address = normalizeSearchValue(coin.address);
+    const pairAddress = normalizeSearchValue(coin.pairAddress);
+
+    if (ticker === query) return 120;
+    if (ticker.startsWith(query)) return 105;
+    if (name === query) return 100;
+    if (name.startsWith(query)) return 92;
+    if (ticker.includes(query)) return 86;
+    if (name.includes(query)) return 78;
+    if (query.length >= 3 && ticker.length <= 6 && isOneEditAway(query, ticker)) return 72;
+    if (query.length >= 3 && name.split(/[^a-z0-9]+/).some((part) => part.startsWith(query))) return 68;
+    if (query.length >= 6 && (address.includes(query) || pairAddress.includes(query))) return 62;
+
+    return 0;
+};
+
+const getRankedSearchSuggestions = (tokens: MarketCoin[], query: string) => {
+    const seen = new Set<string>();
+
+    return tokens
+        .map((coin) => ({ coin, score: scoreTokenSearchMatch(coin, query) }))
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            const liquidityDiff = parseCurrency(b.coin.liquidity) - parseCurrency(a.coin.liquidity);
+            if (liquidityDiff !== 0) return liquidityDiff;
+            return parseCurrency(b.coin.cap) - parseCurrency(a.coin.cap);
+        })
+        .filter(({ coin }) => {
+            const key = getTokenSearchKey(coin);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .map(({ coin }) => coin);
+};
+
 const getInitialItemsPerPage = () => {
     if (typeof window === 'undefined') return 16;
 
@@ -410,17 +489,10 @@ export const Dashboard: React.FC<DashboardProps> = () => {
             return;
         }
 
-        const query = searchQuery.toLowerCase();
+        const query = searchQuery.trim();
 
-        // 1. Instant Local Search from Market Data
-        const localMatches = marketData ? marketData.filter(coin =>
-            isLiveAlphaEligible(coin) &&
-            (
-                coin.ticker.toLowerCase().includes(query) ||
-                coin.name.toLowerCase().includes(query) ||
-                coin.address.toLowerCase().includes(query)
-            )
-        ).slice(0, 5) : [];
+        // 1. Instant local recommendations by ticker, project name, and address.
+        const localMatches = getRankedSearchSuggestions(marketData || [], query).slice(0, 6);
 
         setSuggestions(localMatches);
 
@@ -432,22 +504,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
 
                 const globalResults = await DatabaseService.searchGlobalPairs(query);
 
-                // Merge: Local first, then unique Global
-                const existingPairs = new Set(localMatches.map(c => (c.pairAddress || c.address || '').toLowerCase()));
-                const uniqueGlobal = globalResults.filter(c =>
-                    !existingPairs.has((c.pairAddress || c.address || '').toLowerCase()) &&
-                    isLiveAlphaEligible(c)
-                );
+                // Merge: local first, then unique global recommendations.
+                const existingPairs = new Set(localMatches.map(getTokenSearchKey));
+                const rankedGlobal = getRankedSearchSuggestions(globalResults, query);
+                const uniqueGlobal = rankedGlobal.filter(c => !existingPairs.has(getTokenSearchKey(c)));
 
                 // Combine
                 let combined = [...localMatches, ...uniqueGlobal];
-
-                // Sort by pair liquidity first so duplicate token pairs are easier to compare.
-                combined.sort((a, b) => {
-                    const liquidityDiff = parseCurrency(b.liquidity) - parseCurrency(a.liquidity);
-                    if (liquidityDiff !== 0) return liquidityDiff;
-                    return parseCurrency(b.cap) - parseCurrency(a.cap);
-                });
 
                 // Set suggestions
                 setSuggestions(combined.slice(0, 10));
@@ -1268,8 +1331,13 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                                 setShowSuggestions(false);
                                             }}
                                         >
-                                            <div className="w-10 h-10 rounded-full bg-main flex items-center justify-center shrink-0 border border-border">
-                                                <img src={coin.img} alt={coin.ticker} loading="lazy" decoding="async" className="w-7 h-7 rounded-full object-cover" onError={handleImageError} />
+                                            <div className="flex shrink-0 items-center gap-1.5">
+                                                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-card-hover">
+                                                    <img src={getChainIcon(coin.chain)} alt={coin.chain} loading="lazy" decoding="async" className="h-4 w-4 opacity-85" />
+                                                </div>
+                                                <div className="w-10 h-10 rounded-full bg-main flex items-center justify-center border border-border">
+                                                    <img src={coin.img} alt={coin.ticker} loading="lazy" decoding="async" className="w-7 h-7 rounded-full object-cover" onError={handleImageError} />
+                                                </div>
                                             </div>
 
                                             {/* Left: Ticker & Name */}
@@ -1279,21 +1347,21 @@ export const Dashboard: React.FC<DashboardProps> = () => {
                                             </div>
 
                                             {/* Center: Pair quality metrics */}
-                                            <div className="grid grid-cols-2 gap-4 flex-1 px-3 border-r border-border/30 mr-3">
+                                            <div className="grid grid-cols-2 gap-3 flex-1 px-3 border-r border-border/30 mr-2">
                                                 <div className="flex flex-col items-end">
-                                                    <span className="text-[10px] text-text-dark uppercase tracking-wider">MCap</span>
-                                                    <span className="font-mono text-sm text-text-medium">{coin.cap}</span>
+                                                    <span className="text-[9px] text-text-dark uppercase tracking-wider">MCap</span>
+                                                    <span className="font-mono text-xs text-text-medium">{coin.cap}</span>
                                                 </div>
                                                 <div className="flex flex-col items-end">
-                                                    <span className="text-[10px] text-text-dark uppercase tracking-wider">Liq</span>
-                                                    <span className="font-mono text-sm font-bold text-primary-green">{coin.liquidity}</span>
+                                                    <span className="text-[9px] text-text-dark uppercase tracking-wider">Liq</span>
+                                                    <span className="font-mono text-xs font-bold text-primary-green">{coin.liquidity}</span>
                                                 </div>
                                             </div>
 
                                             {/* Right: Price & Change */}
-                                            <div className="flex flex-col items-end min-w-[80px]">
-                                                <span className="font-mono text-sm text-text-light">{coin.price}</span>
-                                                <span className={`text-xs font-bold ${getPercentColor(coin.h24)}`}>{coin.h24}</span>
+                                            <div className="flex flex-col items-end min-w-[74px]">
+                                                <span className="font-mono text-xs text-text-light">{coin.price}</span>
+                                                <span className={`text-[10px] font-bold ${getPercentColor(coin.h24)}`}>{coin.h24}</span>
                                             </div>
                                         </div>
                                     ))}

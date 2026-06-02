@@ -308,7 +308,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                   <button
                     type="button"
                     onClick={() => setMobileNavOpen(false)}
-                    className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#F2FAF5] text-text-light transition-all hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary-green/40"
+                    className="atlaix-mobile-nav-close grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#F2FAF5] text-text-light transition-all hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary-green/40"
                     aria-label="Close navigation menu"
                   >
                     <X size={21} />
@@ -336,7 +336,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onLogout, isAuthentica
                               }
                               handleNavigation(item.path);
                             }}
-                            className={`atlaix-nav-item flex min-h-12 w-full items-center gap-3 rounded-[18px] px-3 py-3 text-left transition-all ${
+                            className={`atlaix-nav-item ${item.action === 'theme' ? 'atlaix-mobile-theme-toggle' : ''} flex min-h-12 w-full items-center gap-3 rounded-[18px] px-3 py-3 text-left transition-all ${
                               isActive(item.path)
                                 ? 'is-active'
                                 : 'text-text-medium hover:bg-[#F2FAF5] hover:text-text-light'
