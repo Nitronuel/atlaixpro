@@ -2,7 +2,6 @@
 import { AlphaGauntletEvent, MarketCoin, SavedWallet, WalletCategory } from '../types';
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from '../config';
-import { classifyTokenSector } from '../utils/sectorClassification';
 import { filterAlphaTokens, hasQualityTokenMetadata, isExcludedAlphaToken } from '../utils/tokenFilters';
 
 // --- INITIALIZE SUPABASE ---
@@ -191,7 +190,7 @@ const ACTIVE_FEED_LIMIT = 1000;
 const STALE_PURGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const EXCLUDED_PURGE_INTERVAL_MS = 10 * 60 * 1000;
 const LOCAL_CACHE_KEY = 'atlaix-live-alpha-cache';
-const LOCAL_CACHE_SCHEMA_VERSION = 2;
+const LOCAL_CACHE_SCHEMA_VERSION = 3;
 const LOCAL_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 const DEXSCREENER_SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
 const DEXSCREENER_RATE_LIMIT_COOLDOWN_MS = 45 * 1000;
@@ -239,10 +238,29 @@ const getStaleCutoffIso = () => {
     return cutoff.toISOString();
 };
 
+const isCoinGeckoSectorSource = (source: string | undefined) =>
+    source === 'coingecko' || source === 'coingecko-onchain';
+
+const normalizeCoinGeckoSectorEvidence = (coin: MarketCoin): MarketCoin => {
+    if (isCoinGeckoSectorSource(coin.sectorSource)) {
+        return coin;
+    }
+
+    return {
+        ...coin,
+        sector: undefined,
+        sectorLabels: [],
+        providerCategories: [],
+        providerTags: [],
+        providerLabels: [],
+        sectorSource: undefined
+    };
+};
+
 const canUseLocalStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
 const setCachedMarketData = (data: MarketCoin[]) => {
-    cache.marketData = { data, timestamp: Date.now() };
+    cache.marketData = { data: data.map(normalizeCoinGeckoSectorEvidence), timestamp: Date.now() };
 
     if (!canUseLocalStorage()) return;
 
@@ -696,31 +714,6 @@ const updatePairsBulk = async (chainId: string, pairAddresses: string[]): Promis
     }
 };
 
-const readProviderStringArray = (value: unknown) =>
-    typeof value === 'string'
-        ? [value.trim()].filter(Boolean)
-        : Array.isArray(value)
-        ? value.map((item) => String(item || '').trim()).filter(Boolean)
-        : [];
-
-const extractProviderSectorLabels = (pair: DexPair) => {
-    const rawPair = pair as any;
-    const launchpadDexLabels = ['pumpswap', 'pumpfun', 'pump-fun', 'letsbonk', 'lets-bonk', 'moonshot'];
-    const dexId = String(pair.dexId || '').trim().toLowerCase();
-    const labels = [
-        ...readProviderStringArray(pair.categories),
-        ...readProviderStringArray(rawPair.category),
-        ...readProviderStringArray(pair.tags),
-        ...readProviderStringArray(pair.labels),
-        ...readProviderStringArray(pair.info?.categories),
-        ...readProviderStringArray(pair.info?.tags),
-        ...readProviderStringArray(pair.info?.labels),
-        ...(launchpadDexLabels.includes(dexId) ? [dexId] : [])
-    ];
-
-    return [...new Set(labels)];
-};
-
 type TokenSectorEnrichment = {
     key?: string;
     chain?: string;
@@ -735,11 +728,12 @@ type TokenSectorEnrichment = {
 const marketCoinSectorKey = (coin: Pick<MarketCoin, 'chain' | 'address'>) =>
     `${String(coin.chain || '').trim().toLowerCase()}:${String(coin.address || '').trim().toLowerCase()}`;
 
-const hasProviderSectorEvidence = (coin: MarketCoin) =>
-    classifyTokenSector(coin).confidence === 'provider';
+const hasCoinGeckoSectorEvidence = (coin: MarketCoin) =>
+    isCoinGeckoSectorSource(coin.sectorSource);
 
 const mergeTokenSectorEnrichment = (coin: MarketCoin, enrichment?: TokenSectorEnrichment): MarketCoin => {
-    if (!enrichment) return coin;
+    const baseCoin = normalizeCoinGeckoSectorEvidence(coin);
+    if (!enrichment) return baseCoin;
 
     const sectorLabels = [...new Set([
         ...(enrichment.sectorLabels || []),
@@ -748,10 +742,10 @@ const mergeTokenSectorEnrichment = (coin: MarketCoin, enrichment?: TokenSectorEn
         ...(enrichment.providerLabels || [])
     ].map((item) => String(item || '').trim()).filter(Boolean))];
 
-    if (!sectorLabels.length) return coin;
+    if (!sectorLabels.length) return baseCoin;
 
     return {
-        ...coin,
+        ...baseCoin,
         sector: sectorLabels[0],
         sectorLabels,
         providerCategories: enrichment.providerCategories || [],
@@ -763,12 +757,13 @@ const mergeTokenSectorEnrichment = (coin: MarketCoin, enrichment?: TokenSectorEn
 
 const enrichMarketCoinSectors = async (tokens: MarketCoin[]) => {
     if (!tokens.length || typeof fetch === 'undefined') return tokens;
+    const normalizedTokens = tokens.map(normalizeCoinGeckoSectorEvidence);
 
-    const candidates = tokens
-        .filter((coin) => coin.address && coin.chain && !hasProviderSectorEvidence(coin))
+    const candidates = normalizedTokens
+        .filter((coin) => coin.address && coin.chain && !hasCoinGeckoSectorEvidence(coin))
         .slice(0, SECTOR_ENRICHMENT_BATCH_LIMIT);
 
-    if (!candidates.length) return tokens;
+    if (!candidates.length) return normalizedTokens;
 
     try {
         const response = await fetch(apiUrl('/api/token-sector/enrich'), {
@@ -792,9 +787,9 @@ const enrichMarketCoinSectors = async (tokens: MarketCoin[]) => {
             if (key) sectorsByKey.set(key, sector);
         });
 
-        return tokens.map((coin) => mergeTokenSectorEnrichment(coin, sectorsByKey.get(marketCoinSectorKey(coin))));
+        return normalizedTokens.map((coin) => mergeTokenSectorEnrichment(coin, sectorsByKey.get(marketCoinSectorKey(coin))));
     } catch {
-        return tokens;
+        return normalizedTokens;
     }
 };
 
@@ -1191,8 +1186,6 @@ export const DatabaseService = {
         const liq = pair.liquidity?.usd || 0;
         const riskLevel: MarketCoin['riskLevel'] = liq < 5000 ? 'High' : liq < 50000 ? 'Medium' : 'Low';
         const smartMoneySignal: MarketCoin['smartMoneySignal'] = estimatedNetFlow > 50000 ? 'Inflow' : estimatedNetFlow < -50000 ? 'Outflow' : 'Neutral';
-        const providerLabels = extractProviderSectorLabels(pair);
-
         return {
             id: index,
             name: pair.baseToken.name,
@@ -1221,23 +1214,12 @@ export const DatabaseService = {
             chain: getChainId(pair.chainId),
             address: pair.baseToken.address,
             pairAddress: pair.pairAddress,
-            sector: providerLabels[0],
-            sectorLabels: providerLabels,
-            providerCategories: [
-                ...readProviderStringArray(pair.categories),
-                ...readProviderStringArray((pair as any).category),
-                ...readProviderStringArray(pair.info?.categories)
-            ],
-            providerTags: [
-                ...readProviderStringArray(pair.tags),
-                ...readProviderStringArray(pair.info?.tags),
-                ...readProviderStringArray(pair.dexId)
-            ],
-            providerLabels: [
-                ...readProviderStringArray(pair.labels),
-                ...readProviderStringArray(pair.info?.labels)
-            ],
-            sectorSource: providerLabels.length ? 'dexscreener' : undefined,
+            sector: undefined,
+            sectorLabels: [],
+            providerCategories: [],
+            providerTags: [],
+            providerLabels: [],
+            sectorSource: undefined,
             // Attempt to capture makers if available in raw response (some endpoints provide it)
             activeWallets24h: (pair as any).boosts?.active || (pair as any).makers || 0
         };

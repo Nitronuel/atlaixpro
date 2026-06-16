@@ -106,10 +106,14 @@ const PUBLIC_PROXY_ROUTES = [
 
 const INSIGHTX_API_BASE_URL = 'https://api.insightx.network';
 const INSIGHTX_TIMEOUT_MS = 18_000;
+const INSIGHTX_REQUEST_SPACING_MS = 1_500;
+const INSIGHTX_RATE_LIMIT_BACKOFF_MS = 4_000;
 const INSIGHTX_DEFAULT_CACHE_TTL_MS = 3 * 60_000;
 const INSIGHTX_LABEL_CACHE_TTL_MS = 24 * 60 * 60_000;
 const INSIGHTX_SUPPORTED_NETWORKS = new Set(['sol', 'eth', 'base', 'bsc', 'monad', 'xlayer', 'abs', 'sui']);
 const insightXCache = new Map<string, { expiresAt: number; value: unknown; cachedAt: string }>();
+let insightXQueue = Promise.resolve();
+let lastInsightXRequestAt = 0;
 
 const CHAIN_DEX_VOLUME_LABELS: Record<string, string> = {
     solana: 'Solana',
@@ -3918,75 +3922,6 @@ const fetchCoinGeckoSectorEnrichment = async (token: Required<Pick<SectorEnrichm
     };
 };
 
-const fetchGeckoTerminalSectorEnrichment = async (token: Required<Pick<SectorEnrichmentToken, 'chain' | 'address'>>) => {
-    const network = coingeckoOnchainNetworkForChain(token.chain);
-    if (!network) return null;
-
-    const url = `https://api.geckoterminal.com/api/v2/networks/${encodeURIComponent(network)}/tokens/${encodeURIComponent(token.address)}`;
-    const response = await fetchWithTimeout(url, {
-        headers: {
-            accept: 'application/json',
-            'user-agent': 'Atlaix/1.0'
-        }
-    }, 10_000).catch(() => null);
-    if (!response?.ok) return null;
-
-    const payload = await response.json().catch(() => null) as any;
-    const attributes = payload?.data?.attributes || {};
-    const categories = readProviderSectorLabels(attributes.categories || attributes.category);
-    const tags = readProviderSectorLabels(attributes.tags || attributes.token_lists);
-    const labels = readProviderSectorLabels(attributes.labels);
-
-    if (attributes.launchpad_details && typeof attributes.launchpad_details === 'object') {
-        tags.push('solana meme launchpad');
-    }
-    if (attributes.coingecko_coin_id) {
-        labels.push(String(attributes.coingecko_coin_id));
-    }
-
-    if (!categories.length && !tags.length && !labels.length) return null;
-
-    return {
-        source: 'geckoterminal',
-        providerCategories: uniqueProviderLabels(categories),
-        providerTags: uniqueProviderLabels(tags),
-        providerLabels: uniqueProviderLabels(labels)
-    };
-};
-
-const fetchMobulaSectorEnrichment = async (token: Required<Pick<SectorEnrichmentToken, 'chain' | 'address'>>) => {
-    const apiKey = readEnv('MOBULA_API_KEY', 'VITE_MOBULA_API_KEY');
-    const urls = [
-        `https://api.mobula.io/api/1/metadata?asset=${encodeURIComponent(token.address)}`,
-        `https://api.mobula.io/api/1/market/data?asset=${encodeURIComponent(token.address)}`
-    ];
-    const headers = {
-        accept: 'application/json',
-        'user-agent': 'Atlaix/1.0',
-        ...(apiKey ? { Authorization: apiKey } : {})
-    };
-
-    for (const url of urls) {
-        const response = await fetchWithTimeout(url, { headers }, 10_000).catch(() => null);
-        if (!response?.ok) continue;
-        const payload = await response.json().catch(() => null) as any;
-        const data = payload?.data || payload;
-        const categories = readProviderSectorLabels(data?.categories || data?.category);
-        const tags = readProviderSectorLabels(data?.tags || data?.sectors || data?.sector);
-        const labels = readProviderSectorLabels(data?.labels);
-        if (!categories.length && !tags.length && !labels.length) continue;
-
-        return {
-            source: 'mobula',
-            providerCategories: uniqueProviderLabels(categories),
-            providerTags: uniqueProviderLabels(tags),
-            providerLabels: uniqueProviderLabels(labels)
-        };
-    }
-
-    return null;
-};
-
 const enrichTokenSector = async (token: SectorEnrichmentToken): Promise<SectorEnrichmentResult | null> => {
     const chain = normalizeSectorEnrichmentChain(token.chain);
     const address = String(token.address || '').trim();
@@ -3997,10 +3932,7 @@ const enrichTokenSector = async (token: SectorEnrichmentToken): Promise<SectorEn
     if (cached && cached.expiresAt > Date.now()) return cached.result;
 
     const base = { chain, address };
-    const providerResult =
-        await fetchCoinGeckoSectorEnrichment(base).catch(() => null)
-        || await fetchGeckoTerminalSectorEnrichment(base).catch(() => null)
-        || await fetchMobulaSectorEnrichment(base).catch(() => null);
+    const providerResult = await fetchCoinGeckoSectorEnrichment(base).catch(() => null);
 
     const result: SectorEnrichmentResult = providerResult
         ? {
@@ -4263,6 +4195,24 @@ function delay(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function runQueuedInsightXRequest<T>(task: () => Promise<T>) {
+    const queued = insightXQueue.then(async () => {
+        const waitMs = Math.max(0, INSIGHTX_REQUEST_SPACING_MS - (Date.now() - lastInsightXRequestAt));
+        if (waitMs > 0) {
+            await delay(waitMs);
+        }
+
+        try {
+            return await task();
+        } finally {
+            lastInsightXRequestAt = Date.now();
+        }
+    });
+
+    insightXQueue = queued.then(() => undefined, () => undefined);
+    return queued;
+}
+
 type InsightXFetchOptions = {
     path: string;
     params?: Record<string, string | number | null | undefined>;
@@ -4391,43 +4341,67 @@ async function fetchInsightX(options: InsightXFetchOptions): Promise<InsightXEnd
     }
 
     try {
-        const upstream = await fetchWithTimeout(upstreamUrl, {
-            headers: {
-                'Accept': 'application/json',
-                'X-API-Key': apiKey
+        return await runQueuedInsightXRequest(async () => {
+            let lastRateLimit: InsightXEndpointResult | null = null;
+
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                const upstream = await fetchWithTimeout(upstreamUrl, {
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-API-Key': apiKey
+                    }
+                }, INSIGHTX_TIMEOUT_MS);
+                const payload = await upstream.json().catch(() => ({}));
+
+                if (upstream.ok) {
+                    insightXCache.set(options.cacheKey, {
+                        value: payload,
+                        cachedAt: fetchedAt,
+                        expiresAt: Date.now() + (options.ttlMs ?? INSIGHTX_DEFAULT_CACHE_TTL_MS)
+                    });
+
+                    return {
+                        status: 'available',
+                        data: payload,
+                        cached: false,
+                        fetchedAt
+                    };
+                }
+
+                const detail = typeof payload?.detail === 'string'
+                    ? payload.detail
+                    : Array.isArray(payload?.detail)
+                        ? payload.detail.map((item: any) => item?.msg || item?.type).filter(Boolean).join(', ')
+                        : payload?.error || `InsightX request failed with status ${upstream.status}.`;
+
+                const result: InsightXEndpointResult = {
+                    status: upstream.status === 404 ? 'missing' : upstream.status === 429 ? 'rate_limited' : upstream.status === 422 || upstream.status === 501 ? 'unsupported' : 'error',
+                    data: null,
+                    error: detail || `InsightX request failed with status ${upstream.status}.`,
+                    httpStatus: upstream.status,
+                    retryAfter: upstream.headers.get('Retry-After'),
+                    fetchedAt
+                };
+
+                if (upstream.status !== 429 || attempt === 2) {
+                    return result;
+                }
+
+                lastRateLimit = result;
+                const retryAfterMs = Number(result.retryAfter || 0) * 1000;
+                await delay(Number.isFinite(retryAfterMs) && retryAfterMs > 0
+                    ? retryAfterMs
+                    : INSIGHTX_RATE_LIMIT_BACKOFF_MS * (attempt + 1)
+                );
             }
-        }, INSIGHTX_TIMEOUT_MS);
-        const payload = await upstream.json().catch(() => ({}));
 
-        if (!upstream.ok) {
-            const detail = typeof payload?.detail === 'string'
-                ? payload.detail
-                : Array.isArray(payload?.detail)
-                    ? payload.detail.map((item: any) => item?.msg || item?.type).filter(Boolean).join(', ')
-                    : payload?.error || `InsightX request failed with status ${upstream.status}.`;
-
-            return {
-                status: upstream.status === 404 ? 'missing' : upstream.status === 429 ? 'rate_limited' : upstream.status === 422 || upstream.status === 501 ? 'unsupported' : 'error',
+            return lastRateLimit || {
+                status: 'error',
                 data: null,
-                error: detail || `InsightX request failed with status ${upstream.status}.`,
-                httpStatus: upstream.status,
-                retryAfter: upstream.headers.get('Retry-After'),
+                error: 'InsightX request failed.',
                 fetchedAt
             };
-        }
-
-        insightXCache.set(options.cacheKey, {
-            value: payload,
-            cachedAt: fetchedAt,
-            expiresAt: Date.now() + (options.ttlMs ?? INSIGHTX_DEFAULT_CACHE_TTL_MS)
         });
-
-        return {
-            status: 'available',
-            data: payload,
-            cached: false,
-            fetchedAt
-        };
     } catch (error) {
         return {
             status: 'error',
@@ -4501,25 +4475,26 @@ async function buildInsightXReport(network: string, address: string) {
     const encodedAddress = encodeURIComponent(address);
     const cacheBase = `${network}:${address.toLowerCase()}`;
 
-    const requests: Partial<Record<InsightXReportEndpointKey, Promise<InsightXEndpointResult>>> = {
-        scanner: fetchInsightX({ path: `/scanner/v1/tokens/${encodedNetwork}/${encodedAddress}`, cacheKey: `scanner:${cacheBase}`, endpointKey: 'scanner', network }),
-        overview: fetchInsightX({ path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}`, cacheKey: `overview:${cacheBase}`, endpointKey: 'overview', network }),
-        distribution: fetchInsightX({ path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/distribution`, cacheKey: `distribution:${cacheBase}`, endpointKey: 'distribution', network }),
-        clusters: fetchInsightX({ path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/clusters`, cacheKey: `clusters:${cacheBase}`, endpointKey: 'clusters', network }),
-        snipers: fetchInsightX({ path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/snipers`, cacheKey: `snipers:${cacheBase}`, endpointKey: 'snipers', network }),
-        bundlers: fetchInsightX({ path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/bundlers`, cacheKey: `bundlers:${cacheBase}`, endpointKey: 'bundlers', network }),
-        insiders: fetchInsightX({ path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/insiders`, cacheKey: `insiders:${cacheBase}`, endpointKey: 'insiders', network }),
-        atlasLatest: fetchInsightX({ path: `/atlas/v1/${encodedNetwork}/${encodedAddress}/snapshots/latest`, cacheKey: `atlas-latest:${cacheBase}`, endpointKey: 'atlasLatest', network }),
-        atlasTimestamps: fetchInsightX({ path: `/atlas/v1/${encodedNetwork}/${encodedAddress}/snapshots`, cacheKey: `atlas-timestamps:${cacheBase}`, endpointKey: 'atlasTimestamps', network })
-    };
+    const endpointRequests: Array<[InsightXReportEndpointKey, InsightXFetchOptions]> = [
+        ['scanner', { path: `/scanner/v1/tokens/${encodedNetwork}/${encodedAddress}`, cacheKey: `scanner:${cacheBase}`, endpointKey: 'scanner', network }],
+        ['overview', { path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}`, cacheKey: `overview:${cacheBase}`, endpointKey: 'overview', network }],
+        ['distribution', { path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/distribution`, cacheKey: `distribution:${cacheBase}`, endpointKey: 'distribution', network }],
+        ['clusters', { path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/clusters`, cacheKey: `clusters:${cacheBase}`, endpointKey: 'clusters', network }],
+        ['snipers', { path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/snipers`, cacheKey: `snipers:${cacheBase}`, endpointKey: 'snipers', network }],
+        ['bundlers', { path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/bundlers`, cacheKey: `bundlers:${cacheBase}`, endpointKey: 'bundlers', network }],
+        ['insiders', { path: `/dex-metrics/v1/${encodedNetwork}/${encodedAddress}/insiders`, cacheKey: `insiders:${cacheBase}`, endpointKey: 'insiders', network }],
+        ['atlasLatest', { path: `/atlas/v1/${encodedNetwork}/${encodedAddress}/snapshots/latest`, cacheKey: `atlas-latest:${cacheBase}`, endpointKey: 'atlasLatest', network }],
+        ['atlasTimestamps', { path: `/atlas/v1/${encodedNetwork}/${encodedAddress}/snapshots`, cacheKey: `atlas-timestamps:${cacheBase}`, endpointKey: 'atlasTimestamps', network }]
+    ];
 
-    const entries = await Promise.all(Object.entries(requests).map(async ([key, promise]) => [key, await promise] as const));
-    const endpoints = Object.fromEntries(entries) as Record<InsightXReportEndpointKey, InsightXEndpointResult>;
+    const endpoints = {} as Record<InsightXReportEndpointKey, InsightXEndpointResult>;
+    for (const [key, options] of endpointRequests) {
+        endpoints[key] = await fetchInsightX(options);
+    }
 
     const addresses = new Set<string>();
     collectInsightXLabelAddresses(addresses, endpoints);
     if (!addresses.size) addresses.add(address);
-    await delay(2_000);
     endpoints.labels = await fetchInsightX({
         path: `/labels/v1/${encodedNetwork}/${encodeURIComponent([...addresses].join(','))}`,
         cacheKey: `labels:${network}:${[...addresses].sort().join(',').toLowerCase()}`,

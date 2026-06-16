@@ -119,6 +119,10 @@ export default defineConfig(({ mode }) => {
           target: 'http://127.0.0.1:3101',
           changeOrigin: true
         },
+        '/api/token-sector': {
+          target: 'http://127.0.0.1:3101',
+          changeOrigin: true
+        },
         '/api/smart-alerts': {
           target: 'http://127.0.0.1:3101',
           changeOrigin: true

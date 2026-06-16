@@ -42,6 +42,26 @@ describe('provider-backed sector metadata', () => {
         });
     });
 
+    it('maps common CoinGecko category names and ids', () => {
+        expect(classifyTokenSector({
+            ticker: 'TOKEN',
+            name: 'Token',
+            providerCategories: ['Solana Meme']
+        })).toMatchObject({
+            primarySector: 'meme',
+            label: 'Meme'
+        });
+
+        expect(classifyTokenSector({
+            ticker: 'TOKEN',
+            name: 'Token',
+            providerCategories: ['gaming-gamefi']
+        })).toMatchObject({
+            primarySector: 'gaming',
+            label: 'Gaming'
+        });
+    });
+
     it('does not expose raw DEX/pool labels as sectors', () => {
         expect(classifyTokenSector({
             ticker: 'TOKEN',
